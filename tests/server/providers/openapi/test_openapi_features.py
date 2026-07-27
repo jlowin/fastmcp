@@ -1,5 +1,6 @@
 """Tests for OpenAPI feature support in OpenAPIProvider."""
 
+import json
 from typing import Any
 from unittest.mock import AsyncMock, Mock
 
@@ -1412,3 +1413,75 @@ class TestMultipartUpload:
 
         assert "multipart/form-data" in received["content_type"]
         assert b"data" in received["body"]
+
+
+class TestAllOfReferenceRequestBodies:
+    """Request bodies keep fields inherited through an allOf reference."""
+
+    SPEC = {
+        "openapi": "3.1.0",
+        "info": {"title": "Pet API", "version": "1.0.0"},
+        "servers": [{"url": "https://api.example.com"}],
+        "paths": {
+            "/pets": {
+                "post": {
+                    "operationId": "create_pet",
+                    "requestBody": {
+                        "required": True,
+                        "content": {
+                            "application/json": {
+                                "schema": {"$ref": "#/components/schemas/Cat"}
+                            }
+                        },
+                    },
+                    "responses": {"200": {"description": "Created"}},
+                }
+            }
+        },
+        "components": {
+            "schemas": {
+                "Pet": {
+                    "type": "object",
+                    "properties": {"petType": {"type": "string"}},
+                    "required": ["petType"],
+                },
+                "Cat": {
+                    "allOf": [
+                        {"$ref": "#/components/schemas/Pet"},
+                        {
+                            "type": "object",
+                            "properties": {"meowVolume": {"type": "integer"}},
+                            "required": ["meowVolume"],
+                        },
+                    ]
+                },
+            }
+        },
+    }
+
+    async def test_allof_reference_fields_reach_tool_schema_and_request_body(self):
+        received: dict[str, object] = {}
+
+        def handler(request):
+            received["body"] = json.loads(request.content)
+            return httpx2.Response(200, json={"ok": True})
+
+        async with httpx2.AsyncClient(
+            transport=httpx2.MockTransport(handler),
+            base_url="https://api.example.com",
+        ) as client:
+            server = create_openapi_server(self.SPEC, client)
+            async with Client(server) as mcp_client:
+                tools = await mcp_client.list_tools()
+                tool = next(tool for tool in tools if tool.name == "create_pet")
+                assert tool.input_schema["properties"].keys() >= {
+                    "petType",
+                    "meowVolume",
+                }
+
+                result = await mcp_client.call_tool(
+                    "create_pet", {"petType": "cat", "meowVolume": 11}
+                )
+
+        assert result.structured_content == {"ok": True}
+        assert received["body"] == {"petType": "cat", "meowVolume": 11}
