@@ -86,6 +86,22 @@ mcp = FastMCP("Internal API", auth=auth)
 
 The asserted subject flows into the normal auth context, so tools read it through `get_access_token()` like any other identity. See [Identity Assertion](/servers/auth/oauth-proxy#identity-assertion-sep-990).
 
+Authorizing that identity is the next step, and it is where providers diverge. Scopes are standardized, so `require_scopes` behaves the same everywhere, but roles and groups are not part of OIDC and every provider files them under a different claim. `require_roles` handles the comparison and takes an `extract` callable naming where to look, so Keycloak's `realm_access.roles`, Cognito's `cognito:groups`, and Auth0's per-tenant namespaced claims all work without FastMCP guessing.
+
+```python
+from fastmcp import FastMCP
+from fastmcp.server.auth import require_roles
+
+mcp = FastMCP("Internal API")
+
+@mcp.tool(auth=require_roles("admin", extract=lambda c: c["realm_access"]["roles"]))
+def rotate_credentials() -> str:
+    """Only callable by a caller holding the 'admin' role."""
+    return "Rotated"
+```
+
+See [Authorization](/servers/authorization#require_roles).
+
 ## Faster and safer
 
 Two more capabilities arrive by default. Response caching (SEP-2549) lets a server stamp freshness hints on its results that a caching [client](/clients/client#response-caching) reuses without a round trip, and a distributed `KeyValueResponseCacheStore` backs that cache with Redis or any key-value store, so a fleet of clients or proxy replicas shares fills.
