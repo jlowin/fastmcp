@@ -786,6 +786,19 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
             )
         return self._jwt_issuer
 
+    @property
+    def token_endpoint_url(self) -> str:
+        """The token endpoint URL, as advertised in the authorization server metadata.
+
+        A CIMD `private_key_jwt` assertion is bound to this URL as its `aud`, so
+        it must match the advertised `token_endpoint` byte-for-byte. The SDK's
+        `build_metadata` builds that URL by stripping any trailing slash from
+        `base_url` first, so this does too: pydantic renders a bare-authority
+        `base_url` with a trailing slash, which would otherwise expect an `aud`
+        of `https://example.com//token`.
+        """
+        return f"{str(self.base_url).rstrip('/')}/token"
+
     # -------------------------------------------------------------------------
     # Upstream OAuth Client
     # -------------------------------------------------------------------------
@@ -2406,7 +2419,7 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
                 # Replace the token endpoint so it can (a) authenticate CIMD
                 # private_key_jwt clients and (b) accept the SEP-990 jwt-bearer
                 # grant when identity assertion is enabled.
-                token_endpoint_url = f"{self.base_url}/token"
+                token_endpoint_url = self.token_endpoint_url
                 if self._cimd_manager is not None:
                     authenticator: ClientAuthenticator = (
                         PrivateKeyJWTClientAuthenticator(

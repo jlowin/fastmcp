@@ -3,6 +3,7 @@
 from fastmcp.utilities.authorization import (
     AuthCheck,
     AuthContext,
+    require_roles,
     require_scopes,
     restrict_tag,
     run_auth_checks,
@@ -13,6 +14,7 @@ from fastmcp.utilities.authorization import (
 __all__ = [
     "AuthCheck",
     "AuthContext",
+    "require_roles",
     "require_scopes",
     "restrict_tag",
     "run_auth_checks",

@@ -9,9 +9,9 @@ from __future__ import annotations
 
 import inspect
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from fastmcp.exceptions import AuthorizationError
 
@@ -104,9 +104,94 @@ class _RestrictTag(_ScopeAwareCheck):
         return set(self.required_scopes) - set(ctx.token.scopes)
 
 
+class _RequireRoles:
+    """Callable auth check requiring all of a fixed set of roles.
+
+    Deliberately not a :class:`_ScopeAwareCheck`. Roles are not scopes and
+    cannot be requested through OAuth, so a shortfall has no spec-correct
+    step-up representation.
+    """
+
+    def __init__(
+        self,
+        roles: tuple[str, ...],
+        extract: Callable[[dict[str, Any]], Iterable[str]],
+    ) -> None:
+        self.required_roles: frozenset[str] = frozenset(roles)
+        self._extract = extract
+
+    def __call__(self, ctx: AuthContext) -> bool:
+        if ctx.token is None:
+            return False
+        try:
+            extracted = self._extract(ctx.token.claims)
+            # A provider that stores a single role as a bare string satisfies
+            # `Iterable[str]`, but iterating it yields characters: "admin"
+            # would deny an "admin" requirement and grant an "a" one. Treat a
+            # string as the single role it plainly means.
+            if isinstance(extracted, str):
+                extracted = [extracted]
+            granted = set(extracted)
+        except (KeyError, IndexError, TypeError):
+            # A caller whose token simply lacks the claim is an ordinary
+            # denial, not a broken check: return False rather than letting
+            # `_evaluate_check` log a warning on every unauthorized request.
+            return False
+        return self.required_roles.issubset(granted)
+
+
 def require_scopes(*scopes: str) -> AuthCheck:
     """Require all of the given OAuth scopes."""
     return _RequireScopes(scopes)
+
+
+def require_roles(
+    *roles: str,
+    extract: Callable[[dict[str, Any]], Iterable[str]],
+) -> AuthCheck:
+    """Require all of the given roles, read from the token's claims.
+
+    Roles and groups are not part of OIDC, so every identity provider puts them
+    somewhere different: `realm_access.roles` on Keycloak, `roles` on Microsoft
+    Entra, `cognito:groups` on AWS Cognito, `permissions` or a namespaced custom
+    claim on Auth0. `extract` receives the token's claims and returns the
+    caller's roles, which keeps that provider-specific knowledge at the call
+    site instead of guessing it here.
+
+    ```python
+    from fastmcp.server.auth import require_roles
+
+    keycloak = require_roles("admin", extract=lambda c: c["realm_access"]["roles"])
+    cognito = require_roles("admins", extract=lambda c: c["cognito:groups"])
+    ```
+
+    A token missing the claim entirely is denied rather than treated as an
+    error, so `extract` may index into the claims without guarding. An
+    extractor returning a bare string is treated as one role, since a provider
+    that stores a single role as a scalar is common.
+
+    Unlike `require_scopes`, this check cannot signal a shortfall: OAuth has no
+    way to request a role, so there is no `insufficient_scope` challenge to
+    emit. A role denial is therefore reported as a plain `AuthorizationError`,
+    and it suppresses any scope shortfall alongside it — a caller blocked by
+    their role must not be told to go obtain a scope that would not help.
+    Scope shortfalls are still reported normally whenever the role check
+    passes.
+
+    Args:
+        *roles: Roles the caller must hold. All are required (AND logic).
+        extract: Callable mapping the token's claims to the caller's roles.
+
+    Raises:
+        ValueError: If no roles are given, which would allow any authenticated
+            caller and is more likely a mistake than an intent.
+    """
+    if not roles:
+        raise ValueError(
+            "require_roles() needs at least one role; a check with no roles "
+            "would admit any authenticated caller."
+        )
+    return _RequireRoles(roles, extract)
 
 
 def restrict_tag(tag: str, *, scopes: list[str]) -> AuthCheck:
