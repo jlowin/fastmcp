@@ -134,16 +134,23 @@ jobs:
           # fastmcp-tasks is pinned via the optional `tasks` extra, so its
           # Requires-Dist entry carries an `extra == "tasks"` marker — unlike the
           # base slim dependency, do not skip marked entries here.
+          #
+          # Print nothing when there is no such pin. Release lines that resolve
+          # the `tasks` extra through fastmcp-slim instead of a standalone
+          # fastmcp-tasks package have nothing here to verify.
           for value in metadata.get_all("Requires-Dist", []):
               requirement, _, _marker = value.partition(";")
               match = re.fullmatch(r"fastmcp-tasks==([^;\s]+)", requirement.strip())
               if match:
                   print(match.group(1))
                   break
-          else:
-              raise RuntimeError("Could not find the fastmcp-tasks extra dependency")
           PY
           )
+
+          if [ -z "$TASKS_VERSION" ]; then
+            echo "This build does not pin fastmcp-tasks; the [tasks] extra cannot be uninstallable, so there is nothing to verify."
+            exit 0
+          fi
 
           for attempt in {1..12}; do
             if python - "$TASKS_VERSION" <<'PY'
