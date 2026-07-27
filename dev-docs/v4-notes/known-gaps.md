@@ -80,6 +80,6 @@ Separately, the [SDK delegation round two](feature-program.md#sdk-delegation-rou
 
 The beta-to-stable transition is a small set of tracked steps:
 
-- **Swap the pins.** When `mcp 2.0.0` reaches GA, change `mcp-types==2.0.0b1` (core) and the `mcp` pin (the `[mcp]` extra) in `fastmcp_slim/pyproject.toml` from the beta to the stable release, and cut `4.0.0` instead of another pre-release.
+- **Swap the pins.** When `mcp 2.0.0` reaches GA, change the exact `mcp-types` pin (core) and the `mcp` pin (the `[mcp]` extra) in `fastmcp_slim/pyproject.toml` from the beta to a stable range (`>=2.0.0,<3.0.0`), then regenerate `uv.lock` and confirm the suite and conformance run green against the stable SDK. The published install snippet in the upgrade guide pins these too, so it has to change in the same commit — a `2.0.0b2` constraint does not satisfy `>=2.0.0` and would break the very resolution it is meant to enable. FastMCP still ships a beta on the stable SDK before `4.0.0`.
 - **Re-run the xfail suite against the GA SDK.** Any strict xfail that starts passing means a gap closed — remove the marker and, where applicable, the corresponding shim.
 - **Confirm `release/3.x`** is cut from pre-merge `main` and receiving upstream security patches for users who stay on the SDK v1 line.

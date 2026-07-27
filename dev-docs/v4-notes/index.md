@@ -22,7 +22,7 @@ FastMCP v4.0 is an engine swap. Three forces drive the major version:
 
 The migration merges to `main` and development continues there with subsequent PRs. Releases follow the SDK's own beta timeline:
 
-- **`main` carries the beta pins.** While the SDK is on `mcp==2.0.0b1` / `mcp-types==2.0.0b1`, `main` cuts **pre-releases** (`4.0.0b1`, `4.0.0b2`, …). No stable PyPI release goes out until `mcp 2.0.0` reaches GA — at which point the pins swap to the stable SDK and `4.0.0` ships. The pin-swap is a tracked checklist item on the [Known Gaps](known-gaps.md) page.
+- **`main` cuts pre-releases.** While the SDK was on exact beta pins, `main` cut the `4.0.0a*` alphas. When `mcp 2.0.0` reaches GA the pins move to stable ranges (`>=2.0.0,<3.0.0`) and the line continues through `4.0.0b1` before `4.0.0` ships — the stable SDK is what a beta needs, not a reason to skip straight to GA. The pin-swap is a tracked checklist item on the [Known Gaps](known-gaps.md) page.
 - **`release/3.x` is the maintenance line.** A `release/3.x` branch is cut from pre-merge `main`. It stays on the SDK v1 line, receives upstream security patches, and serves users who cannot move to the SDK v2 beta yet.
 
 ### Release codenames
