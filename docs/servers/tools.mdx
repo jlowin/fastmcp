@@ -1056,16 +1056,14 @@ mcp = FastMCP(name="ContextDemo")
 async def process_data(data_uri: str, ctx: Context) -> dict:
     """Process data from a resource with progress reporting."""
     await ctx.info(f"Processing data from {data_uri}")
-    
-    # Read a resource
-    resource = await ctx.read_resource(data_uri)
-    data = resource[0].content if resource else ""
-    
-    # Report progress
+
+    result = await ctx.read_resource(data_uri)
+    data = result.contents[0].content if result.contents else ""
     await ctx.report_progress(progress=50, total=100)
 
+    summary = str(data)[:200]
     await ctx.report_progress(progress=100, total=100)
-    return {"length": len(data)}
+    return {"length": len(data), "summary": summary}
 ```
 
 The Context object provides access to:

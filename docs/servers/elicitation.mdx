@@ -596,9 +596,9 @@ The same protocol requirement applies: returning an `InputRequiredResult` from a
 
 ### Sampling and roots
 
-Elicitation is the most common request to carry this way, and **roots** and **sampling** requests work identically — the `input_requests` map holds a `ListRootsRequest` or a `CreateMessageRequest` the same way it holds an `ElicitRequest`, and each answer comes back in `ctx.input_responses` under its key as a `ListRootsResult` or `CreateMessageResult`. A single map can mix all three. `fastmcp.Client` answers each one from the handlers you already configured — `elicitation_handler=`, `roots=`, `sampling_handler=` — so a guard tool that mixes them needs no extra client wiring. See [Client Roots](/clients/roots) for what a roots request contains.
+Elicitation is the most common request to carry this way, and the map carries the others just as well. A `ListRootsRequest` or a `CreateMessageRequest` sits in `input_requests` exactly as an `ElicitRequest` does, and its answer arrives in `ctx.input_responses` under the same key as a `ListRootsResult` or a `CreateMessageResult`. One map can mix all three, and `fastmcp.Client` answers each from the handlers it already has — `elicitation_handler=`, `roots=`, and `sampling_handler=` — so a tool that asks for a mixture needs no extra client wiring. [Client Roots](/clients/roots) covers what a roots request contains.
 
-The two differ in when you should reach for them. Roots suits this pattern well: a server asks once and has what it needs, so one extra round trip buys the whole answer. Generation usually does not, because every round is a full request-response cycle and a loop pays that cost each time — [call an LLM directly from your server](/servers/sampling) unless the point is specifically to use the caller's model.
+Roots and sampling differ in how well they suit the round trip. A server asks for roots once and then has what it needs, so the extra round buys the whole answer. Generation rarely works out that way, because every round is a full request-response cycle and a tool that generates in a loop pays that cost each time — [call an LLM directly from your server](/servers/sampling) unless the point is specifically to use the caller's model.
 
 ### Middleware
 
