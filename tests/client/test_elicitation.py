@@ -3,7 +3,6 @@ from enum import Enum
 from typing import Any, Literal, cast
 
 import pytest
-from mcp_types import ElicitRequestFormParams, ElicitRequestParams
 from pydantic import BaseModel
 from typing_extensions import TypedDict
 
@@ -229,29 +228,6 @@ async def test_elicitation_response_title_rejected_for_basemodel():
             await client.call_tool("ask", {})
 
 
-async def test_elicitation_response_title_rejected_for_none():
-    """response_title raises TypeError when response_type is None."""
-    mcp = FastMCP("TestServer")
-
-    @mcp.tool
-    async def ask(context: Context) -> str:
-        await context.elicit(
-            message="Confirm?",
-            response_type=None,
-            response_title="Not allowed",
-        )
-        return "done"
-
-    async def elicitation_handler(message, response_type, params, ctx):
-        return ElicitResult(action="accept", content={})
-
-    # Not pinned: response_title is validated locally before any request is
-    # dispatched, so this raises identically on every era.
-    async with Client(mcp, elicitation_handler=elicitation_handler) as client:
-        with pytest.raises(ToolError, match="response_title"):
-            await client.call_tool("ask", {})
-
-
 async def test_elicitation_cancel_action():
     """Test user canceling elicitation request."""
     mcp = FastMCP("TestServer")
@@ -300,79 +276,6 @@ class TestScalarResponseTypes:
         ) as client:
             result = await client.call_tool("my_tool", {})
             assert result.data == "Alice"
-
-    async def test_elicitation_no_response(self):
-        """Test elicitation with no response type."""
-        mcp = FastMCP("TestServer")
-
-        @mcp.tool
-        async def my_tool(context: Context) -> dict[str, Any]:
-            result = await context.elicit(message="", response_type=None)
-            assert isinstance(result, AcceptedElicitation)
-            assert isinstance(result.data, dict)
-            return cast(dict[str, Any], result.data)
-
-        async def elicitation_handler(
-            message, response_type, params: ElicitRequestParams, ctx
-        ):
-            assert isinstance(params, ElicitRequestFormParams)
-            assert params.requested_schema == {"type": "object", "properties": {}}
-            assert response_type is None
-            return ElicitResult(action="accept")
-
-        async with Client(
-            mcp, mode="legacy", elicitation_handler=elicitation_handler
-        ) as client:
-            result = await client.call_tool("my_tool", {})
-            assert result.data is None
-
-    async def test_elicitation_empty_response(self):
-        """Test elicitation with empty response type."""
-        mcp = FastMCP("TestServer")
-
-        @mcp.tool
-        async def my_tool(context: Context) -> dict[str, Any]:
-            result = await context.elicit(message="", response_type=None)
-            assert result.action == "accept"
-            assert isinstance(result, AcceptedElicitation)
-            accepted = result
-            assert isinstance(accepted.data, dict)
-            return accepted.data
-
-        async def elicitation_handler(
-            message, response_type, params: ElicitRequestParams, ctx
-        ):
-            return ElicitResult(action="accept", content={})
-
-        async with Client(
-            mcp, mode="legacy", elicitation_handler=elicitation_handler
-        ) as client:
-            result = await client.call_tool("my_tool", {})
-            assert result.data is None
-
-    async def test_elicitation_response_when_no_response_requested(self):
-        """Test elicitation with no response type."""
-        mcp = FastMCP("TestServer")
-
-        @mcp.tool
-        async def my_tool(context: Context) -> dict[str, Any]:
-            result = await context.elicit(message="", response_type=None)
-            assert result.action == "accept"
-            assert isinstance(result, AcceptedElicitation)
-            accepted = result
-            assert isinstance(accepted.data, dict)
-            return accepted.data
-
-        async def elicitation_handler(message, response_type, params, ctx):
-            return ElicitResult(action="accept", content={"value": "hello"})
-
-        async with Client(
-            mcp, mode="legacy", elicitation_handler=elicitation_handler
-        ) as client:
-            with pytest.raises(
-                ToolError, match="Elicitation expected an empty response"
-            ):
-                await client.call_tool("my_tool", {})
 
     async def test_elicitation_str_response(self):
         """Test elicitation with string schema."""
@@ -731,6 +634,28 @@ async def test_all_primitive_field_types():
             "union": "x",
             "choice": "x",
         }
+
+
+class TestResponseTypeRequired:
+    """`response_type` is required — the empty-schema form was removed in 4.0."""
+
+    async def test_explicit_none_raises_type_error(self):
+        mcp = FastMCP("TestServer")
+
+        @mcp.tool
+        async def my_tool(context: Context) -> str:
+            await context.elicit(message="Approve?", response_type=None)  # ty: ignore[no-matching-overload]
+            return "unreachable"
+
+        async with Client(mcp, mode="legacy") as client:
+            with pytest.raises(ToolError, match="requires a response_type"):
+                await client.call_tool("my_tool", {})
+
+    async def test_omitting_response_type_raises_type_error(self):
+        ctx = Context(fastmcp=FastMCP("TestServer"))
+
+        with pytest.raises(TypeError, match="response_type"):
+            await ctx.elicit("Approve?")  # ty: ignore[no-matching-overload]
 
 
 class TestValidation:
