@@ -5,6 +5,28 @@ icon: "sparkles"
 tag: NEW
 ---
 
+<Update label="FastMCP 4.0.0b1" description="July 28, 2026" tags={["Releases"]}>
+<Card
+title="FastMCP v4.0.0b1: Fourgone Conclusion"
+href="https://github.com/PrefectHQ/fastmcp/releases/tag/v4.0.0b1"
+cta="Read the release notes"
+>
+FastMCP 4 rebuilds the framework on the MCP Python SDK v2, and this beta is the first release to run on the SDK's stable 2.0. The engine underneath changed completely, but FastMCP absorbs nearly all of it — most FastMCP 3 servers run untouched.
+
+🌐 **Every protocol era** — one server answers both the sessionless `2026-07-28` protocol and the older session-based handshake, negotiated per connection.
+
+💾 **State without a session** — `UserSession` and `SessionId` give tools durable per-user state on a protocol that deliberately has none.
+
+⏳ **Background tasks** — the `io.modelcontextprotocol/tasks` extension in the new `fastmcp-tasks` package, on the same Docket engine FastMCP 3 used.
+
+🧩 **Server extensions** — `add_extension()` turns capability-negotiated protocol features into a supported plugin surface.
+
+🔐 **Enterprise auth** — server-side identity assertion (SEP-990), `require_roles`, scope step-up challenges, and DCR `application_type`.
+
+⚠️ **Breaking** — server-initiated sampling and roots are removed from the server API, and the 3.x-era compatibility shims are gone. See the [upgrade guide](/getting-started/upgrading/from-fastmcp-3).
+</Card>
+</Update>
+
 <Update label="FastMCP 3.4.5" description="July 27, 2026" tags={["Releases"]}>
 <Card
 title="FastMCP v3.4.5: Key Change"
