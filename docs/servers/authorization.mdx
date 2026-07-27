@@ -75,7 +75,14 @@ mcp = FastMCP("Role Server")
 def admin_operation() -> str:
     """Requires the 'admin' role."""
     return "Admin action completed"
+
+@mcp.tool(auth=require_roles("admin", "auditor", extract=keycloak_roles))
+def audited_admin_operation() -> str:
+    """Requires both the 'admin' AND 'auditor' roles."""
+    return "Audited admin action"
 ```
+
+Multiple roles are required together, matching `require_scopes`. A token whose claims lack the path entirely is denied rather than raising, so the extractor can index directly.
 
 Keeping the claim path at the call site means any provider works, including ones with unusual shapes. Common locations:
 
@@ -88,15 +95,6 @@ Keeping the claim path at the call site means any provider works, including ones
 
 Verify the claim against your own tenant before relying on it. Auth0's namespaced custom claims are configured per tenant, and Entra emits `roles` or `groups` depending on the app manifest.
 
-Multiple roles are required together, matching `require_scopes`. A token whose claims lack the path entirely is denied rather than raising, so the extractor can index directly.
-
-```python
-@mcp.tool(auth=require_roles("admin", "auditor", extract=keycloak_roles))
-def audited_admin_operation() -> str:
-    """Requires both the 'admin' AND 'auditor' roles."""
-    return "Audited admin action"
-```
-
 <Warning>
 `require_roles` cannot signal a scope shortfall. OAuth has no way to request a role, so there is no `insufficient_scope` challenge to emit and the check is opaque. Because a single opaque check withholds scope disclosure for every check beside it, combining `require_roles` and `require_scopes` on one component stops that component from emitting the step-up challenges described in [Signaling Scope Shortfalls](#signaling-scope-shortfalls). Apply them at different layers — for example scopes on the component and roles in middleware — if you need both.
 </Warning>
@@ -107,11 +105,11 @@ def audited_admin_operation() -> str:
 
 ```python
 from fastmcp import FastMCP
-from fastmcp.server.auth import AuthContext
+from fastmcp.server.auth import AuthCheck, AuthContext
 
 mcp = FastMCP("Claim Server")
 
-def require_tenant(tenant_id: str):
+def require_tenant(tenant_id: str) -> AuthCheck:
     """Require the token to come from a specific tenant."""
     def check(ctx: AuthContext) -> bool:
         if ctx.token is None:
@@ -176,7 +174,7 @@ Any callable that accepts `AuthContext` and returns `bool` can serve as an auth 
 
 ```python
 from fastmcp import FastMCP
-from fastmcp.server.auth import AuthContext
+from fastmcp.server.auth import AuthCheck, AuthContext
 
 mcp = FastMCP("Custom Auth Server")
 
@@ -186,7 +184,7 @@ def require_premium_user(ctx: AuthContext) -> bool:
         return False
     return ctx.token.claims.get("premium", False) is True
 
-def require_access_level(minimum_level: int):
+def require_access_level(minimum_level: int) -> AuthCheck:
     """Factory function for level-based authorization."""
     def check(ctx: AuthContext) -> bool:
         if ctx.token is None:
