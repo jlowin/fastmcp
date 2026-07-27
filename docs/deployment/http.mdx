@@ -698,7 +698,7 @@ When deploying FastMCP behind a load balancer or running multiple server instanc
 
 #### Understanding Sessions
 
-By default, FastMCP's Streamable HTTP transport maintains server-side sessions. Sessions enable stateful MCP features like [elicitation](/servers/elicitation) and [sampling](/servers/sampling), where the server needs to maintain context across multiple requests from the same client.
+By default, FastMCP's Streamable HTTP transport maintains server-side sessions. A session holds the context a server keeps across multiple requests from the same client, and it carries the handshake-era back-channel that server-initiated requests like [elicitation](/servers/elicitation) push down.
 
 This works perfectly for single-instance deployments. However, sessions are stored in memory on each server instance, which creates challenges when scaling horizontally.
 

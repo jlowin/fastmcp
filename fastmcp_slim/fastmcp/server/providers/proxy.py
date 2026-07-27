@@ -1282,9 +1282,19 @@ class FastMCPProxy(FastMCP):
 async def default_proxy_roots_handler(
     context: ServerRequestContext[Any, Any],
 ) -> RootsList:
-    """Forward list roots request from remote server to proxy's connected clients."""
+    """Forward list roots request from remote server to proxy's connected clients.
+
+    A handshake-era backend can still issue `roots/list`, and the proxy is that
+    backend's client, so it relays the request onto its own front session. This
+    reaches the wire through the SDK session rather than a `Context` method:
+    `ctx.list_roots()` is not part of FastMCP's server-authoring API, because
+    SEP-2577 removed server-initiated requests from the modern protocol. The
+    relay exists only for handshake-era interop on both legs.
+    """
     ctx = get_context()
-    return await ctx.list_roots()
+    # Deprecated upstream in SDK v2; the handshake-era relay is the one caller.
+    result = await ctx.session.list_roots()  # ty: ignore[deprecated]
+    return result.roots
 
 
 async def default_proxy_sampling_handler(
@@ -1292,16 +1302,27 @@ async def default_proxy_sampling_handler(
     params: mcp_types.CreateMessageRequestParams,
     context: ServerRequestContext[Any, Any],
 ) -> mcp_types.CreateMessageResult:
-    """Forward sampling request from remote server to proxy's connected clients."""
+    """Forward sampling request from remote server to proxy's connected clients.
+
+    Relays through the SDK session for the same reason as
+    `default_proxy_roots_handler`: server-initiated sampling is not part of
+    FastMCP's server-authoring API, and this path only ever runs when both legs
+    of the proxy speak the handshake era.
+    """
     ctx = get_context()
-    result = await ctx.sample(
-        list(messages),
+    # Deprecated upstream in SDK v2; the handshake-era relay is the one caller.
+    result = await ctx.session.create_message(  # ty: ignore[deprecated]
+        messages=list(messages),
         system_prompt=params.system_prompt,
         temperature=params.temperature,
         max_tokens=params.max_tokens,
         model_preferences=params.model_preferences,
+        related_request_id=ctx.origin_request_id,
     )
-    content = mcp_types.TextContent(type="text", text=result.text or "")
+    text = (
+        result.content.text if isinstance(result.content, mcp_types.TextContent) else ""
+    )
+    content = mcp_types.TextContent(type="text", text=text)
     return mcp_types.CreateMessageResult(
         role="assistant",
         model="fastmcp-client",

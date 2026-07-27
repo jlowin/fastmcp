@@ -596,9 +596,9 @@ The same protocol requirement applies: returning an `InputRequiredResult` from a
 
 ### Sampling and roots
 
-Elicitation is the most common request to carry this way, and **roots** requests work identically — the `input_requests` map holds them the same way, and each answer comes back in `ctx.input_responses` under its key (an `ElicitResult` or `ListRootsResult`). See [Client Roots](/clients/roots) for what a roots request contains. `fastmcp.Client` answers both from the handlers you already configured, so a guard tool that mixes them needs no extra client wiring.
+Elicitation is the most common request to carry this way, and the map carries the others just as well. A `ListRootsRequest` or a `CreateMessageRequest` sits in `input_requests` exactly as an `ElicitRequest` does, and its answer arrives in `ctx.input_responses` under the same key as a `ListRootsResult` or a `CreateMessageResult`. One map can mix all three, and `fastmcp.Client` answers each from the handlers it already has — `elicitation_handler=`, `roots=`, and `sampling_handler=` — so a tool that asks for a mixture needs no extra client wiring. [Client Roots](/clients/roots) covers what a roots request contains.
 
-The map can structurally hold a **sampling** request too (its answer would be a `CreateMessageResult`), but SEP-2577 deprecated server-initiated sampling on the modern protocol, so reach for a direct server-side LLM call instead of routing generation through a guard round. See [Sampling](/servers/sampling).
+Roots and sampling differ in how well they suit the round trip. A server asks for roots once and then has what it needs, so the extra round buys the whole answer. Generation rarely works out that way, because every round is a full request-response cycle and a tool that generates in a loop pays that cost each time — [call an LLM directly from your server](/servers/sampling) unless the point is specifically to use the caller's model.
 
 ### Middleware
 

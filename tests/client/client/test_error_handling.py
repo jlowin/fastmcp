@@ -14,14 +14,13 @@ import logging
 
 import mcp_types
 import pytest
-from mcp_types import TextContent, ToolUseContent
+from mcp_types import TextContent
 from pydantic import AnyUrl
 
 from fastmcp.client import Client
 from fastmcp.client.mixins.tools import _parse_call_tool_result
 from fastmcp.client.transports import FastMCPTransport
 from fastmcp.exceptions import PromptError, ResourceError, ToolError
-from fastmcp.server.sampling.run import SamplingTool, execute_tools
 from fastmcp.server.server import FastMCP
 
 
@@ -412,41 +411,6 @@ class TestLogLevel:
         assert "Something went wrong" in str(exc_info.value)
         assert any(
             "Error rendering prompt 'regular_prompt'" in record.message
-            and record.levelname == "ERROR"
-            for record in caplog.records
-        )
-
-    async def test_sampling_tool_error_with_custom_log_level(self, caplog):
-        """ToolError with custom log_level in sampling should log at specified level."""
-
-        async def custom_level_sampling_tool(x: int) -> int:
-            raise ToolError("Expected sampling error", log_level=logging.WARNING)
-
-        tool = SamplingTool.from_function(custom_level_sampling_tool)
-        tool_use = ToolUseContent(
-            type="tool_use",
-            id="test-id",
-            name="custom_level_sampling_tool",
-            input={"x": 42},
-        )
-
-        with caplog.at_level(logging.WARNING):
-            results = await execute_tools(
-                tool_calls=[tool_use],
-                tool_map={"custom_level_sampling_tool": tool},
-                mask_error_details=False,
-            )
-
-        assert len(results) == 1
-        assert results[0].is_error
-        assert "Expected sampling error" in results[0].content[0].text  # type: ignore
-        assert any(
-            "Error calling sampling tool" in record.message
-            and record.levelname == "WARNING"
-            for record in caplog.records
-        )
-        assert not any(
-            "Error calling sampling tool" in record.message
             and record.levelname == "ERROR"
             for record in caplog.records
         )

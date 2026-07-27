@@ -432,31 +432,44 @@ The push-style Context features that require the server to call back into the cl
 | `ctx.info` / logging notifications | Supported | Supported |
 | Tools, resources, prompts, completions | Supported | Supported |
 | `ctx.elicit` (imperative) | Supported | Not on the back-channel — use [elicitation on the modern protocol](https://gofastmcp.com/servers/elicitation#elicitation-on-the-modern-protocol) |
-| `ctx.sample` / `ctx.sample_step` | Supported (deprecated) | Removed — call an LLM server-side |
-| `ctx.list_roots` | Supported | Via the [guard pattern](https://gofastmcp.com/servers/elicitation#elicitation-on-the-modern-protocol) |
+| `ctx.sample` / `ctx.sample_step` | Not in the API | Not in the API — call an LLM server-side |
+| `ctx.list_roots` | Not in the API | Not in the API — take paths as arguments, or use the [guard pattern](https://gofastmcp.com/servers/elicitation#elicitation-on-the-modern-protocol) |
+| `client.set_logging_level()` | Supported | Raises — `logging/setLevel` is absent from the era's registry |
 | Background tasks (`task=True`) | Runs synchronously — never tasked | Supported via the tasks extension |
 
-Tools that rely on `ctx.elicit` or `ctx.list_roots` continue to work against clients on the session-based eras. On the modern era, elicitation is reachable through the multi-round "guard" pattern instead (a tool returns an `InputRequiredResult`; see the New entry below). Sampling is the exception: it is deprecated on every era and will not return on modern connections (see the Deprecated entry below).
+Tools that rely on `ctx.elicit` continue to work against clients on the session-based eras; on the modern era, elicitation is reachable through the multi-round "guard" pattern instead (a tool returns an `InputRequiredResult`; see the New entry below). Sampling and roots have no era row to speak of — they left the server API entirely (see the Removed entry below).
 
-Ordinary `ctx.info` usage emits an SDK-level `MCPDeprecationWarning` ("The logging capability is deprecated as of 2026-07-28 (SEP-2577)"). That warning comes from the SDK, not FastMCP, and is benign — logging keeps working on session-based connections per the matrix. `ctx.sample`/`ctx.sample_step` additionally emit a FastMCP-owned `FastMCPDeprecationWarning` (see below). The upgrade guide calls both out explicitly.
+Ordinary `ctx.info` usage emits an SDK-level `MCPDeprecationWarning` ("The logging capability is deprecated as of 2026-07-28 (SEP-2577)"). That warning comes from the SDK, not FastMCP, and is benign — logging *notifications* ride the request's own stream and work on every era, including the modern one. The upgrade guide calls it out explicitly.
 
 Wire interop across the transition is verified: a 3.4.3 client against a v4 server and a v4 client against a 3.4.3 server are bidirectionally clean across 9 operations over HTTP (WS2).
 
 *Verify:* `docs/getting-started/upgrading/from-fastmcp-3.mdx` (the published matrix and SDK-warning note), `tests/server/test_protocol_eras.py`.
 
-### Sampling deprecated, era-gated — Deprecated
+### Server-initiated sampling and roots removed from the server API — Breaking
 
-`ctx.sample()` and `ctx.sample_step()` are deprecated and slated for removal in a future FastMCP release. Server-initiated sampling relies on the `createMessage` back-channel that SEP-2577 removed from the wire as of `2026-07-28`, and unlike elicitation it has no multi-round-trip replacement (the agentic loop would exhaust the round-trip budget). Both methods now emit a `FastMCPDeprecationWarning` once per process (gated on `settings.deprecation_warnings`), and on a `2026-07-28` connection they raise a clear `ToolError` before touching the wire. The client-side sampling handler infrastructure (anthropic/openai/google_genai) is retained for future MRTR work and is not deprecated. The migration is to call an LLM directly from your server rather than borrowing the client's model.
+FastMCP 4 is a modern MCP toolkit, so the capabilities the modern protocol removed are not in its server-authoring API. `Context.sample()`, `Context.sample_step()`, and `Context.list_roots()` are gone, along with the whole `fastmcp/server/sampling/` package (`SamplingTool`, `SampleStep`, `SamplingResult`, the tool loop, structured-result sampling) and the server-side handler arguments `FastMCP(sampling_handler=..., sampling_handler_behavior=...)`. These were previously deprecated-and-era-gated; they are now absent. Calling them raises `AttributeError`; the constructor kwargs raise a `TypeError` naming SEP-2577 and the migration.
 
-The dead TODO at `server/context.py` (a background-task sampling relay that was never built) is removed: that relay is not being built, so the note is gone rather than left as a promise.
+The motivating failure is that the gate had become the default experience. `Client` now defaults to `mode="auto"`, which negotiates `2026-07-28` against a FastMCP server, so an unmodified `ctx.sample()` server failed on an ordinary client connection. Four shipped examples (`examples/sampling/`) were broken by that flip; they are deleted rather than ported, and remain available on `release/3.x`.
 
-*Verify:* `fastmcp_slim/fastmcp/server/context.py` (`_warn_sampling_deprecated`, `_is_modern_protocol`, the `sample`/`sample_step` gates), `docs/servers/sampling.mdx` (deprecation banner), `tests/server/test_protocol_eras.py` (warning + era-gate tests).
+Server-initiated sampling and roots are *requests* — the server sends one and blocks for the answer — which needs a back-channel the sessionless protocol does not have. What the protocol removed is the *pushing*, not the asking: both capabilities remain reachable through the guard pattern, where a tool returns an `InputRequiredResult` whose `input_requests` map carries a `CreateMessageRequest` or a `ListRootsRequest`, the client answers it, and the tool re-runs and reads `ctx.input_responses`. `Client._drive_input_required()` dispatches those to the same `sampling_handler` / `roots` handler a handshake-era server would have pushed to, and `tests/conformance/server.py` exercises both routes. For roots that guard round is the recommended modern path. For generation it is available but usually the wrong tool — each round is a full request-response cycle, so an agentic loop exhausts the round-trip budget — and the recommended migration stays a direct LLM call from the server.
+
+**What is deliberately kept.** Client-side `Client(sampling_handler=..., roots=...)` and the provider handlers (anthropic/openai/google_genai) stay: a FastMCP client must still answer a legacy server's requests, and removing them would break interop with older servers. `docs/clients/sampling.mdx` and `docs/clients/roots.mdx` stay as real documentation. Logging is untouched — `ctx.log`/`info`/`debug`/`warning`/`error` are notifications that ride the request's own stream and work on every era.
+
+**Proxy relay.** `ProxyClient`'s default `roots` and `sampling_handler` are client-side handlers that relay a handshake-era backend's requests to the proxy's own front client. They are kept, because a proxy is a client to its backend and falls squarely under the interop guarantee above. They no longer route through the removed `Context` methods: both now call the SDK session directly (`ctx.session.list_roots()` / `ctx.session.create_message()`), an internal path with no public authoring surface. The relay is reachable only when both legs speak the handshake era.
+
+*Verify:* `fastmcp_slim/fastmcp/server/context.py` (no `sample`/`sample_step`/`list_roots`), `fastmcp_slim/fastmcp/server/server.py` (`_REMOVED_KWARGS`), `fastmcp_slim/fastmcp/server/providers/proxy.py` (`default_proxy_roots_handler`, `default_proxy_sampling_handler`), `docs/servers/sampling.mdx` (rewritten in place as the explainer), `tests/server/test_protocol_eras.py` (`test_removed_server_initiated_methods_are_absent`), `tests/server/providers/proxy/test_proxy_client.py` (relay still green).
+
+### `client.set_logging_level()` era-gated — Breaking (modern era)
+
+`logging/setLevel` asks a server to remember a level for the rest of the session, and it is absent from the `2026-07-28` method registry because that era has no session to remember it in. It previously surfaced the SDK's opaque "Method not found". `Client.set_logging_level()` now raises a `RuntimeError` naming the era and pointing at level-filtering in the client's `log_handler`; it is unchanged on handshake-era connections. It is never a silent no-op.
+
+*Verify:* `fastmcp_slim/fastmcp/client/client.py` (`set_logging_level`), `tests/server/test_protocol_eras.py` (`test_set_logging_level_is_era_gated_on_modern`).
 
 ### Push-feature degradation quality — Resolved (was sdk-feedback #10)
 
-On a `2026-07-28` connection the degradation error used to differ by feature: `ctx.list_roots` raised a clear `NoBackChannelError`, while `ctx.elicit` / `ctx.sample` surfaced a bare "Method not found" because those methods attach a `related_request_id` and reach client dispatch before failing. FastMCP now era-gates `ctx.elicit` and `ctx.sample`/`ctx.sample_step` to raise a clear, era-aware `ToolError` before the wire ("server-initiated sampling is not available on MCP 2026-07-28 connections…" and "elicitation via server-initiated requests is unavailable on 2026-07-28 connections."). The strict xfail that captured #10 is flipped to a passing test.
+On a `2026-07-28` connection `ctx.elicit` used to surface a bare "Method not found", because it attaches a `related_request_id` and reaches client dispatch before failing. FastMCP now era-gates `ctx.elicit` to raise a clear, era-aware `ToolError` before the wire ("elicitation via server-initiated requests is unavailable on 2026-07-28 connections."). The strict xfail that captured #10 is flipped to a passing test. The sampling half of #10 is moot: `ctx.sample` no longer exists.
 
-*Verify:* `tests/server/test_protocol_eras.py` (`test_elicit_sample_degradation_message_is_clear_on_modern`, now a real test), `server/context.py` (era gates).
+*Verify:* `tests/server/test_protocol_eras.py` (`test_elicit_degradation_message_is_clear_on_modern`, now a real test), `server/context.py` (era gate).
 
 ### Server-level cache hints (SEP-2549) — New (opt-in feature)
 

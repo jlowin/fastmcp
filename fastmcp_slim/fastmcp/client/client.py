@@ -1351,7 +1351,22 @@ class Client(
         )
 
     async def set_logging_level(self, level: mcp_types.LoggingLevel) -> None:
-        """Send a logging/setLevel request."""
+        """Send a logging/setLevel request.
+
+        Handshake-era servers only. `logging/setLevel` asks the server to
+        remember a level for the rest of the session, and the 2026-07-28
+        protocol has no session to remember it in — the method is absent from
+        that era's registry. Log *notifications* are unaffected: they ride the
+        request's own stream, so a server's `ctx.info()` still reaches you.
+        Filter by level on the receiving side instead, in your `log_handler`.
+        """
+        if self.protocol_version in MODERN_PROTOCOL_VERSIONS:
+            raise RuntimeError(
+                "logging/setLevel is not available on MCP 2026-07-28 "
+                "connections; the method requires per-session server state that "
+                "the modern protocol does not have. Filter incoming log "
+                "messages by level in your log_handler instead."
+            )
         # Deprecated upstream in SDK v2 but deliberately kept per compat directive;
         # removed with the multi-round-trip follow-up.
         await self._await_with_session_monitoring(
