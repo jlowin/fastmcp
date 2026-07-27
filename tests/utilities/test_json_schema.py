@@ -442,6 +442,27 @@ class TestCompressSchema:
         # ...and the copy really was pruned as deep as the traversal reaches.
         assert _count_titles(result) < _count_titles(schema)
 
+    def test_keeps_defs_referenced_below_the_traversal_cutoff(self):
+        """A $ref deeper than the traversal walks must still pin its definition.
+
+        The reference scan stops at its depth guard, so past that point it
+        cannot prove a definition is unused. Dropping one anyway would leave a
+        dangling $ref — an invalid schema is worse than an unpruned one.
+        """
+        schema: dict[str, Any] = {"$ref": "#/$defs/Leaf"}
+        for _ in range(60):
+            schema = {"type": "array", "items": schema}
+        schema["$defs"] = {"Leaf": {"type": "string"}}
+
+        result = compress_schema(schema)
+
+        assert result["$defs"] == {"Leaf": {"type": "string"}}
+
+        node: Any = result
+        while isinstance(node.get("items"), dict):
+            node = node["items"]
+        assert node == {"$ref": "#/$defs/Leaf"}
+
     def test_preserves_refs_by_default(self):
         """Test that compress_schema preserves $refs by default."""
         schema = {
