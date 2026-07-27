@@ -95,9 +95,9 @@ Keeping the claim path at the call site means any provider works, including ones
 
 Verify the claim against your own tenant before relying on it. Auth0's namespaced custom claims are configured per tenant, and Entra emits `roles` or `groups` depending on the app manifest.
 
-<Warning>
-`require_roles` cannot signal a scope shortfall. OAuth has no way to request a role, so there is no `insufficient_scope` challenge to emit and the check is opaque. Because a single opaque check withholds scope disclosure for every check beside it, combining `require_roles` and `require_scopes` on one component stops that component from emitting the step-up challenges described in [Signaling Scope Shortfalls](#signaling-scope-shortfalls). Apply them at different layers — for example scopes on the component and roles in middleware — if you need both.
-</Warning>
+<Note>
+`require_roles` cannot signal a scope shortfall, because OAuth has no way to request a role. A role denial surfaces as a plain `AuthorizationError` rather than one of the `insufficient_scope` challenges described in [Signaling Scope Shortfalls](#signaling-scope-shortfalls), and it suppresses any scope shortfall raised alongside it — a caller blocked by their role should not be told to go obtain a scope that would not help them. Combining `require_roles` with `require_scopes` is otherwise fine: whenever the role check passes, a scope shortfall is reported as usual.
+</Note>
 
 ### Checking Other Claims
 

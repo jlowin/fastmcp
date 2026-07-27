@@ -124,7 +124,14 @@ class _RequireRoles:
         if ctx.token is None:
             return False
         try:
-            granted = set(self._extract(ctx.token.claims))
+            extracted = self._extract(ctx.token.claims)
+            # A provider that stores a single role as a bare string satisfies
+            # `Iterable[str]`, but iterating it yields characters: "admin"
+            # would deny an "admin" requirement and grant an "a" one. Treat a
+            # string as the single role it plainly means.
+            if isinstance(extracted, str):
+                extracted = [extracted]
+            granted = set(extracted)
         except (KeyError, IndexError, TypeError):
             # A caller whose token simply lacks the claim is an ordinary
             # denial, not a broken check: return False rather than letting
@@ -159,14 +166,17 @@ def require_roles(
     ```
 
     A token missing the claim entirely is denied rather than treated as an
-    error, so `extract` may index into the claims without guarding.
+    error, so `extract` may index into the claims without guarding. An
+    extractor returning a bare string is treated as one role, since a provider
+    that stores a single role as a scalar is common.
 
     Unlike `require_scopes`, this check cannot signal a shortfall: OAuth has no
     way to request a role, so there is no `insufficient_scope` challenge to
-    emit. It is therefore opaque, and a single opaque check suppresses scope
-    disclosure for every check beside it — combining `require_roles` with
-    `require_scopes` on one component stops that component from emitting
-    step-up challenges.
+    emit. A role denial is therefore reported as a plain `AuthorizationError`,
+    and it suppresses any scope shortfall alongside it — a caller blocked by
+    their role must not be told to go obtain a scope that would not help.
+    Scope shortfalls are still reported normally whenever the role check
+    passes.
 
     Args:
         *roles: Roles the caller must hold. All are required (AND logic).

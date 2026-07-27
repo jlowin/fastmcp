@@ -166,6 +166,79 @@ class TestRequireRoles:
         assert scope_requirements(checks, ctx) is None
         assert scope_requirements([require_scopes("write")], ctx) == ["write"]
 
+    @pytest.mark.parametrize(
+        "required, expected",
+        [("admin", True), ("a", False), ("dmin", False)],
+    )
+    def test_scalar_role_claim_is_one_role(self, required: str, expected: bool):
+        """A provider storing one role as a string must not be iterated.
+
+        `str` satisfies `Iterable[str]`, so a bare "admin" would otherwise
+        become the character set {a, d, m, i, n} — denying the "admin" it
+        plainly grants and granting any single character it contains.
+        """
+        ctx = AuthContext(
+            token=make_token(claims={"role": "admin"}), component=make_tool()
+        )
+        check = require_roles(required, extract=lambda c: c["role"])
+        assert check(ctx) is expected
+
+    async def test_role_denial_suppresses_scope_challenge(self):
+        """A caller blocked by their role is not told to obtain a scope."""
+        mcp = FastMCP(
+            middleware=[
+                AuthMiddleware(
+                    auth=[
+                        require_scopes("api"),
+                        require_roles("admin", extract=keycloak_roles),
+                    ]
+                )
+            ]
+        )
+
+        @mcp.tool
+        def t() -> str:
+            return "ok"
+
+        token = make_token(scopes=["read"], claims={"realm_access": {"roles": ["v"]}})
+        tok = set_token(token)
+        try:
+            with pytest.raises(AuthorizationError) as exc_info:
+                await mcp.call_tool("t", {})
+        finally:
+            auth_context_var.reset(tok)
+
+        assert not isinstance(exc_info.value, InsufficientScopeError)
+
+    async def test_passing_role_still_allows_scope_challenge(self):
+        """Mixing the two checks does not disable step-up on its own."""
+        mcp = FastMCP(
+            middleware=[
+                AuthMiddleware(
+                    auth=[
+                        require_scopes("api"),
+                        require_roles("admin", extract=keycloak_roles),
+                    ]
+                )
+            ]
+        )
+
+        @mcp.tool
+        def t() -> str:
+            return "ok"
+
+        token = make_token(
+            scopes=["read"], claims={"realm_access": {"roles": ["admin"]}}
+        )
+        tok = set_token(token)
+        try:
+            with pytest.raises(InsufficientScopeError) as exc_info:
+                await mcp.call_tool("t", {})
+        finally:
+            auth_context_var.reset(tok)
+
+        assert exc_info.value.required_scopes == ["api"]
+
 
 # =============================================================================
 # Tests for restrict_tag
