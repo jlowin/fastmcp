@@ -151,14 +151,9 @@ if result.action == "accept":
 
 See [User Elicitation](/servers/elicitation) for detailed examples and supported response types.
 
-### Server-initiated requests
+### Sampling and Roots
 
-<Note>
-`Context` has no `sample()` or `list_roots()`. Both were server→client *requests*, and the modern MCP protocol has no channel to carry them ([SEP-2577](/servers/sampling)). For generation, [call an LLM directly from your server](/servers/sampling). For roots, accept paths as tool arguments, or ask for them through the [guard pattern](/servers/elicitation#elicitation-on-the-modern-protocol), which carries a roots request in `input_requests`.
-
-Logging is unaffected — `ctx.info()` and friends are *notifications*, which ride the response stream and work on every protocol era.
-</Note>
-
+Neither capability has a `Context` method. Both used to *push* a request into a live client connection, which the modern MCP protocol has no channel to carry, so a tool now asks for them by returning the request and reading the answer on the next round — the same [guard pattern](/servers/elicitation#sampling-and-roots) elicitation uses on modern connections. That route is the natural one for roots; for generation, [call an LLM directly from your server](/servers/sampling).
 
 ### Progress Reporting
 

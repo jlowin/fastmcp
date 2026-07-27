@@ -39,9 +39,9 @@ from fastmcp_tasks.creation import (
     registered_component_for_key,
 )
 from fastmcp_tasks.input_store import (
-    acquire_update_lock,
     acquire_update_lock_blocking,
     clear_outstanding,
+    discard_outstanding,
     is_cancelled,
     load_current_leg,
     load_task_args,
@@ -296,18 +296,26 @@ async def tasks_get(server: FastMCP, task_id: str) -> GetTaskResult:
 
     if execution.state == ExecutionState.FAILED:
         message = "Task failed"
+        error: dict[str, Any] = {
+            "code": mcp_types.INTERNAL_ERROR,
+            "message": message,
+        }
         try:
             await execution.get_result(timeout=timedelta(seconds=0))
         # On a FAILED execution, get_result re-raises the exception the task
         # itself raised — an arbitrary user-defined type, so no narrower catch
-        # exists. Its message becomes the task's error payload.
-        except Exception as error:
-            message = str(error)
-        return build(
-            "failed",
-            status_message=message,
-            error={"code": mcp_types.INTERNAL_ERROR, "message": message},
-        )
+        # exists. Its message becomes the task's error payload; an MCPError
+        # already *is* a JSON-RPC error, so its code and data are preserved
+        # rather than flattened to an internal error.
+        except MCPError as protocol_error:
+            message = protocol_error.error.message
+            error = {"code": protocol_error.error.code, "message": message}
+            if protocol_error.error.data is not None:
+                error["data"] = protocol_error.error.data
+        except Exception as unexpected:
+            message = str(unexpected)
+            error = {"code": mcp_types.INTERNAL_ERROR, "message": message}
+        return build("failed", status_message=message, error=error)
 
     if execution.state == ExecutionState.CANCELLED:
         return build("cancelled")
@@ -342,9 +350,24 @@ async def tasks_update(
     )
 
     # Serialize concurrent updates for this task so two racing answers cannot
-    # each enqueue a next leg (double execution). A loser is an idempotent no-op.
-    if not await acquire_update_lock(docket, task_scope, task_id):
-        return UpdateTaskResult()
+    # each enqueue a next leg (double execution). Waiting rather than dropping
+    # the loser matters for partial fulfillment: SEP-2663 invites a client to
+    # answer a multi-request ask one key at a time, so two in-flight updates may
+    # carry *different* answers. Acknowledging the loser without storing its
+    # answer would strand the task waiting on a key the client believes it has
+    # already sent. Once the winner finishes, the loser re-reads the leg's
+    # outstanding state: a genuinely duplicate answer finds nothing left to
+    # match and is the idempotent no-op SEP-2663 asks for.
+    if not await acquire_update_lock_blocking(docket, task_scope, task_id):
+        # The holder is wedged. Report a retryable failure rather than a false
+        # acknowledgement, which would silently lose this answer.
+        raise MCPError(
+            code=mcp_types.INTERNAL_ERROR,
+            message=(
+                f"Task {task_id} has an update in progress that did not complete "
+                "in time; retry this update."
+            ),
+        )
     try:
         # A cancelled task never re-enters: clearing outstanding on cancel makes
         # translate return None already, but check explicitly so a cancel that
@@ -352,21 +375,45 @@ async def tasks_update(
         if await is_cancelled(docket, task_scope, task_id):
             return UpdateTaskResult()
 
-        translated = await translate_responses(
+        matched = await translate_responses(
             docket, task_scope, task_id, leg_number, input_responses
         )
-        if translated is None:
+        if matched is None:
             # Nothing matched the current leg's outstanding requests: the leg was
             # already answered, or the keys are unknown. Idempotent no-op.
             return UpdateTaskResult()
+        translated, answered_keys = matched
 
-        # Store the answers for the next leg to read, then enqueue that leg.
-        # Ordering matters: the answers must be in Redis before the next leg's
-        # worker context loads them, and current_leg must not advance to an
-        # execution that is not yet durable — so enqueue (with its durable wait)
-        # precedes the pointer swap.
+        # Store the answers for the next leg to read. They accumulate: a client
+        # may answer a multi-request ask one update at a time.
         await store_input_responses(docket, task_scope, task_id, translated)
 
+        # A partial update retires only the keys it answered, leaving the task
+        # `input_required` with the rest surfaced; the leg re-enters only once
+        # every request has an answer (SEP-2663 partial fulfillment).
+        #
+        # The *last* answer deliberately leaves its marker in place. Outstanding
+        # requests are what make a completed-but-parked leg read as
+        # `input_required` rather than as a finished task, so retiring the final
+        # one before the next leg is durable would let a racing `tasks/get`
+        # report the task complete with a `None` result — and would strand it
+        # there for good if the enqueue below failed, since a retried update
+        # would no longer match any key. `clear_outstanding` runs after the
+        # pointer swap instead.
+        outstanding = await read_outstanding_inputs(
+            docket, task_scope, task_id, leg_number
+        )
+        if set(outstanding) - set(answered_keys):
+            await discard_outstanding(
+                docket, task_scope, task_id, leg_number, answered_keys
+            )
+            return UpdateTaskResult()
+
+        # Every request is answered, so enqueue the next leg. Ordering matters:
+        # the answers must be in Redis before the next leg's worker context
+        # loads them, and current_leg must not advance to an execution that is
+        # not yet durable — so enqueue (with its durable wait) precedes the
+        # pointer swap.
         component = await registered_component_for_key(
             server, parse_task_key(base_task_key)["component_identifier"]
         )

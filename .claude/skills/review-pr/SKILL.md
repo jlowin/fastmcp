@@ -96,12 +96,9 @@ Codex sometimes re-posts old comments that reference code you've already fixed (
 
 ## Labels — never apply or invent them
 
-**Do not apply labels to PRs or issues programmatically, and never create new ones.** Labeling is the maintainer's call (and is often automated). Two hard rules:
+**Do not apply labels to PRs or issues programmatically, and never create new ones.** Issues and PRs in this repo are auto-labeled by a bot based on title, body, and code changes — there's no fixed canonical list to match against, and GitHub's "add labels" API auto-creates any label name that doesn't already exist, so a typo or guessed name silently pollutes the repo's label list with a stray, uncolored duplicate. There is no MCP tool to delete a label, so a mistaken creation can only be cleaned up by hand in repo settings.
 
-- **Never invent a label.** GitHub's "add labels" API *auto-creates* any label name that doesn't already exist — so a typo or a guessed name silently pollutes the repo's label list with a stray, uncolored duplicate. Adding `breaking` (which does not exist) creates it alongside the real `breaking change` label.
-- **Use only labels that already exist.** If you genuinely need to confirm a label, look it up first (`get_label` / the repo's label list) and match the exact name. The canonical names here are specific — e.g. the breaking-change label is **`breaking change`**, not `breaking`; enhancements is **`enhancements`**, features is **`features`**, bugs is **`bugs`**.
-
-When a change warrants a label (e.g. it's breaking), **say so in the PR body and let the maintainer apply the label** rather than applying it yourself. There is no MCP tool to delete a label, so a mistaken creation can only be cleaned up by hand in repo settings — the cost of guessing is high and one-directional.
+Don't call out a "suggested" or "appropriate" label in the PR body either — the bot doesn't read it, and it just adds noise.
 
 ## When a PR is ready
 

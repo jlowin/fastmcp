@@ -185,16 +185,11 @@ Set `mode="legacy"` to force the initialize handshake. This behaves identically 
 client = Client("https://example.com/mcp", mode="legacy")
 ```
 
-Legacy mode is also what you need for the capabilities that depend on a live session between client and server. The handshake opens a persistent back-channel the server can push requests down, and the modern era removed it. Pin `mode="legacy"` when your code relies on any of these:
-
-- **[Sampling](/clients/sampling)** — server-initiated LLM completion requests
-- **[Roots](/clients/roots)** — server-initiated requests for the client's roots
-- **[Elicitation](/clients/elicitation)** — server-initiated requests for user input, which modern connections replace with [input-required rounds](/clients/elicitation#input-required-rounds)
-- `client.ping()` and `transport.get_session_id()`
+Legacy mode is also what carries the *pushed* form of a server's requests. The handshake opens a persistent back-channel down which a server can send a sampling, roots, or elicitation request mid-call, and the modern era removed it. Your handlers are unaffected by that: a [sampling](/clients/sampling), [roots](/clients/roots), or [elicitation](/clients/elicitation) handler you register answers a modern server's [input-required rounds](/clients/elicitation#input-required-rounds) from the same registration. Pin `mode="legacy"` when you connect to a server that pushes, or when your code calls `client.ping()` or `transport.get_session_id()`, which need the session the modern era does not open.
 
 Conversely, [background tasks](/clients/tasks) are **modern-only**: the tasks capability is negotiated over `2026-07-28` connections, so `mode="legacy"` never triggers one and a task-enabled tool just runs synchronously.
 
-A FastMCP server serves both eras, so a default client negotiates the modern one and these raise an era-specific error. Pinning the handshake restores them.
+A FastMCP server serves both eras, so a default client negotiates the modern one and the session-dependent calls raise an era-specific error there. Pinning the handshake restores them.
 
 You can also pin a specific modern protocol version to adopt it directly, without a discovery probe:
 
@@ -342,7 +337,7 @@ See [Prompts](/clients/prompts) for detailed documentation including argument se
 
 The client supports callback handlers for advanced server interactions. These let you respond to server-initiated requests and receive notifications.
 
-Sampling, elicitation, and roots are all server-initiated, so they belong to the handshake era described under [protocol negotiation](#protocol-negotiation). A default client negotiates the newest era both peers share, where the server has no back-channel to push those requests down, so an example that exercises them pins `mode="legacy"`. Logging and progress arrive as notifications on the response stream and work in either era.
+Sampling, elicitation, and roots are the requests a server makes of the client. A server reaches your handler by whichever route its [era](#protocol-negotiation) allows — pushed down the open session on the handshake, returned as an input-required result on the modern protocol — and both routes dispatch to the same handler, so one registration covers both. Logging and progress arrive as notifications on the response stream and work in either era.
 
 ```python
 from fastmcp import Client
@@ -360,7 +355,6 @@ async def sampling_handler(messages, params, context):
 
 client = Client(
     "my_mcp_server.py",
-    mode="legacy",
     log_handler=log_handler,
     progress_handler=progress_handler,
     sampling_handler=sampling_handler,

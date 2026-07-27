@@ -11,9 +11,14 @@ the real interceptor and handlers via `task_helpers`.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 import mcp_types
+from fastmcp_tasks.context import get_task_scope
+from fastmcp_tasks.input_store import acquire_update_lock, release_update_lock
+from mcp.shared.exceptions import MCPError
+from mcp_types import INTERNAL_ERROR
 
 from fastmcp import Context, FastMCP
 from fastmcp_tasks import TasksExtension
@@ -56,6 +61,14 @@ def _input_required(
         input_requests=requests,
         request_state=request_state,
     )
+
+
+def _key_asking(input_requests: dict[str, Any], message: str) -> str:
+    """The surfaced key whose parked request asks *message*."""
+    for key, payload in input_requests.items():
+        if payload["params"]["message"] == message:
+            return key
+    raise AssertionError(f"no parked request asks {message!r}")
 
 
 async def _park_key(mcp: FastMCP, task_id: str) -> str:
@@ -244,3 +257,187 @@ async def test_state_only_guard_round_fails_clearly():
     assert final.result is not None
     assert final.result["isError"] is True
     assert "state-only" in final.result["content"][0]["text"]
+
+
+async def test_partial_update_keeps_task_parked_on_remaining_request():
+    """SEP-2663 partial fulfillment: a leg that asked two questions stays
+    `input_required` until both are answered, and each `tasks/get` in between
+    surfaces only what is still outstanding."""
+    mcp = FastMCP("partial")
+    mcp.add_extension(TasksExtension())
+
+    @mcp.tool(task=True)
+    async def two_questions(ctx: Context) -> str | mcp_types.InputRequiredResult:
+        responses = ctx.input_responses
+        if responses is None:
+            return _input_required(
+                {
+                    "first": _elicit_request("First?"),
+                    "second": _elicit_request("Second?"),
+                }
+            )
+        return f"{_answer(responses, 'first')}+{_answer(responses, 'second')}"
+
+    async with running_task_server(mcp):
+        created = await submit_task(mcp, "two_questions", {})
+        parked = await wait_for_task(
+            mcp, created.task_id, target_states=frozenset({"input_required"})
+        )
+        assert parked.input_requests is not None
+        assert len(parked.input_requests) == 2
+
+        # Surfaced keys are freshly minted per request, so they carry no order
+        # a test can rely on. Identify each by the question it asks.
+        answered = _key_asking(parked.input_requests, "First?")
+        pending = _key_asking(parked.input_requests, "Second?")
+        await update_task(
+            mcp,
+            created.task_id,
+            {answered: {"action": "accept", "content": {"value": "one"}}},
+        )
+
+        still_parked = await get_task(mcp, created.task_id)
+        assert still_parked.status == "input_required"
+        assert still_parked.input_requests is not None
+        assert list(still_parked.input_requests) == [pending]
+
+        # Answering the last one resumes the leg, which now sees both answers.
+        await update_task(
+            mcp,
+            created.task_id,
+            {pending: {"action": "accept", "content": {"value": "two"}}},
+        )
+        final = await wait_for_task(mcp, created.task_id)
+
+    assert final.status == "completed"
+    assert final.result is not None
+    assert final.result["content"][0]["text"] == "one+two"
+
+
+async def test_partial_update_waits_for_a_held_update_lock():
+    """An update that arrives while another holds the lock must still land.
+
+    SEP-2663 invites a client to answer a multi-request ask one key at a time,
+    so two updates can be in flight carrying *different* answers. Acknowledging
+    the one that loses the lock without storing its answer would leave the task
+    waiting forever on a key the client believes it already sent.
+
+    The lock is taken out of band here so the contention is deterministic rather
+    than dependent on scheduling.
+    """
+    mcp = FastMCP("lock-contention")
+    mcp.add_extension(TasksExtension())
+
+    @mcp.tool(task=True)
+    async def two_questions(ctx: Context) -> str | mcp_types.InputRequiredResult:
+        responses = ctx.input_responses
+        if responses is None:
+            return _input_required(
+                {
+                    "first": _elicit_request("First?"),
+                    "second": _elicit_request("Second?"),
+                }
+            )
+        return f"{_answer(responses, 'first')}+{_answer(responses, 'second')}"
+
+    async with running_task_server(mcp):
+        created = await submit_task(mcp, "two_questions", {})
+        parked = await wait_for_task(
+            mcp, created.task_id, target_states=frozenset({"input_required"})
+        )
+        assert parked.input_requests is not None
+        first = _key_asking(parked.input_requests, "First?")
+        second = _key_asking(parked.input_requests, "Second?")
+
+        docket = mcp._docket
+        assert docket is not None
+        scope = get_task_scope()
+
+        # Simulate a concurrent update in progress.
+        assert await acquire_update_lock(docket, scope, created.task_id)
+        pending = asyncio.create_task(
+            update_task(
+                mcp,
+                created.task_id,
+                {first: {"action": "accept", "content": {"value": "one"}}},
+            )
+        )
+        await asyncio.sleep(0.05)
+        assert not pending.done(), "update returned while the lock was held"
+        await release_update_lock(docket, scope, created.task_id)
+        await pending
+
+        # The blocked answer landed, so only the other key remains outstanding.
+        still_parked = await get_task(mcp, created.task_id)
+        assert still_parked.status == "input_required"
+        assert still_parked.input_requests is not None
+        assert list(still_parked.input_requests) == [second]
+
+        await update_task(
+            mcp,
+            created.task_id,
+            {second: {"action": "accept", "content": {"value": "two"}}},
+        )
+        final = await wait_for_task(mcp, created.task_id)
+
+    assert final.status == "completed"
+    assert final.result is not None
+    assert final.result["content"][0]["text"] == "one+two"
+
+
+async def test_final_answer_keeps_task_parked_until_next_leg_is_durable():
+    """The last answer must not retire its outstanding marker early.
+
+    Outstanding requests are what make a completed-but-parked leg read as
+    `input_required`. Discarding the final one before the next leg is enqueued
+    would let a `tasks/get` landing in that window see a finished execution with
+    no result and report the task complete.
+    """
+    mcp = FastMCP("durable-reentry")
+    mcp.add_extension(TasksExtension())
+
+    @mcp.tool(task=True)
+    async def one_question(ctx: Context) -> str | mcp_types.InputRequiredResult:
+        responses = ctx.input_responses
+        if responses is None:
+            return _input_required({"only": _elicit_request("Only?")})
+        return f"got {_answer(responses, 'only')}"
+
+    async with running_task_server(mcp):
+        created = await submit_task(mcp, "one_question", {})
+        key = await _park_key(mcp, created.task_id)
+
+        await update_task(
+            mcp,
+            created.task_id,
+            {key: {"action": "accept", "content": {"value": "answer"}}},
+        )
+        final = await wait_for_task(mcp, created.task_id)
+
+    # The task must land on the real result, never on a phantom completion.
+    assert final.status == "completed"
+    assert final.result is not None
+    assert final.result["content"][0]["text"] == "got answer"
+
+
+async def test_protocol_error_fails_the_task_with_inlined_error():
+    """SEP-2663 reserves `failed` for protocol faults: an `MCPError` raised by
+    the body is inlined as a JSON-RPC error rather than reported as a completed
+    task carrying an `isError` result (which is what a `ToolError` produces)."""
+    mcp = FastMCP("protocol-fault")
+    mcp.add_extension(TasksExtension())
+
+    @mcp.tool(task=True)
+    async def explodes() -> str:
+        raise MCPError(code=INTERNAL_ERROR, message="protocol fault", data={"x": 1})
+
+    async with running_task_server(mcp):
+        created = await submit_task(mcp, "explodes", {})
+        final = await wait_for_task(mcp, created.task_id)
+
+    assert final.status == "failed"
+    assert final.result is None
+    assert final.error is not None
+    assert final.error["code"] == INTERNAL_ERROR
+    assert final.error["message"] == "protocol fault"
+    assert final.error["data"] == {"x": 1}

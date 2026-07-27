@@ -1,7 +1,7 @@
 """End-to-end tests for the SEP-2663 `TasksExtension` server adapter.
 
 Covers the decide-and-task interceptor (forbidden/optional/required modes and the
--32003 missing-capability error), the tasks/get|update|cancel handlers, status
+-32021 missing-capability error), the tasks/get|update|cancel handlers, status
 mapping, inlined completed results, argument-coercion parity, TTL, and capability
 advertisement. Server-side tasks are driven in-process via `task_helpers` because
 there is no client task-submission API until Phase 4.
@@ -360,7 +360,7 @@ async def test_legacy_era_opt_in_is_ignored():
 
 
 async def test_legacy_era_required_tool_raises_missing_capability():
-    """`required` tools refuse legacy-era calls with -32003 even when opted in."""
+    """`required` tools refuse legacy-era calls with -32021 even when opted in."""
     mcp = _tasks_server()
     async with running_task_server(mcp):
         srctx = ServerRequestContext(
@@ -377,7 +377,7 @@ async def test_legacy_era_required_tool_raises_missing_capability():
         with bind_request_context(srctx):
             with pytest.raises(MCPError) as exc_info:
                 await mcp.call_tool("must_task", {"n": 3})
-    assert exc_info.value.error.code == -32003
+    assert exc_info.value.error.code == -32021
 
 
 # ---------------------------------------------------------------------------
@@ -409,12 +409,21 @@ async def test_worker_hooks_survive_sibling_server_shutdown():
 
 
 # ---------------------------------------------------------------------------
-# Compliance: -32003 on task methods for non-declaring clients (SEP-2663)
+# Compliance: -32021 on task methods for non-declaring clients (SEP-2663)
 # ---------------------------------------------------------------------------
 
 
+def test_missing_capability_code_is_the_protocol_value():
+    """The code must track the SDK, not an early SEP-2663 draft.
+
+    It shipped hardcoded as -32003, which no client recognizes: SEP-2575
+    assigns -32021 to MissingRequiredClientCapability.
+    """
+    assert MISSING_REQUIRED_CLIENT_CAPABILITY == -32021
+
+
 async def test_task_method_without_capability_raises_missing_capability():
-    """tasks/get from a client that did not declare the extension gets -32003."""
+    """tasks/get from a client that did not declare the extension gets -32021."""
     mcp = _tasks_server()
     extension = cast(TasksExtension, mcp._extensions[TASKS_EXTENSION_ID])
     # A request context with no tasks capability in its _meta.

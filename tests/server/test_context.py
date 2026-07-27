@@ -1,7 +1,6 @@
 from unittest.mock import MagicMock
 
 import pytest
-from mcp_types import ModelPreferences
 
 from fastmcp.server.context import (
     Context,
