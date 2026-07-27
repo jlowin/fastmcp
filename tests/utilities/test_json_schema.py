@@ -1,4 +1,6 @@
 import copy
+import sys
+from typing import Any
 from unittest.mock import patch
 
 from jsonref import replace_refs
@@ -10,6 +12,31 @@ from fastmcp.utilities.json_schema import (
     dereference_refs,
     resolve_root_ref,
 )
+
+
+def _measure_depth(schema: dict[str, Any]) -> int:
+    """Return how many `items` levels deep an array-nested schema goes.
+
+    Walks iteratively so the assertion helpers cannot themselves hit the
+    recursion limit the tests are probing.
+    """
+    depth = 0
+    node: Any = schema
+    while isinstance(node.get("items"), dict):
+        node = node["items"]
+        depth += 1
+    return depth
+
+
+def _count_titles(schema: dict[str, Any]) -> int:
+    """Count the `title` keys down an array-nested schema, iteratively."""
+    count = 0
+    node: Any = schema
+    while isinstance(node, dict):
+        if "title" in node:
+            count += 1
+        node = node.get("items")
+    return count
 
 
 class TestPruneParam:
@@ -390,6 +417,30 @@ class TestCompressSchema:
         assert "title" not in result["properties"]["b"]["properties"]["c"]
         assert "additionalProperties" not in result
         assert "$defs" not in result
+
+    def test_compresses_schema_nested_far_beyond_the_recursion_limit(self):
+        """Deeply nested schemas must compress rather than raise RecursionError.
+
+        Copying the schema is what sets the depth ceiling, so it must not
+        recurse: schemas this deep arrive from proxied or remote MCP servers,
+        and failing to compress them is worse than compressing them partially.
+        """
+        depth = sys.getrecursionlimit() * 2
+
+        schema: dict[str, Any] = {"type": "string", "title": "Leaf"}
+        for _ in range(depth):
+            schema = {"type": "array", "title": "Level", "items": schema}
+
+        original_depth = _measure_depth(schema)
+
+        result = compress_schema(schema, prune_titles=True)
+
+        assert result is not schema
+        assert _measure_depth(result) == original_depth
+        # The caller's schema is still intact at every level...
+        assert _count_titles(schema) == original_depth + 1
+        # ...and the copy really was pruned as deep as the traversal reaches.
+        assert _count_titles(result) < _count_titles(schema)
 
     def test_preserves_refs_by_default(self):
         """Test that compress_schema preserves $refs by default."""
