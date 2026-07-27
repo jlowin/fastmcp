@@ -368,6 +368,8 @@ def read_record(id: str) -> str:
 
 ### Signaling Scope Shortfalls
 
+<VersionBadge version="4.0.0" />
+
 A denial is more useful when it says what would fix it. When `AuthMiddleware` blocks a call because the token is missing scopes — rather than because some other policy rejected it — it raises `InsufficientScopeError`, which carries the specific scopes the caller needs in its `required_scopes` attribute. An agent that reads the error knows exactly which scopes to re-authorize for, instead of retrying blindly against an opaque refusal.
 
 `InsufficientScopeError` subclasses `AuthorizationError`, so existing handlers that catch `AuthorizationError` keep catching it and nothing about your error handling has to change to adopt this.

@@ -589,6 +589,8 @@ Check your server logs for "Client registered with redirect_uri" messages to ide
 
 ### Application Type (Web vs. Native)
 
+<VersionBadge version="4.0.0" />
+
 During Dynamic Client Registration, a client may declare an `application_type` (per RFC 7591 and SEP-837) that governs which redirect URIs it is allowed to use. The OAuth proxy honors this field both at registration and when authorizing a redirect.
 
 `application_type` defaults to `"native"` because MCP clients typically run locally and register loopback callbacks. Clients that omit the field keep the permissive behavior described above. A client that explicitly registers as `"web"` is held to the stricter browser-app rules.

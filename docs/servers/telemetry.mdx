@@ -6,6 +6,8 @@ icon: chart-line
 tag: NEW
 ---
 
+import { VersionBadge } from "/snippets/version-badge.mdx"
+
 FastMCP includes native OpenTelemetry instrumentation for observability. Traces are automatically generated for tool, prompt, resource, resource template, and task management operations, providing visibility into server behavior, request handling, and provider delegation chains.
 
 ## How It Works
@@ -20,6 +22,8 @@ FastMCP uses the OpenTelemetry API for instrumentation. This means:
 Because FastMCP only depends on the OpenTelemetry API, span creation is a no-op until you configure an SDK and exporter — so being on by default costs nothing until you opt into collection.
 
 ### Turning Telemetry Off
+
+<VersionBadge version="4.0.0" />
 
 To disable FastMCP's instrumentation entirely, set `FASTMCP_ENABLE_TELEMETRY=false` (or `fastmcp.settings.enable_telemetry = False`). When disabled, FastMCP creates no spans even if an SDK is configured.
 

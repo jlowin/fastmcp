@@ -83,6 +83,8 @@ mcp = FastMCP(name="My Descope Protected Server", auth=auth_provider)
 
 ### Scope discovery and validation
 
+<VersionBadge version="4.0.0" />
+
 When both `scopes_supported` and `required_scopes` are omitted, `DescopeProvider` discovers `scopes_supported` lazily from the OpenID configuration and advertises them to MCP clients. Provider construction remains network-free, and a transient discovery failure is retried on a later metadata request.
 
 Set both options when clients should request a broader set of scopes than the server requires on every token:
