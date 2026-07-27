@@ -12,7 +12,6 @@ from fastmcp.server.providers.skills import (
     ClaudeSkillsProvider,
     SkillProvider,
     SkillsDirectoryProvider,
-    SkillsProvider,
 )
 from fastmcp.server.providers.skills._common import parse_frontmatter
 from fastmcp.server.providers.skills.skill_provider import SkillFileResource
@@ -722,13 +721,6 @@ description: Second occurrence
         provider = SkillsDirectoryProvider(roots=[])
         resources = await provider.list_resources()
         assert resources == []
-
-
-class TestSkillsProviderAlias:
-    """Test that SkillsProvider is a backwards-compatible alias."""
-
-    def test_skills_provider_is_alias(self):
-        assert SkillsProvider is SkillsDirectoryProvider
 
 
 class TestClaudeSkillsProvider:

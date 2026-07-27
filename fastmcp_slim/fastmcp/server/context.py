@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import warnings
 import weakref
 from collections.abc import Callable, Generator, Mapping
 from contextlib import contextmanager
@@ -24,11 +23,7 @@ from pydantic.networks import AnyUrl
 from typing_extensions import TypeVar
 from uncalled_for import SharedContext
 
-import fastmcp
-from fastmcp.exceptions import (
-    FastMCPDeprecationWarning,
-    ToolError,
-)
+from fastmcp.exceptions import ToolError
 from fastmcp.resources.base import ResourceResult
 from fastmcp.server.dependencies import FastMCPRequestContext, fastmcp_request_ctx
 from fastmcp.server.elicitation import (
@@ -956,29 +951,13 @@ class Context:
     async def elicit(
         self,
         message: str,
-        response_type: None,
-        *,
-        response_title: str | None = None,
-        response_description: str | None = None,
-    ) -> (
-        AcceptedElicitation[dict[str, Any]] | DeclinedElicitation | CancelledElicitation
-    ): ...
-
-    """When response_type is None, the accepted elicitation will contain an
-    empty dict"""
-
-    @overload
-    async def elicit(
-        self,
-        message: str,
         response_type: type[T],
         *,
         response_title: str | None = None,
         response_description: str | None = None,
     ) -> AcceptedElicitation[T] | DeclinedElicitation | CancelledElicitation: ...
 
-    """When response_type is not None, the accepted elicitation will contain the
-    response data"""
+    """The accepted elicitation will contain the response data"""
 
     @overload
     async def elicit(
@@ -1044,8 +1023,7 @@ class Context:
         | list[str]
         | dict[str, dict[str, str]]
         | list[list[str]]
-        | list[dict[str, dict[str, str]]]
-        | None = None,
+        | list[dict[str, dict[str, str]]],
         *,
         response_title: str | None = None,
         response_description: str | None = None,
@@ -1070,11 +1048,9 @@ class Context:
         "value" field will be generated for the MCP interaction and
         automatically deconstructed into the primitive type upon response.
 
-        Passing ``response_type=None`` (or omitting it) is deprecated and will
-        be removed in a future version. The resulting empty-schema form-mode
-        request is ambiguous and causes some clients (e.g. VS Code) to hang on
-        an empty form. Pass an explicit ``response_type`` describing the data
-        you want back.
+        ``response_type`` is required. Pass ``bool`` when all you need is a
+        confirmation; an empty schema leaves some clients rendering an empty,
+        non-functional form.
 
         Args:
             message: A human-readable message explaining what information is needed
@@ -1096,17 +1072,6 @@ class Context:
             the guard pattern: return an ``InputRequiredResult`` and read
             ``ctx.input_responses`` / ``ctx.request_state`` when the task re-runs.
         """
-        if response_type is None and fastmcp.settings.deprecation_warnings:
-            warnings.warn(
-                "Calling ctx.elicit() without a response_type is deprecated "
-                "and will be removed in a future version. The empty-schema "
-                "form-mode request is ambiguous under the current MCP spec "
-                "and causes some clients (e.g. VS Code) to render an empty, "
-                "non-functional form. Pass an explicit response_type "
-                "describing the data you expect back.",
-                FastMCPDeprecationWarning,
-                stacklevel=2,
-            )
         config = parse_elicit_response_type(
             response_type,
             response_title=response_title,

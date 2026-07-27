@@ -178,9 +178,16 @@ The proxy, OpenAPI, and app integrations moved to their permanent homes, and the
 | `fastmcp.experimental.server.openapi` | `fastmcp.server.providers.openapi` |
 | `fastmcp.experimental.utilities.openapi` | `fastmcp.utilities.openapi` |
 | `fastmcp.server.apps`, `fastmcp.server.app` | `fastmcp.apps` (e.g. `AppConfig`) or `fastmcp` (`FastMCPApp`) |
+| `Tool` / `ToolResult` from `fastmcp.tools.tool` | `fastmcp.tools` |
+| `Resource` from `fastmcp.resources.resource` | `fastmcp.resources` |
+| `Prompt` / `Message` from `fastmcp.prompts.prompt` | `fastmcp.prompts` |
 | `FunctionTool` / `ParsedFunction` / `tool` from `fastmcp.tools.tool` | `fastmcp.tools.function_tool` |
 | `FunctionResource` / `resource` from `fastmcp.resources.resource` | `fastmcp.resources.function_resource` |
 | `FunctionPrompt` / `prompt` from `fastmcp.prompts.prompt` | `fastmcp.prompts.function_prompt` |
+| `OpenAISamplingHandler` from `fastmcp.experimental.sampling.handlers` | `fastmcp.client.sampling.handlers.openai` |
+| `AuthCheck` / `AuthContext` / `require_scopes` / `require_roles` / `restrict_tag` / `run_auth_checks` from `fastmcp.server.auth.authorization` | `fastmcp.server.auth` |
+| `run_auth_checks_with_shortfall` / `scope_requirements` from `fastmcp.server.auth.authorization` | `fastmcp.utilities.authorization` |
+| `SkillsProvider` | `SkillsDirectoryProvider` from `fastmcp.server.providers.skills` |
 
 Two renames in the same family are worth calling out because they have no compatibility alias. The response-caching wrapper models lost a spelling typo — `CachableToolResult`, `CachablePromptResult`, and their siblings became `CacheableToolResult`, `CacheablePromptResult`, etc. — so an import of the old spelling from `fastmcp.server.middleware.caching` raises `ImportError`. And `PromptToolMiddleware` / `ResourceToolMiddleware` are gone in favor of the `PromptsAsTools` / `ResourcesAsTools` transforms from `fastmcp.server.transforms` (the `ToolInjectionMiddleware` base class is retained).
 
@@ -204,14 +211,25 @@ Two of these replacements are not exact behavioral swaps. `create_proxy` takes i
 
 `import_server` → `mount` is the one row here that is not a mechanical swap, because the two never had the same semantics. `import_server` took a **one-time static snapshot** — it copied the child's tools, resources, and prompts at call time, with no live link, and did not run the child's lifespan or middleware. `mount` is a **live composition** — it holds a live link to the child and runs the child's lifespan and middleware. After switching, later changes to the child become visible through the parent, the child's lifespan runs with the parent's (entered when the server starts, held until it stops — not per request), and the child's middleware runs on the operations delegated to it. If you depended on the frozen-copy behavior (a stable snapshot, no child lifecycle), there is no drop-in replacement: register the child's components on the parent directly instead of composing the two servers.
 
-### Removed tool and decorator parameters
+### Removed parameters and settings
 
-Two `@tool` parameters and two settings are gone:
+Several parameters and settings that warned in 3.x are gone:
 
 - **Tool `serializer=`** is removed from `@tool` / `mcp.tool()`, `Tool.from_function`, `Tool.from_tool`, and the OpenAPI tool. Return a `ToolResult` from your tool for full control over serialization instead.
 - **Tool `exclude_args=`** is removed. Hide a parameter from the tool schema by injecting it instead: give it a `Depends(factory)` default (from `fastmcp.dependencies`), where `factory` is a callable returning the value the argument used to carry. An injected parameter never appears in the tool's schema, which is what `exclude_args` was for.
 - **The `decorator_mode` setting** (`FASTMCP_DECORATOR_MODE`) and its `"object"` mode are removed. Decorators always return your original function with metadata attached; reach the component object through the server (`await mcp.get_tool("name")`) rather than off the decorated function.
 - **`StreamableHttpTransport(sse_read_timeout=...)`** is removed — it was a no-op under the SDK v2 client. Set the read timeout through the public `Client(transport, timeout=...)` (a `timedelta` or float seconds), or reach for a custom `httpx_client_factory` when you need finer control. (`SSETransport` still accepts `sse_read_timeout`.)
+- **`ctx.elicit()` now requires `response_type`.** Omitting it (or passing `None`) has warned since 3.2 and now raises `TypeError`. The empty-object schema it produced gave clients nothing to render, and some showed an empty, non-functional form. Pass a type describing what you expect back — `bool` is the right answer for a confirmation:
+
+  ```python
+  # Before
+  result = await ctx.elicit("Approve this action?")
+
+  # After
+  result = await ctx.elicit("Approve this action?", response_type=bool)
+  ```
+
+  This is the server-authoring API only. Client elicitation handlers still receive `response_type=None` for URL requests and for empty schemas sent by other servers — that contract is unchanged.
 
 ## Behavior changes to verify
 

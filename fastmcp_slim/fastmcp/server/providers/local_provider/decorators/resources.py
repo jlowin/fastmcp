@@ -20,7 +20,7 @@ from fastmcp.resources.security import (
     ResourceSecurity,
 )
 from fastmcp.resources.template import ResourceTemplate
-from fastmcp.server.auth.authorization import AuthCheck
+from fastmcp.utilities.authorization import AuthCheck
 from fastmcp.utilities.types import AnyFunction
 
 if TYPE_CHECKING:
