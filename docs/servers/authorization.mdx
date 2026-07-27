@@ -60,6 +60,8 @@ def read_write_operation() -> str:
 
 ### require_roles
 
+<VersionBadge version="4.0.0" />
+
 Scopes are standardized, so `require_scopes` works the same everywhere. Roles and groups are not part of OIDC, so every identity provider puts them under a different claim. `require_roles` handles the comparison and takes an `extract` callable that tells it where to look.
 
 ```python
