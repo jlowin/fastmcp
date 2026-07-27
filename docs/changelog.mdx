@@ -9,7 +9,7 @@ tag: NEW
 
 **[v3.4.5: Key Change](https://github.com/PrefectHQ/fastmcp/releases/tag/v3.4.5)**
 
-FastMCP 3.4.5 is a maintenance release for the 3.x line. `JWTVerifier` no longer rejects every token when an authorization server publishes a key type it does not recognize — a single Ed25519 entry in a JWKS, which Rauthy, Ory Hydra, and some Keycloak configurations publish by default, previously poisoned the entire key cache. Azure token exchange now applies the same scope fallback the authorize URL already did, so clients that omit `scope` no longer fail with AADSTS70011. Alongside those, OpenAPI `deepObject` query parameters serialize to the bracketed form their specs describe, `compress_schema` no longer mutates the schema it was handed or drops definitions referenced deep inside one, and transformed tools emit a stable `required` order across processes.
+FastMCP 3.4.5 collects five fixes for the 3.x line, led by `JWTVerifier` no longer rejecting every token when an authorization server publishes an unrecognized key type such as Ed25519.
 
 ### Fixes 🐞
 * Backport #4517 to release/3.x: skip unsupported JWKS keys (#4515) by [@kakiii](https://github.com/kakiii) in [#4631](https://github.com/PrefectHQ/fastmcp/pull/4631)
