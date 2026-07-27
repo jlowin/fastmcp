@@ -11,15 +11,7 @@ title="FastMCP v3.4.5: Key Change"
 href="https://github.com/PrefectHQ/fastmcp/releases/tag/v3.4.5"
 cta="Read the release notes"
 >
-A maintenance release for the 3.x line, led by a JWKS fix for deployments whose identity provider publishes an unrecognized key type. Four other fixes cover Azure scopes, OpenAPI query serialization, schema compression, and transformed tool schemas.
-
-🔑 **Unsupported JWKS keys are skipped** — one Ed25519 key no longer poisons the whole key cache, so tokens signed by supported keys in the same set still verify.
-
-🔐 **Azure scope fallback** — clients that omit `scope` now exchange and refresh against the configured API scope instead of failing with AADSTS70011.
-
-🔗 **OpenAPI `deepObject` parameters** — nested query objects serialize to the bracketed form the spec describes rather than as unrelated top-level keys.
-
-🧬 **Schema compression is non-destructive** — `compress_schema` leaves the caller's schema untouched and keeps definitions referenced below its traversal depth.
+A maintenance release for the 3.x line. A single unrecognized JWKS key — Ed25519, which Rauthy and Ory Hydra publish by default — no longer poisons the entire key cache, alongside fixes for Azure scope fallback, OpenAPI `deepObject` query serialization, schema compression, and transformed tool `required` ordering.
 </Card>
 </Update>
 
