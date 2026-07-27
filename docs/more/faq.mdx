@@ -16,7 +16,7 @@ One change is silent, so go looking for it: an `except httpx.ConnectError:` arou
 
 `fastmcp.Client` defaults to `mode="auto"` as of FastMCP 4, so it negotiates the newest era both sides speak rather than pinning the handshake. Over streamable HTTP or stdio to a FastMCP server that means the sessionless `2026-07-28` protocol, where FastMCP 3 connected at `2025-11-25`.
 
-Two transports are exceptions and stay on the handshake whatever you ask for: SSE predates the sessionless era and cannot carry it, and a multi-server `MCPConfigTransport` mounts each backend behind a legacy-era composite. Seeing `2025-11-25` on either is correct, not a negotiation failure.
+Two transports are exceptions: SSE predates the sessionless era and cannot carry it, and a multi-server `MCPConfigTransport` mounts each backend behind a legacy-era composite. Under `mode="auto"` the client recognizes both and settles on the handshake without probing, so seeing `2025-11-25` there is correct rather than a negotiation failure. Pinning a modern version explicitly on either skips that substitution and asks the transport for something it cannot serve, so leave them on auto or legacy.
 
 The client probes `server/discover` and adopts the modern protocol when the server answers, falling back to the `initialize` handshake for anything that is not positive evidence of a modern peer — so a mixed fleet of servers still connects. Pin the old behavior per client with `Client(url, mode="legacy")`. See [Protocol negotiation](/clients/client#protocol-negotiation).
 
@@ -64,7 +64,9 @@ You may see an `MCPDeprecationWarning` from the SDK about the logging capability
 
 On a modern connection it raises, because `logging/setLevel` is not in the `2026-07-28` protocol. The method asked the server to remember a level for the rest of the session, and a sessionless protocol has nowhere to keep that.
 
-The messages themselves are unaffected — the server still sends everything it always did, at every level. Filter on the receiving side in your `log_handler`, which sees each message's `level` field. See [Client Logging](/clients/logging). On a handshake-era connection (`Client(url, mode="legacy")`) the call works as before.
+The messages themselves are unaffected — the server still sends whatever its own configuration allows. Filter on the receiving side in your `log_handler`, which sees each message's `level` field. See [Client Logging](/clients/logging). On a handshake-era connection (`Client(url, mode="legacy")`) the call works as before.
+
+Receiving-side filtering only narrows what already arrives. A server that sets `FastMCP(client_log_level="error")` drops anything below that threshold before it reaches the wire, and a modern client has no way to ask for the missing levels — the server operator has to lower `client_log_level` for them to be sent at all.
 
 ## What replaces elicitation on the modern protocol?
 
@@ -105,7 +107,7 @@ async def slow_computation(duration: int) -> str:
     return "done"
 ```
 
-Tasks are modern-only: the capability is negotiated over `2026-07-28`, so a `mode="legacy"` client never triggers one and a task-enabled tool just runs synchronously. See [Background Tasks](/servers/tasks).
+Tasks are modern-only: the capability is negotiated over `2026-07-28`, so a `mode="legacy"` client never triggers one. A tool marked `task=True` (equivalently `mode="optional"`) then just runs synchronously. A tool that sets `TaskConfig(mode="required")` has no synchronous form to fall back to, so the call fails with a missing-required-capability error instead. See [Background Tasks](/servers/tasks).
 
 ## `import fastmcp` stopped working after I upgraded with pip
 
