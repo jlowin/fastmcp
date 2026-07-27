@@ -839,7 +839,8 @@ class OAuthProvider(
         ):
             logger.info(
                 f"OAuth endpoints at {self.base_url}, issuer at {self.issuer_url}. "
-                f"Ensure well-known routes are accessible at root ({self.issuer_url}/.well-known/). "
+                f"Ensure well-known routes are accessible at root "
+                f"({str(self.issuer_url).rstrip('/')}/.well-known/). "
                 f"See: https://gofastmcp.com/deployment/http#mounting-authenticated-servers"
             )
 
