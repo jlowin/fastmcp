@@ -23,7 +23,7 @@ Example usage with SDK:
 
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
-from typing import Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from opentelemetry import context as otel_context
 from opentelemetry import propagate, trace
@@ -39,6 +39,9 @@ from opentelemetry.trace import (
 )
 from opentelemetry.trace import get_tracer as otel_get_tracer
 from opentelemetry.util import types as otel_types
+
+if TYPE_CHECKING:
+    from fastmcp.settings import TELEMETRY_MODE as TelemetryMode
 
 INSTRUMENTATION_NAME = "fastmcp"
 
@@ -77,28 +80,71 @@ class _DisabledTracer(NoOpTracer):
 
 _DISABLED_TRACER = _DisabledTracer()
 
+_SUPPRESS_KEY = otel_context.create_key("fastmcp_suppress_telemetry")
+
+
+def telemetry_mode() -> "TelemetryMode":
+    """Resolve the effective telemetry mode for the current context.
+
+    This is `fastmcp.settings.telemetry_mode`, except that an active
+    `suppress_fastmcp_telemetry()` block downgrades `native` to
+    `propagation_only`. Suppression never upgrades or overrides `off`: `off`
+    means FastMCP touches nothing, and a narrower request to skip FastMCP's
+    spans cannot re-enable the context propagation `off` deliberately omits.
+    """
+    import fastmcp
+
+    mode: TelemetryMode = fastmcp.settings.telemetry_mode
+    if mode == "native" and otel_context.get_value(_SUPPRESS_KEY):
+        return "propagation_only"
+    return mode
+
+
+def native_spans_enabled() -> bool:
+    """Whether FastMCP should create its own spans right now."""
+    return telemetry_mode() == "native"
+
+
+@contextmanager
+def suppress_fastmcp_telemetry() -> Iterator[None]:
+    """Suppress FastMCP's own spans without disabling trace propagation.
+
+    Scoped equivalent of `telemetry_mode="propagation_only"`, for callers that
+    embed FastMCP inside their own instrumented stack and want to own the MCP
+    span hierarchy for a specific block. Narrower than OpenTelemetry's global
+    instrumentation suppression: only FastMCP's spans are skipped, so nested
+    instrumentation (HTTP clients, databases) keeps emitting, and trace context
+    still flows through `_meta` so those spans are parented correctly.
+
+    Has no effect when `telemetry_mode` is already `off`.
+    """
+    token = otel_context.attach(otel_context.set_value(_SUPPRESS_KEY, True))
+    try:
+        yield
+    finally:
+        otel_context.detach(token)
+
 
 def get_tracer(version: str | None = None) -> Tracer:
     """Get the FastMCP tracer for creating spans.
 
     Instrumentation is on by default. FastMCP uses only the OpenTelemetry API,
     so span creation is a no-op with negligible overhead unless an OpenTelemetry
-    SDK and exporter are configured. Set `fastmcp.settings.enable_telemetry` to
-    False (env `FASTMCP_ENABLE_TELEMETRY=false`) to turn instrumentation off
-    entirely, in which case this returns a pass-through tracer that leaves the
-    current OTel context untouched even when an SDK is configured.
+    SDK and exporter are configured. When `fastmcp.settings.telemetry_mode` is
+    `propagation_only` or `off` — or the caller is inside a
+    `suppress_fastmcp_telemetry()` block — this returns a pass-through tracer
+    that creates no spans and leaves the current OTel context untouched even
+    when an SDK is configured.
 
     Args:
         version: Optional version string for the instrumentation
 
     Returns:
-        A tracer instance. Returns a non-attaching pass-through tracer if
-        telemetry is disabled; span creation is otherwise a no-op unless an SDK
-        is configured.
+        A tracer instance. Returns a non-attaching pass-through tracer when
+        FastMCP's own spans are disabled; span creation is otherwise a no-op
+        unless an SDK is configured.
     """
-    import fastmcp
-
-    if not fastmcp.settings.enable_telemetry:
+    if not native_spans_enabled():
         return _DISABLED_TRACER
     return otel_get_tracer(INSTRUMENTATION_NAME, version)
 
@@ -115,6 +161,11 @@ def inject_trace_context(
         A new dict containing the original meta (if any) plus trace context keys,
         or None if no trace context to inject and meta was None
     """
+    # `off` means FastMCP touches nothing, outbound propagation included.
+    # `propagation_only` still injects — carrying context is the whole point.
+    if telemetry_mode() == "off":
+        return meta
+
     carrier: dict[str, str] = {}
     propagate.inject(carrier)
 
@@ -222,6 +273,10 @@ def extract_trace_context(meta: dict[str, Any] | None) -> Context:
         An OpenTelemetry Context with the extracted trace context,
         or the current context if no trace context found or already in a trace
     """
+    # `off` means FastMCP touches nothing, including the surrounding context.
+    if telemetry_mode() == "off":
+        return otel_context.get_current()
+
     # Don't override existing trace context (e.g., from HTTP propagation)
     current_span = trace.get_current_span()
     if current_span.get_span_context().is_valid:
@@ -237,7 +292,12 @@ def extract_trace_context(meta: dict[str, Any] | None) -> Context:
         carrier["tracestate"] = str(meta[TRACE_STATE_KEY])
 
     if carrier:
-        return propagate.extract(carrier)
+        # Extract *onto the current context* rather than a fresh root, so the
+        # incoming parent is added without discarding context values the
+        # caller already established — active baggage, and FastMCP's own
+        # suppression marker, which would otherwise be dropped the moment the
+        # extracted context is attached.
+        return propagate.extract(carrier, context=otel_context.get_current())
     return otel_context.get_current()
 
 
@@ -248,6 +308,9 @@ __all__ = [
     "extract_trace_context",
     "get_tracer",
     "inject_trace_context",
+    "native_spans_enabled",
     "record_span_error",
     "restore_dropped_attributes",
+    "suppress_fastmcp_telemetry",
+    "telemetry_mode",
 ]

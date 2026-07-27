@@ -29,12 +29,6 @@ You can change which `.env` file is loaded by setting the `FASTMCP_ENV_FILE` env
 | `FASTMCP_DEPRECATION_WARNINGS` | `bool` | `true` | Show deprecation warnings. |
 | `FASTMCP_MCP_CAMELCASE_COMPAT` | `bool` | `true` | Bridge legacy camelCase reads on MCP SDK objects (e.g. `tool.inputSchema`, `result.isError`) to their snake_case fields after the SDK v2 rename. Each bridged read emits a `FastMCPDeprecationWarning`. Set to `false` to disable the shims, in which case only the snake_case names resolve. |
 
-## Telemetry
-
-| Environment Variable | Type | Default | Description |
-|---|---|---|---|
-| `FASTMCP_TELEMETRY_MODE` | `Literal["native", "propagation_only"]` | `native` | Controls FastMCP's native OpenTelemetry span creation. `native` emits FastMCP MCP spans and propagates trace context. `propagation_only` keeps `_meta` trace propagation but suppresses FastMCP's own spans so another instrumentation layer can own the MCP span hierarchy. |
-
 ## Transport & HTTP
 
 These control how the server listens when running with an HTTP transport.
@@ -83,7 +77,7 @@ These control how the server listens when running with an HTTP transport.
 
 | Environment Variable | Type | Default | Description |
 |---|---|---|---|
-| `FASTMCP_ENABLE_TELEMETRY` | `bool` | `true` | Whether FastMCP's native [OpenTelemetry instrumentation](/servers/telemetry) is active. Enabled by default; FastMCP uses only the OpenTelemetry API, so span creation is a no-op with negligible overhead unless an OpenTelemetry SDK and exporter are configured. Set to `false` to turn instrumentation off entirely, in which case no FastMCP spans are created even when an SDK is configured. |
+| `FASTMCP_TELEMETRY_MODE` | `Literal["native", "propagation_only", "off"]` | `native` | Controls FastMCP's native [OpenTelemetry instrumentation](/servers/telemetry). `native` emits FastMCP's MCP spans and propagates trace context; because FastMCP uses only the OpenTelemetry API, this costs almost nothing unless an SDK and exporter are configured. `propagation_only` keeps `_meta` trace propagation and still parents downstream spans from the incoming context, but emits none of FastMCP's own spans, so another instrumentation layer can own the MCP span hierarchy. `off` is a full pass-through: no spans, and no trace context extracted or attached. |
 
 ## Tasks (Docket)
 
