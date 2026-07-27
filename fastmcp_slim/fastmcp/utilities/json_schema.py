@@ -544,6 +544,11 @@ def _single_pass_optimize(
     )  # def A references def B
     defs = schema.get("$defs")
 
+    # Set when the traversal below gives up at its depth limit. Once that
+    # happens the reference scan is incomplete, so we can no longer tell which
+    # definitions are genuinely unused.
+    reference_scan_truncated = False
+
     def traverse_and_clean(
         node: object,
         current_def_name: str | None = None,
@@ -561,7 +566,10 @@ def _single_pass_optimize(
         about) but we skip all cleanups so we don't mutate user data that
         happens to look metadata-shaped.
         """
+        nonlocal reference_scan_truncated
+
         if depth > 50:  # Prevent infinite recursion
+            reference_scan_truncated = True
             return
 
         if isinstance(node, dict):
@@ -684,6 +692,13 @@ def _single_pass_optimize(
     if prune_defs and defs:
         for def_name, def_schema in defs.items():
             traverse_and_clean(def_schema, current_def_name=def_name, in_schema=True)
+
+        # An incomplete scan has not seen every $ref, so a definition that looks
+        # unused may simply be referenced below the cutoff. Keeping an unused
+        # definition is harmless; dropping a referenced one leaves a dangling
+        # $ref and an invalid schema.
+        if reference_scan_truncated:
+            return schema
 
         # Phase 4: Remove unused definitions
         def is_def_used(def_name: str, visiting: set[str] | None = None) -> bool:
