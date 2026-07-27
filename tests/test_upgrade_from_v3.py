@@ -34,6 +34,7 @@ from fastmcp import Client, FastMCP, settings
 # longer resolves. `create_proxy`, `settings`, `McpError`, and
 # `CacheableToolResult` above are part of the same set.
 from fastmcp.apps import AppConfig
+from fastmcp.client.sampling.handlers.openai import OpenAISamplingHandler
 from fastmcp.client.transports import StreamableHttpTransport
 from fastmcp.dependencies import Depends
 from fastmcp.exceptions import McpError
@@ -188,6 +189,17 @@ class TestCanonicalReplacementsResolve:
 
         for name in ("run_auth_checks_with_shortfall", "scope_requirements"):
             assert not hasattr(auth_package, name)
+
+    def test_sampling_handler_resolves_from_its_submodule(self):
+        # The removed shim re-exported `OpenAISamplingHandler` from its package
+        # `__init__`. The canonical package keeps its `__init__` empty so that
+        # touching it never pulls in a vendor SDK, so the guide must name the
+        # submodule — pin both halves of that.
+        assert OpenAISamplingHandler is not None
+
+        import fastmcp.client.sampling.handlers as handlers_package
+
+        assert not hasattr(handlers_package, "OpenAISamplingHandler")
 
 
 # --- Hard removals: modules that no longer exist ---
