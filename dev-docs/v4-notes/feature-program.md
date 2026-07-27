@@ -103,7 +103,7 @@ This workstream also owns the server-side statelessness design holes — `ctx.se
 A cluster of protocol features tracked for v4. Their statuses have diverged:
 
 - **Cache hints — shipped (#4464).** Server-level authoring (`FastMCP(cache_ttl=..., cache_scope=...)`, SEP-2549) stamps every cacheable result, and the FastMCP client honors hints with an opt-in response cache.
-- **OpenTelemetry — shipped (#4481).** Spans are on by default (a no-op without an exporter), with SDK-aligned attributes and a `FASTMCP_ENABLE_TELEMETRY=false` off-switch.
+- **OpenTelemetry — shipped (#4481).** Spans are on by default (a no-op without an exporter), with SDK-aligned attributes and a `FASTMCP_TELEMETRY_MODE` setting (`native` / `propagation_only` / `off`).
 - **Extensions — client side shipped (#4572).** `Client(extensions=..., result_claims=...)` advertises opt-in client extensions (SEP-2133). The server side is a Designed workstream in its own right (see [FastMCP-native extension API](#fastmcp-native-extension-api)). The cross-era reconciliation of the `extensions` / MCP Apps capability advertisement is still open (the capability is stripped at pre-2026 negotiated versions — sdk-feedback #2).
 - **Subscriptions — not started.** A `subscriptions/listen` surface backed by a subscription bus.
 
