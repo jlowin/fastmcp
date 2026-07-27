@@ -21,9 +21,3 @@ server:
   # need the tool to declare which one it wants, which is an unmade API
   # decision rather than a bug.
   - tasks-mrtr-composition
-
-  # Server-initiated sampling was removed from the server API (SEP-2577), so the
-  # fixture has no `test_sampling` tool for this handshake-era scenario to drive.
-  # Modern sampling rides the guard pattern and is covered by
-  # input-required-result-basic-sampling.
-  - tools-call-sampling

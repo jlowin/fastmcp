@@ -173,6 +173,31 @@ async def test_tool_with_progress(ctx: Context) -> str:
     return "Progress test complete."
 
 
+@server.tool(name="test_sampling")
+async def test_sampling(prompt: str, ctx: Context) -> str:
+    """Requests LLM sampling via the client.
+
+    `Context` has no `sample()` — server-initiated sampling is not part of
+    FastMCP's server API. The handshake-era wire path is still supported and
+    still shipped (the proxy relay uses it), so this fixture reaches the SDK
+    session directly to keep the scenario covered.
+    """
+    result = await ctx.session.create_message(  # ty: ignore[deprecated]
+        messages=[
+            mcp_types.SamplingMessage(
+                role="user",
+                content=mcp_types.TextContent(type="text", text=prompt),
+            )
+        ],
+        max_tokens=512,
+        related_request_id=ctx.origin_request_id,
+    )
+    text = (
+        result.content.text if isinstance(result.content, mcp_types.TextContent) else ""
+    )
+    return f"Sampling result: {text}"
+
+
 class _UserInfo(BaseModel):
     username: str
     email: str

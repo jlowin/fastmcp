@@ -24,7 +24,7 @@ from fastmcp import Client
 
 client = Client(
     "my_mcp_server.py",
-    roots=["/path/to/root1", "/path/to/root2"]
+    roots=["file:///path/to/root1", "file:///path/to/root2"]
 )
 ```
 
@@ -38,7 +38,7 @@ from fastmcp.client.roots import RequestContext
 
 async def roots_callback(context: RequestContext) -> list[str]:
     print(f"Server requested roots (Request ID: {context.request_id})")
-    return ["/path/to/root1", "/path/to/root2"]
+    return ["file:///path/to/root1", "file:///path/to/root2"]
 
 client = Client(
     "my_mcp_server.py",
