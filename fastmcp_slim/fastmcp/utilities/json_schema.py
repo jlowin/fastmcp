@@ -1,10 +1,43 @@
 from __future__ import annotations
 
-import copy
 from collections import defaultdict
 from typing import Any
 
 from jsonref import JsonRefError, replace_refs
+
+
+def _copy_schema(schema: dict[str, Any]) -> dict[str, Any]:
+    """Return a deep copy of a JSON schema without recursing.
+
+    `copy.deepcopy` consumes stack frames in proportion to nesting depth, so a
+    deeply nested schema raises `RecursionError` before the traversals in this
+    module can apply their own depth guards — turning a schema that used to
+    compress into one that fails outright. Schemas are plain JSON, so an
+    explicit stack copies the containers at any depth and shares the immutable
+    scalars at the leaves.
+    """
+    root: dict[str, Any] = {}
+    stack: list[tuple[Any, Any]] = [(schema, root)]
+
+    while stack:
+        source, target = stack.pop()
+        if isinstance(source, dict):
+            pairs: list[tuple[Any, Any]] = list(source.items())
+        else:
+            pairs = list(enumerate(source))
+
+        for key, value in pairs:
+            if isinstance(value, dict):
+                child: Any = {}
+                stack.append((value, child))
+            elif isinstance(value, list):
+                child = [None] * len(value)
+                stack.append((value, child))
+            else:
+                child = value
+            target[key] = child
+
+    return root
 
 
 def _defs_have_cycles(defs: dict[str, Any]) -> bool:
@@ -348,7 +381,7 @@ def _prune_param(schema: dict[str, Any], param: str) -> dict[str, Any]:
     """Return a new schema with *param* removed from `properties`, `required`,
     and (if no longer referenced) `$defs`.
     """
-    schema = copy.deepcopy(schema)
+    schema = _copy_schema(schema)
 
     # ── 1. drop from properties/required ──────────────────────────────
     props = schema.get("properties", {})
@@ -501,7 +534,7 @@ def _single_pass_optimize(
     # Work on a copy so the caller's schema is never mutated (see docstring). The
     # pruning phases below pop keys/$defs in place, which would otherwise corrupt a
     # shared dict such as a live Tool.input_schema passed straight to compress_schema.
-    schema = copy.deepcopy(schema)
+    schema = _copy_schema(schema)
 
     # Phase 1: Collect references and apply simple cleanups
     # Track which $defs are referenced from the main schema and from other $defs
