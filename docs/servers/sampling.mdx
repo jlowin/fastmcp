@@ -5,8 +5,14 @@ description: Generate text from a FastMCP server — by calling an LLM directly,
 icon: robot
 ---
 
+import { VersionBadge } from "/snippets/version-badge.mdx"
+
+<VersionBadge version="2.0.0" />
+
 <Warning>
-**`ctx.sample()` and `ctx.sample_step()` were removed in FastMCP 4.** The modern MCP protocol gives a server no channel to push a request to its client, so there is nothing left for those methods to do. Generate by [calling an LLM directly](#calling-an-llm-directly), or [ask the caller's model](#asking-the-callers-model) when borrowing their model is the point.
+**`ctx.sample()` and `ctx.sample_step()` were removed in FastMCP 4.** The modern MCP protocol gives a server no channel to push a request to its client, so there is nothing left for those methods to do.
+
+To build a server that uses sampling, stay on [FastMCP 3.x](/v3/servers/sampling). On FastMCP 4, generate by [calling an LLM directly](#calling-an-llm-directly), or [ask the caller's model](#asking-the-callers-model) when borrowing their model is the point.
 </Warning>
 
 A tool that needs text generated calls a model to get it, and in FastMCP 4 that call is ordinary Python: your server holds an API key, creates a provider client, and awaits a completion inside the tool. No protocol is involved, so the tool behaves the same for every client — including the many that never implemented sampling at all.
