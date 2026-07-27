@@ -1164,6 +1164,14 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
                 error="invalid_client",  # type: ignore[arg-type]  # "invalid_client" is valid OAuth error but not in Literal type  # ty:ignore[invalid-argument-type]
                 error_description="Client ID is required",
             )
+        # Clients may omit `scope` entirely, in which case OAuth lets the
+        # authorization server apply its configured default. Resolve that default
+        # once, here, so the transaction records the scopes actually being
+        # authorized. Every later consumer — the consent screen, the issued
+        # authorization code, token exchange, and refresh — reads this one value
+        # instead of deciding for itself whether to substitute required_scopes.
+        effective_scopes = params.scopes or self.required_scopes or []
+
         transaction = OAuthTransaction(
             txn_id=txn_id,
             client_id=client.client_id,
@@ -1171,7 +1179,7 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
             client_state=params.state or "",
             code_challenge=params.code_challenge,
             code_challenge_method=getattr(params, "code_challenge_method", "S256"),
-            scopes=params.scopes or [],
+            scopes=effective_scopes,
             created_at=time.time(),
             resource=getattr(params, "resource", None),
             proxy_code_verifier=proxy_code_verifier,
