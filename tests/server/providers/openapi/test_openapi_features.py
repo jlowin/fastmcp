@@ -1485,3 +1485,24 @@ class TestAllOfReferenceRequestBodies:
 
         assert result.structured_content == {"ok": True}
         assert received["body"] == {"petType": "cat", "meowVolume": 11}
+
+    async def test_allof_reference_request_body_does_not_crash(self):
+        """Required fields inherited through a reference can be sent together."""
+        received: dict[str, object] = {}
+
+        def handler(request):
+            received["body"] = json.loads(request.content)
+            return httpx2.Response(200, json={"ok": True})
+
+        async with httpx2.AsyncClient(
+            transport=httpx2.MockTransport(handler),
+            base_url="https://api.example.com",
+        ) as client:
+            server = create_openapi_server(self.SPEC, client)
+            async with Client(server) as mcp_client:
+                result = await mcp_client.call_tool(
+                    "create_pet", {"petType": "cat", "meowVolume": 11}
+                )
+
+        assert result.structured_content == {"ok": True}
+        assert received["body"] == {"petType": "cat", "meowVolume": 11}
