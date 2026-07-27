@@ -135,6 +135,8 @@ mcp = FastMCP(name="My Server", auth=auth)
 <ParamField body="issuer_url" type="AnyHttpUrl | str | None">
   Issuer URL for OAuth authorization server metadata (defaults to `base_url`).
 
+  `issuer_url` is the server's OAuth identity: it is the `issuer` field of the authorization server metadata, the `iss` claim of the tokens the proxy mints, and the RFC 9207 `iss` parameter on authorization responses. `base_url` remains the location of the endpoints, so `authorization_endpoint`, `token_endpoint`, and the rest of the metadata still point at `base_url` where the routes are actually mounted.
+
   When `issuer_url` has a path component (either explicitly or by defaulting from `base_url`), FastMCP creates path-aware discovery routes per RFC 8414. For example, if `base_url` is `http://localhost:8000/api`, the authorization server metadata will be at `/.well-known/oauth-authorization-server/api`.
 
   **Default behavior (recommended for most cases):**
@@ -718,7 +720,7 @@ For each ID-JAG presented at the token endpoint, the proxy checks that:
 - the JOSE header `typ` is `oauth-id-jag+jwt`;
 - the `iss` claim is one of the configured `trusted_issuers`;
 - the signature verifies against the issuer's published keys;
-- the `aud` claim identifies this authorization server;
+- the `aud` claim identifies this authorization server — configure your identity provider to mint assertions whose `aud` is the `issuer` value published at `/.well-known/oauth-authorization-server`, which is your `issuer_url` when you set one and your `base_url` otherwise;
 - the signed `client_id` claim matches the client presenting the assertion — an assertion the IdP minted for one client cannot be redeemed by another;
 - the signed `resource` claim names this server — an assertion minted for a different MCP server behind the same IdP is rejected;
 - `exp` (and `iat`/`nbf`, when present) place the assertion within a short lifetime and its validity window; and

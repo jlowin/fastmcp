@@ -357,7 +357,7 @@ class ConsentMixin:
                         url=build_client_redirect(
                             txn["client_redirect_uri"],
                             callback_params,
-                            iss=str(self.base_url),
+                            iss=str(self.issuer_url),
                         ),
                         status_code=302,
                     )
@@ -532,7 +532,7 @@ class ConsentMixin:
                 "state": txn.get("client_state") or "",
             }
             client_callback_url = build_client_redirect(
-                txn["client_redirect_uri"], callback_params, iss=str(self.base_url)
+                txn["client_redirect_uri"], callback_params, iss=str(self.issuer_url)
             )
             response = RedirectResponse(url=client_callback_url, status_code=302)
 

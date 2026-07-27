@@ -544,7 +544,7 @@ base_url="http://localhost:8000/api"  # Includes mount prefix
 mcp_path="/mcp"  # Internal MCP path, NOT the mount prefix
 ```
 
-**`issuer_url`** (optional) controls the authorization server identity for OAuth discovery. Defaults to `base_url`.
+**`issuer_url`** (optional) controls the authorization server identity for OAuth discovery. Defaults to `base_url`. It sets the `issuer` advertised in the authorization server metadata and the `iss` on issued tokens, while the endpoints in that metadata continue to point at `base_url`.
 
 ```python
 # Usually not needed - just set base_url and it works
