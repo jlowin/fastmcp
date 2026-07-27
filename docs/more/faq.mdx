@@ -34,7 +34,9 @@ A FastMCP 4 client is equally happy against an old server, because `mode="auto"`
 
 ## When should I pin `mode="legacy"`?
 
-Pin it when your code depends on the session the handshake creates. That covers server-initiated [sampling](/clients/sampling), [roots](/clients/roots), and [elicitation](/clients/elicitation) requests, along with `client.ping()` and `transport.get_session_id()` — all of which need the back-channel the modern era removed. It is also the escape hatch when a server misbehaves under discovery or you need the classic `initialize` result object.
+Pin it when your code depends on the session the handshake creates: `client.ping()` and `transport.get_session_id()` have no modern equivalent, since a sessionless connection has neither a live back-channel to ping nor an id to hold. It is also the escape hatch when a server misbehaves under discovery or you need the classic `initialize` result object.
+
+You do not need to pin it just because you registered a `sampling_handler`, `roots=`, or an `elicitation_handler`. [Roots](/clients/roots) and [elicitation](/clients/elicitation) both have a modern-era form — the guard pattern delivers them through `InputRequiredResult`, and the same handler you already registered answers it, no extra wiring required. [Sampling](/clients/sampling) has no FastMCP 4 server API on either era (`ctx.sample()` is gone entirely), so a `sampling_handler` only ever answers a server that is not running FastMCP 4 and still pushes `sampling/createMessage` over the handshake — and `mode="auto"` already falls back to the handshake against that kind of server on its own.
 
 Pinning is per client, not a deployment setting: `Client(url, mode="legacy")`. The trade runs the other way as well — [background tasks](/clients/tasks) are modern-only, so a legacy client never triggers one and a task-enabled tool simply runs synchronously.
 
@@ -84,7 +86,7 @@ Work that must happen once per process belongs in the server [lifespan](/servers
 
 On a modern connection every request is a fresh connection, so `ctx.set_state` lives only for the duration of the call that wrote it. The same code persists state across calls on a handshake-era connection, which is why it appears to break the moment a client negotiates `2026-07-28`.
 
-[Session state](/servers/sessions) is the durable answer, following MCP's own decision to move session semantics up into the application. Declare a `UserSession` parameter and FastMCP injects one bucket of stored state keyed to the authenticated user, with nothing to pass around. Declare a `SessionId` argument when a single user needs several independent sessions, and the caller mints an id with `create_session` and supplies it on each call. Both store server-side and key to the authenticated caller's identity, so a handle is inert in anyone else's hands.
+[Session state](/servers/sessions) is the durable answer, following MCP's own decision to move session semantics up into the application. Declare a `UserSession` parameter and FastMCP injects one bucket of stored state keyed to the authenticated user, with nothing to pass around. Declare a `SessionId` argument when a single user needs several independent sessions, and the caller mints an id with `create_session` and supplies it on each call — register `mcp.add_provider(SessionProvider())` first, since `create_session` doesn't exist until a `SessionProvider` contributes it. Both store server-side and key to the authenticated caller's identity, so a handle is inert in anyone else's hands.
 
 That isolation comes from authentication, not from the id. On an unauthenticated server there is no principal to key on, so every session shares one anonymous namespace and a `SessionId` becomes a bearer capability — anyone holding it can read and write that state. Treat unauthenticated sessions as single-tenant or trusted-network only; `UserSession` sidesteps the question by requiring an authenticated principal outright.
 
