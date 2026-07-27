@@ -453,3 +453,20 @@ FastMCP handles array parameters according to OpenAPI specifications:
 ### Headers
 
 Header parameters are automatically converted to strings and included in the HTTP request.
+
+### Composed Request Bodies
+
+A request body becomes a flat set of tool arguments, which is the shape LLM tool-calling APIs fill in most reliably. Schemas composed with `allOf` are resolved first, following `$ref` members, so fields inherited from a parent schema appear alongside the ones a schema declares itself.
+
+Schemas that use a `discriminator` are flattened the same way. FastMCP merges in the fields of every subtype named in the discriminator's `mapping`, marks them optional, and names the accepted values on the discriminator's own description. Given a `Pet` body discriminated by `petType` and mapped onto `Cat` and `Dog`, the tool takes the discriminator plus whichever fields that variant uses:
+
+```python
+await client.call_tool("create_pet", {
+    "petType": "cat",
+    "meowVolume": 11,
+})
+```
+
+The discriminator stays required; every variant field is optional, because only one variant applies to any given call.
+
+This trades local strictness for a schema models complete accurately. The generated schema permits any combination of variant fields, so sending `packSize` with `petType: "cat"` passes FastMCP's validation and is rejected by the API itself, exactly as it would be for any other HTTP client. Where two variants declare the same field differently, the declarations are combined with `anyOf` so that neither variant's constraints are advertised as applying to both.
