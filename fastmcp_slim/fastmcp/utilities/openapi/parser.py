@@ -36,6 +36,7 @@ from .models import (
 )
 from .schemas import (
     _combine_schemas_and_map_params,
+    _discriminator_target_name,
     _replace_ref_with_defs,
 )
 
@@ -589,10 +590,11 @@ class OpenAPIParser(
                         mapping = discriminator.get("mapping")
                         if isinstance(mapping, dict):
                             for target in mapping.values():
-                                if isinstance(target, str) and target.startswith(
-                                    ("#/$defs/", "#/components/schemas/")
-                                ):
-                                    collect(target.split("/")[-1])
+                                if not isinstance(target, str):
+                                    continue
+                                name = _discriminator_target_name(target)
+                                if name:
+                                    collect(name)
 
                 # Continue searching in all values
                 for value in obj.values():

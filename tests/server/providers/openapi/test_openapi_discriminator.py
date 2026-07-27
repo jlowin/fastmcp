@@ -84,6 +84,71 @@ def discriminator_spec(
     }
 
 
+def colliding_variant_spec() -> dict[str, Any]:
+    """Subtypes that disagree about the shape of the discriminator property.
+
+    The parent marks ``kind`` required without declaring it, so each subtype's
+    own ``const`` is the only schema available for that field.
+    """
+    return {
+        "openapi": "3.1.0",
+        "info": {"title": "Pet API", "version": "1.0.0"},
+        "servers": [{"url": "https://api.example.com"}],
+        "paths": {
+            "/pets": {
+                "post": {
+                    "operationId": "create_pet",
+                    "requestBody": {
+                        "required": True,
+                        "content": {
+                            "application/json": {
+                                "schema": {"$ref": "#/components/schemas/Pet"}
+                            }
+                        },
+                    },
+                    "responses": {"200": {"description": "Created"}},
+                }
+            }
+        },
+        "components": {
+            "schemas": {
+                "Pet": {
+                    "type": "object",
+                    "required": ["kind"],
+                    "discriminator": {
+                        "propertyName": "kind",
+                        "mapping": {"cat": "Cat", "dog": "Dog"},
+                    },
+                },
+                "Cat": {
+                    "allOf": [
+                        {"$ref": "#/components/schemas/Pet"},
+                        {
+                            "type": "object",
+                            "properties": {
+                                "kind": {"const": "cat"},
+                                "meowVolume": {"type": "integer"},
+                            },
+                        },
+                    ]
+                },
+                "Dog": {
+                    "allOf": [
+                        {"$ref": "#/components/schemas/Pet"},
+                        {
+                            "type": "object",
+                            "properties": {
+                                "kind": {"const": "dog"},
+                                "packSize": {"type": "integer"},
+                            },
+                        },
+                    ]
+                },
+            }
+        },
+    }
+
+
 async def tool_schema(spec: dict[str, Any]) -> dict[str, Any]:
     """Build the server and return the generated input schema for create_pet."""
     async with httpx2.AsyncClient(
@@ -131,8 +196,10 @@ class TestDiscriminatorRequestBodies:
     @pytest.mark.parametrize(
         "mapping",
         [
-            pytest.param({"cat": "#/components/schemas/Missing"}, id="missing_target"),
+            pytest.param({"cat": "#/components/schemas/Missing"}, id="missing_ref"),
+            pytest.param({"cat": "Missing"}, id="missing_name"),
             pytest.param({"cat": "https://example.com/Cat"}, id="remote_target"),
+            pytest.param({"cat": "#/definitions/Cat"}, id="unsupported_pointer"),
         ],
     )
     async def test_unresolvable_mapping_is_ignored(self, mapping: dict[str, str]):
@@ -140,6 +207,14 @@ class TestDiscriminatorRequestBodies:
         schema = await tool_schema(discriminator_spec(mapping=mapping))
 
         assert set(schema["properties"]) == {"petType"}
+
+    async def test_bare_schema_name_mapping_resolves(self):
+        """Mapping values may be schema names, not just references."""
+        schema = await tool_schema(
+            discriminator_spec(mapping={"cat": "Cat", "dog": "Dog"})
+        )
+
+        assert schema["properties"].keys() >= {"petType", "meowVolume", "packSize"}
 
     async def test_selected_variant_field_reaches_the_request_body(self):
         """The reported failure: meowVolume must reach the upstream API."""
@@ -161,6 +236,16 @@ class TestDiscriminatorRequestBodies:
 
         assert result.structured_content == {"ok": True}
         assert received["body"] == {"petType": "cat", "meowVolume": 11}
+
+    async def test_conflicting_variant_schemas_are_unioned(self):
+        """No variant's constraint may be advertised as if it applied to all."""
+        schema = await tool_schema(colliding_variant_spec())
+
+        kind = schema["properties"]["kind"]
+        assert [alternative.get("const") for alternative in kind["anyOf"]] == [
+            "cat",
+            "dog",
+        ]
 
     async def test_subtype_body_is_unaffected(self):
         """A body referencing the child still resolves through allOf only."""

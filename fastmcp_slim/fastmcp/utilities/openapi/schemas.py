@@ -258,6 +258,22 @@ def _allof_members(
     return [schema]
 
 
+def _discriminator_target_name(target: str) -> str | None:
+    """Resolve a ``discriminator.mapping`` value to a local schema name.
+
+    Mapping values hold "schema names or references", so a bare ``"Cat"`` means
+    the ``Cat`` component just as ``"#/components/schemas/Cat"`` does. Anything
+    else — a remote URL, a pointer outside the component schemas — has no local
+    definition to flatten.
+    """
+    for prefix in ("#/$defs/", "#/components/schemas/"):
+        if target.startswith(prefix):
+            return target.removeprefix(prefix) or None
+    if target.startswith("#") or "/" in target:
+        return None
+    return target or None
+
+
 def _flatten_discriminator_subtypes(
     schema: dict[str, Any],
     schema_defs: dict[str, Any],
@@ -290,18 +306,18 @@ def _flatten_discriminator_subtypes(
         return None
 
     own_props = schema.get("properties", {})
-    subtype_props: dict[str, Any] = {}
+    # Variants that disagree about a property are unioned rather than resolved:
+    # keeping whichever came first would advertise one variant's constraint
+    # (a `const` tag, say) while claiming to accept all of them.
+    alternatives: dict[str, list[Any]] = {}
     variants: list[str] = []
 
     for value, target in mapping.items():
         if not isinstance(target, str):
             continue
 
-        subtype: Any = None
-        for prefix in ("#/$defs/", "#/components/schemas/"):
-            if target.startswith(prefix):
-                subtype = schema_defs.get(target.removeprefix(prefix))
-                break
+        name = _discriminator_target_name(target)
+        subtype = schema_defs.get(name) if name else None
         if not isinstance(subtype, dict):
             continue
 
@@ -313,14 +329,20 @@ def _flatten_discriminator_subtypes(
                     continue
                 if prop_name not in variant_fields:
                     variant_fields.append(prop_name)
-                subtype_props.setdefault(prop_name, prop_schema)
+                seen = alternatives.setdefault(prop_name, [])
+                if prop_schema not in seen:
+                    seen.append(prop_schema)
 
         if variant_fields:
             variants.append(f"{value!r} uses {', '.join(variant_fields)}")
 
-    if not subtype_props:
+    if not alternatives:
         return None
 
+    subtype_props = {
+        prop_name: schemas[0] if len(schemas) == 1 else {"anyOf": schemas}
+        for prop_name, schemas in alternatives.items()
+    }
     properties = {**own_props, **subtype_props}
 
     note = (
