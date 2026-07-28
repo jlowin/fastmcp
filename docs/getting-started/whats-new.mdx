@@ -70,6 +70,8 @@ async def remember(fact: str, session: UserSession) -> str:
     return f"Remembered {len(facts)} facts."
 ```
 
+Because the bucket is chosen from the caller's identity, `UserSession` requires [authentication](/servers/auth/authentication). An unauthenticated request has no user to key on, so the tool raises rather than guessing at a bucket.
+
 When one user needs several independent buckets, such as separate carts or parallel conversations, `SessionId` makes the handle an explicit string argument that the agent obtains from `create_session` and supplies on each call. See [Session State](/servers/sessions).
 
 ## Background tasks

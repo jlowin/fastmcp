@@ -9,7 +9,9 @@ import { VersionBadge } from "/snippets/version-badge.mdx"
 
 <VersionBadge version="4.0.0" />
 
-An MCP extension is a protocol feature that lives outside the core spec, named by a reverse-DNS identifier and negotiated as a capability. A server advertises the extensions it implements, a client advertises the ones it understands, and a feature only comes into play when both ends know about it. That negotiation is what makes extensions safe: a client that has never heard of your extension sees a server it can still talk to normally.
+An MCP extension is a protocol feature that lives outside the core spec, named by a reverse-DNS identifier and negotiated as a capability. A server advertises the extensions it implements, and a client advertises the ones it understands. That negotiation is per request: a client repeats its extension capabilities in every request's `_meta`, so a handler can always tell whether the caller opted in to this particular call.
+
+Honoring that opt-in is the extension's job, not the framework's. FastMCP advertises your capability and routes your methods, but it does not filter callers for you, so an extension that changes behavior must check before it acts. The [tool-call interceptor](#intercepting-tool-calls) below shows the check.
 
 FastMCP 4 makes extensions a first-class surface. `FastMCP.add_extension()` takes an object that can advertise a capability, serve new request methods, wrap every `tools/call`, and own resources for the life of the server. [Background tasks](/servers/tasks) are built this way, on the same public interface available to you, so a cross-cutting protocol feature becomes a plugin rather than a change to FastMCP itself.
 
@@ -107,6 +109,8 @@ Setting `protocol_versions` on a binding restricts the method to specific wire v
 
 Override `intercept_tool_call()` to wrap every `tools/call` the server handles. The interceptor runs after the FastMCP middleware chain and immediately before the tool body, making it the last gate before execution. Await `call_next()` to let the call proceed, or return a result without awaiting it to short-circuit.
 
+Every registered interceptor runs on every tool call, including calls from clients that never advertised your extension. FastMCP does not gate this for you, so an interceptor that changes what the caller gets back must first confirm the caller opted in. `context.client_extension_settings(identifier)` returns the settings the client declared for this request, or `None` when it declared nothing.
+
 ```python
 from fastmcp import FastMCP
 from fastmcp.server.extensions import ServerExtension
@@ -119,6 +123,8 @@ class CallCounterExtension(ServerExtension):
         self.count = 0
 
     async def intercept_tool_call(self, params, context, call_next):
+        if context.client_extension_settings(self.identifier) is None:
+            return await call_next()
         self.count += 1
         return await call_next()
 
@@ -126,6 +132,8 @@ class CallCounterExtension(ServerExtension):
 mcp = FastMCP("Demo")
 mcp.add_extension(CallCounterExtension())
 ```
+
+Counting is harmless either way, so this example passes unaware callers straight through. The check becomes essential the moment an interceptor short-circuits: returning an extension-specific result to a client that never negotiated the extension hands it a shape it has no way to understand. Request methods have the same requirement, and `self.client_settings(ctx)` is the equivalent inside a handler.
 
 `params` holds the validated `tools/call` params, and `context` is the FastMCP `Context`, so the tool being invoked is reachable as `context.fastmcp.get_tool(params.name)` along with auth scope and the server itself. When several extensions intercept, they nest with the first-registered outermost.
 
