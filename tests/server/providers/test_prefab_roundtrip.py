@@ -13,6 +13,7 @@ import pytest
 from fastmcp import FastMCP, FastMCPApp
 from fastmcp.exceptions import ToolError
 from fastmcp.experimental.transforms.code_mode import CodeMode
+from fastmcp.server.middleware.tool_injection import ToolInjectionMiddleware
 from fastmcp.server.providers.addressing import hash_tool, hashed_backend_name
 from fastmcp.server.providers.proxy import ProxyClient, ProxyProvider
 from fastmcp.server.transforms.search import RegexSearchTransform
@@ -491,6 +492,40 @@ class TestLateBoundToolNames:
             await gateway.call_tool(
                 hashed_backend_name("contacts", "save"), {"name": "alice"}
             )
+
+    async def test_middleware_owns_the_names_it_shadows(self):
+        """Binding describes the listing a client will see, so it has to run
+        the middleware chain. An injected tool sharing a backend's name owns
+        that name at call time, and would be invisible to a listing taken
+        beneath middleware.
+        """
+        app = FastMCPApp("contacts")
+
+        @app.tool()
+        def save(name: str) -> str:
+            return f"[APP] saved {name}"
+
+        @app.ui()
+        def form() -> Column:
+            return Column(
+                children=[Button(label="Save", on_click=CallTool(tool="save"))]
+            )
+
+        def injected(name: str) -> str:
+            return f"[INJECTED] saved {name}"
+
+        server = FastMCP("Platform")
+        server.add_provider(app)
+        server.add_middleware(
+            ToolInjectionMiddleware([Tool.from_function(injected, name="save")])
+        )
+
+        result = await server.call_tool("form", {})
+        (ref,) = _tool_refs(result.structured_content)
+        assert ref == hashed_backend_name("contacts", "save")
+
+        clicked = await server.call_tool(ref, {"name": "alice"})
+        assert clicked.content[0].text == "[APP] saved alice"  # type: ignore[union-attr]  # ty:ignore[unresolved-attribute]
 
     async def test_unresolvable_identity_is_restored(self):
         """An inner server binds to a name that means nothing further out, so

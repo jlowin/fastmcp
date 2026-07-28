@@ -725,7 +725,12 @@ class FastMCP(
         # collapse to one target rather than counting as competing copies.
         names_of: dict[str, set[str]] = {}
         owners_of: dict[str, set[str | None]] = {}
-        for tool in await self.list_tools(run_middleware=False):
+        # The middleware chain runs, because the binding has to describe the
+        # listing a client will actually see. Middleware adds, removes and
+        # shadows tools — an injected tool sharing a backend's name owns that
+        # name at call time, and a listing taken beneath middleware would not
+        # know it exists.
+        for tool in await self.list_tools():
             identity = _tool_identity(tool)
             owners_of.setdefault(tool.name, set()).add(identity)
             if identity is not None:
