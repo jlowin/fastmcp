@@ -75,9 +75,18 @@ THE IMPORT (every server needs this)
 - `from mcp.server.fastmcp import Context`
 - `from mcp.server.fastmcp import Image`
 
-CONSTRUCTOR ARGUMENTS THAT MOVED TO run()
-- `FastMCP(...)` receiving any of: host, port, log_level, debug, sse_path, streamable_http_path, json_response, stateless_http
+CONSTRUCTOR ARGUMENTS THAT MOVED (all raise TypeError)
+- moved to run()/http_app(), and FastMCP names them in the error: host, port, log_level, debug, sse_path, message_path, streamable_http_path, json_response, stateless_http
+- moved but rejected with only a generic "unexpected keyword argument", so flag these explicitly: `event_store=` (→ `http_app(event_store=...)`; dropping it silently disables streamable-HTTP resumability), `mount_path=` (→ `http_app(path=...)`), `transport=` (→ `run(transport=...)`), `transport_security=` (→ host/origin settings on `http_app()`), `warn_on_duplicate_tools/_resources/_prompts=` (→ one `on_duplicate=`), `dependencies=` (→ a fastmcp.json file)
+- `name`, `instructions`, `website_url`, `icons`, `tools`, `lifespan` carry over unchanged
 - note when reporting: FastMCP names the streamable HTTP transport "http", not "streamable-http"
+
+CONTEXT METHODS WITH CHANGED SIGNATURES (compile fine, fail at runtime)
+- `ctx.log(level, data)` → `ctx.log(message, level=...)`, message first
+- `ctx.info(data)` / `debug` / `warning` / `error` → take a str message, not arbitrary JSON-serializable data
+- `ctx.elicit(..., schema=Model)` → `response_type=Model`
+- `ctx.read_resource(uri)` → returns a `ResourceResult`; read `.contents` rather than iterating the return value
+- `ctx.report_progress`, `ctx.request_id`, `ctx.client_id` are unchanged
 
 AUTHENTICATION (the one case where the single import change is NOT enough)
 - `token_verifier=` and `auth_server_provider=` — both raise TypeError on FastMCP 4
@@ -119,7 +128,23 @@ mcp = FastMCP("my-server")
 mcp.run(transport="http", host="0.0.0.0", port=8080)
 ```
 
-If you pass the old kwargs, you'll get a clear `TypeError` naming the replacement.
+Nine arguments move this way, and each raises a `TypeError` naming its own replacement, so you can also just run the server and follow the errors: `host`, `port`, `log_level`, `debug`, `sse_path`, `message_path`, `streamable_http_path`, `json_response`, and `stateless_http`.
+
+A second group is rejected with only a generic "unexpected keyword argument" and no hint, which makes these the ones worth reading in advance:
+
+| SDK v1 `FastMCP(...)` | FastMCP 4 |
+|---|---|
+| `event_store=` | `mcp.http_app(event_store=...)` |
+| `mount_path=` | `mcp.http_app(path=...)` |
+| `transport=` | `mcp.run(transport=...)` |
+| `transport_security=` | `host_origin_protection=`, `allowed_hosts=`, `allowed_origins=` on `http_app()` |
+| `warn_on_duplicate_tools=`, `_resources=`, `_prompts=` | a single `on_duplicate=` |
+| `dependencies=[...]` | a [`fastmcp.json`](/deployment/server-configuration) configuration file |
+| `auth_server_provider=`, `token_verifier=` | a single `auth=` provider — see [Authentication](#authentication) below |
+
+Dropping `event_store=` rather than moving it is the one to watch: it silently disables streamable-HTTP resumability, so a client that reconnects loses the events it missed instead of replaying them.
+
+`name`, `instructions`, `website_url`, `icons`, `tools`, and `lifespan` carry over to the constructor unchanged.
 
 ### Authentication
 
@@ -142,6 +167,19 @@ mcp = FastMCP("my-server", auth=JWTVerifier(jwks_uri="https://example.com/.well-
 ```
 
 See [Authentication](/servers/auth/authentication) for the full set and their configuration.
+
+### Context Methods
+
+`from fastmcp import Context` gets you the injected context object, but four of its methods took a different shape in FastMCP 1.0, and a bare import swap leaves calls that compile and then fail:
+
+| SDK v1 | FastMCP 4 |
+|---|---|
+| `ctx.log(level, data)` | `ctx.log(message, level=...)` — message is first now |
+| `ctx.info(data)` and its `debug`/`warning`/`error` siblings | take a `str` message, where v1 accepted any JSON-serializable value |
+| `ctx.elicit(message, schema=Model)` | `ctx.elicit(message, response_type=Model)` |
+| `ctx.read_resource(uri)` | returns a `ResourceResult`; the payload is under `.contents` rather than being iterable directly |
+
+`ctx.report_progress()`, `ctx.request_id`, and `ctx.client_id` are unchanged.
 
 ### Prompts
 

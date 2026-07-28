@@ -24,6 +24,7 @@ import inspect
 import re
 import warnings
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -157,6 +158,66 @@ def test_methods_with_known_signature_differences_still_differ(method: str):
     assert str(sdk) != str(fastmcp), (
         f"ctx.{method} signatures now match; the guide's migration note for it "
         f"is stale and should be moved to the unchanged list"
+    )
+
+
+# SDK v1's `mcp.server.fastmcp.FastMCP.__init__` parameters. Hardcoded because
+# v1 cannot be installed alongside v4 to introspect — read from the published
+# mcp 1.20.0 wheel. Anything here that FastMCP 4 does not accept must appear in
+# the v1 guide, since a reader following "it's one import change" hits it.
+SDK_V1_CONSTRUCTOR_PARAMS = [
+    "name", "instructions", "website_url", "icons", "auth_server_provider",
+    "token_verifier", "event_store", "tools", "debug", "log_level", "host",
+    "port", "mount_path", "sse_path", "message_path", "streamable_http_path",
+    "json_response", "stateless_http", "warn_on_duplicate_resources",
+    "warn_on_duplicate_tools", "warn_on_duplicate_prompts", "dependencies",
+    "lifespan", "auth", "transport_security", "transport",
+]  # fmt: skip
+
+
+def test_sdk_v1_constructor_params_fastmcp_rejects_are_documented():
+    """Every v1 keyword FastMCP 4 refuses must be named in the v1 guide.
+
+    The guide's headline is that upgrading is a single import change. That is
+    only honest if the constructor arguments it *doesn't* accept are spelled
+    out, so nobody follows the headline into a ``TypeError``.
+    """
+    from fastmcp import FastMCP
+
+    guide = _guide("from-mcp-sdk-v1.mdx")
+    probe: dict[str, Any] = {
+        "name": "s",
+        "icons": None,
+        "tools": None,
+        "lifespan": None,
+    }
+
+    undocumented = []
+    for param in SDK_V1_CONSTRUCTOR_PARAMS:
+        if param == "name":
+            continue
+        kwargs: dict[str, Any] = {param: probe.get(param)}
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                FastMCP("s", **kwargs)
+            continue  # accepted, nothing to document
+        except TypeError:
+            pass
+        except Exception:
+            continue  # accepted the keyword, rejected the probe value
+        shorthand = param.replace("warn_on_duplicate", "")
+        if re.search(rf"`{re.escape(param)}[=`]", guide):
+            continue
+        if param.startswith("warn_on_duplicate") and re.search(
+            rf"`{re.escape(shorthand)}[=`]", guide
+        ):
+            continue
+        undocumented.append(param)
+
+    assert not undocumented, (
+        "SDK v1 FastMCP() parameters that FastMCP 4 rejects but from-mcp-sdk-v1.mdx "
+        f"never mentions: {undocumented}"
     )
 
 
