@@ -144,9 +144,7 @@ class TestLowLevelGuide:
     async def test_handlers_and_tools_agree(self, pair):
         """The rewritten tool returns what the hand-written handler returned."""
         handlers, mcp = pair
-        params = type(
-            "Params", (), {"name": "greet", "arguments": {"name": "World"}}
-        )()
+        params = type("Params", (), {"name": "greet", "arguments": {"name": "World"}})()
 
         handler_result = await handlers["call_tool"](None, params)
         async with Client(mcp) as client:
