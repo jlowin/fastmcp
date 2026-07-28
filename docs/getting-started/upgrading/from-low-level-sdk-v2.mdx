@@ -51,7 +51,7 @@ TYPES THAT DISAPPEAR FROM YOUR CODE
 CONTEXT AND SIDE CHANNELS
 - `ctx.session.send_log_message(...)` — `ctx.info()` / `ctx.debug()` / `ctx.warning()` / `ctx.error()` on a `fastmcp.Context` parameter
 - `ctx.session.report_progress(...)` — `ctx.report_progress()`
-- `ctx.params`, `ctx.request_id`, `ctx.meta`, `ctx.protocol_version`
+- `ctx.params`, `ctx.request_id`, `ctx.meta`, `ctx.protocol_version` — on a FastMCP Context these live on `ctx.request_context` (note `ctx.protocol_version` itself does not exist)
 - Direct `ctx.session` use for anything else — `Context.session` exists in FastMCP too and returns the same raw SDK session, so this still works; prefer a `Context` method where one exists, and note the remaining uses as SDK-coupled
 
 ERRORS AND AUTH

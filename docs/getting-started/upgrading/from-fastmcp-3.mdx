@@ -308,6 +308,21 @@ Several parameters and settings that warned in 3.x are gone:
 
 Background tasks left the core MCP spec during the SDK v2 rebuild and came back as the `io.modelcontextprotocol/tasks` extension (SEP-2663). FastMCP follows the protocol: what was a built-in server feature in 3.x is now a registered extension, and the authoring surface changed on both sides of the connection.
 
+The extension ships in a separate package, so the pin from [Install the v4 Prerelease](#install-the-v4-prerelease) needs one more entry before any of this imports:
+
+```toml
+[project]
+dependencies = ["fastmcp[tasks]==4.0.0b1"]
+
+[tool.uv]
+constraint-dependencies = [
+    "fastmcp-slim==4.0.0b1",
+    "fastmcp-tasks==4.0.0b1",
+    "mcp==2.0.0b2",
+    "mcp-types==2.0.0b2",
+]
+```
+
 On the server, `task=True` still marks a tool as capable of running in the background, but it no longer runs anything by itself — the extension does. Register it, or the server refuses to start:
 
 ```python
@@ -371,7 +386,7 @@ These changes compile fine and can surface at runtime. The first is the one most
 ToolError: elicitation via server-initiated requests is unavailable on 2026-07-28 connections.
 ```
 
-The gate is strict in both directions, which is what makes it debuggable: a guard tool that returns an input request on a handshake connection raises the mirror-image error rather than misbehaving quietly. You have three ways forward. Rewrite the tool as a guard tool that *returns* a description of the input it needs, which is the form that works on modern connections. Branch on `ctx.protocol_version` and keep both paths if you serve both eras. Or restrict the protocol versions your server offers, so clients negotiate the handshake era and `ctx.elicit()` keeps working as written. See [Elicitation](/servers/elicitation#which-approach-to-use) for the two shapes side by side.
+The gate is strict in both directions, which is what makes it debuggable: a guard tool that returns an input request on a handshake connection raises the mirror-image error rather than misbehaving quietly. You have three ways forward. Rewrite the tool as a guard tool that *returns* a description of the input it needs, which is the form that works on modern connections. Branch on `ctx.request_context.protocol_version` and keep both paths if you serve both eras. Or restrict the protocol versions your server offers, so clients negotiate the handshake era and `ctx.elicit()` keeps working as written. See [Elicitation](/servers/elicitation#which-approach-to-use) for the two shapes side by side.
 
 **Middleware sees traffic it never saw before.** Dispatch now begins in the SDK's middleware layer, the single point every inbound message passes through, so `on_message`, `on_request`, and `on_notification` observe *every* message a client sends — including `notifications/cancelled`, `notifications/initialized`, and `notifications/progress`, and including requests that fail before reaching a handler, such as an unknown method or a `tools/call` whose params fail validation. In 3.x those never reached your hooks. Middleware that assumed every message it saw was a routable request, or that counted messages to measure tool traffic, needs a guard on the message type. The operation hooks (`on_call_tool`, `on_list_tools`, and the rest) are unaffected: they still fire exactly once per request and still receive typed component results. See [What middleware sees](/servers/middleware#what-middleware-sees).
 
@@ -433,7 +448,7 @@ Most servers upgrade untouched. Work down this list to find the ones that don't:
 2. **Fix imports that moved out.** Replace `from mcp.types import X` with `from mcp_types import X`, and update any import from the [removed modules](#moved-imports) (`fastmcp.server.proxy`, `fastmcp.server.openapi`, `fastmcp.server.apps`, the `fastmcp.tools.tool` / `resources.resource` / `prompts.prompt` component shims).
 3. **Update removed server APIs.** Swap `as_proxy` → `create_proxy`, `import_server` → `mount`, `mount(prefix=)` → `mount(namespace=)`, and the [other removed methods and keywords](#removed-server-methods).
 4. **Replace `ctx.sample` and `ctx.list_roots`.** Both are gone from `Context`, as are `FastMCP(sampling_handler=...)` and `sampling_handler_behavior=`. Call an LLM directly from your server for generation; ask for roots through the guard pattern, or take file paths as tool arguments. A server whose purpose is to use the caller's model should stay on FastMCP 3.x rather than migrate.
-5. **Find every `ctx.elicit()` call.** It raises on modern connections, which is what a default client now negotiates. Rewrite the tool as a guard tool, branch on `ctx.protocol_version`, or restrict the versions your server serves — see [the era gate](#behavior-changes).
+5. **Find every `ctx.elicit()` call.** It raises on modern connections, which is what a default client now negotiates. Rewrite the tool as a guard tool, branch on `ctx.request_context.protocol_version`, or restrict the versions your server serves — see [the era gate](#behavior-changes).
 6. **Register the tasks extension.** A `task=True` tool needs `mcp.add_extension(TasksExtension())` or the server won't start. Drop `task=` from resource and prompt decorators, move `TaskConfig` to `fastmcp.utilities.tasks`, and replace client-side `call_tool(..., task=True)` with plain `call_tool` or `call_tool_task`.
 7. **Update removed tool parameters.** Replace tool `serializer=` (return a `ToolResult`), `exclude_args=` (use `Depends()`), and `StreamableHttpTransport(sse_read_timeout=)`.
 8. **Fix `McpError` construction.** Positional `McpError(ErrorData(...))` becomes keyword `McpError(code=..., message=...)`. Catching is unchanged.

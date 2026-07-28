@@ -65,11 +65,15 @@ CONSTRUCTOR ARGUMENTS THAT DO NOT CARRY OVER
 - `tools=[...]` (rare — the SDK's `Tool` type is not exported): FastMCP takes plain callables, so pass the underlying functions
 These raise TypeError, most naming their replacement. `name`, `version`, `instructions`, `icons`, `website_url`, `lifespan`, `resource_security`, and `request_state_security` carry over unchanged.
 
-CONTEXT
+CONTEXT — these ten properties do NOT exist on FastMCP's Context and raise AttributeError if you only swap the import:
 - `ctx.mcp_server` → `ctx.fastmcp`
-- `ctx.headers` → `get_http_headers()` from `fastmcp.server.dependencies` (a function, not a Context property — the attribute does not exist on FastMCP's Context and would raise AttributeError)
-- `ctx.notify_tools_changed()` and its siblings — send the notification directly with `ctx.send_notification(ToolListChangedNotification())` from `mcp_types`. FastMCP emits it for you when components change visibility through its own `ctx.enable_components` / `ctx.disable_components`.
-- everything else on Context (logging, progress, elicit, read_resource, request_id, input_responses, request_state) carries over unchanged
+- `ctx.headers` → `get_http_headers()` from `fastmcp.server.dependencies` (a function, not a property)
+- `ctx.protocol_version` → `ctx.request_context.protocol_version`
+- `ctx.client_capabilities` → read it off `ctx.session` / `ctx.request_context`
+- `ctx.notify_tools_changed()`, `notify_resources_changed()`, `notify_prompts_changed()`, `notify_resource_updated()` → `ctx.send_notification(...)` with the matching `mcp_types` notification. FastMCP emits the list-changed ones for you when components change visibility through `ctx.enable_components` / `ctx.disable_components`.
+- `ctx.elicit_url` → no direct equivalent; FastMCP has `ctx.elicit` for form elicitation
+- `ctx.close_standalone_sse_stream` → reach it through `ctx.request_context`
+Everything else carries over unchanged, including logging, progress, `elicit`, `read_resource`, `request_id`, `client_id`, `input_responses`, `request_state`, `session`, and `request_context`.
 
 RESOLVERS — the one part that is not a rename, so check for it first
 - any `Annotated[T, Resolve(fn)]` parameter, and the resolvers behind it
@@ -109,6 +113,8 @@ Most of the work is renaming. This table covers the surfaces a typical `MCPServe
 | `server.sse_app()` | `mcp.http_app(transport="sse")` |
 | `ctx.mcp_server` | `ctx.fastmcp` |
 | `ctx.headers` | `get_http_headers()` from `fastmcp.server.dependencies` |
+| `ctx.protocol_version` | `ctx.request_context.protocol_version` |
+| `ctx.client_capabilities` | read it off `ctx.session` |
 | `from mcp_types import X` | unchanged |
 
 Two of these are worth a sentence each. The decorators lose their parentheses: `MCPServer` required `@server.tool()` and raised a `TypeError` telling you so if you wrote `@server.tool`, while FastMCP accepts both forms, so `@mcp.tool` is the idiomatic spelling and `@mcp.tool()` keeps working if you'd rather not touch every line. And the streamable HTTP transport is named `"http"` in FastMCP rather than `"streamable-http"` — the transport is the same, and `mcp.run()` still defaults to stdio.
@@ -262,7 +268,7 @@ async def book_flight(ctx: Context) -> str:
 
 On the **modern protocol** (2026-07-28), server-initiated requests are gone from the wire, so a tool asks by *returning* a description of what it needs. The client answers and calls the tool again with the answer attached, and the tool re-runs from the top. This is the [guard pattern](/servers/elicitation#elicitation-on-the-modern-protocol), and it reads the answers off `ctx.input_responses`.
 
-The two are era-gated in both directions: `ctx.elicit()` raises on a modern connection, and a guard result raises on a handshake one. A server that must serve both branches on `ctx.protocol_version`. See [Elicitation](/servers/elicitation#which-approach-to-use) for both shapes side by side.
+The two are era-gated in both directions: `ctx.elicit()` raises on a modern connection, and a guard result raises on a handshake one. A server that must serve both branches on `ctx.request_context.protocol_version`. See [Elicitation](/servers/elicitation#which-approach-to-use) for both shapes side by side.
 
 Resolvers that return `Sample` or `ListRoots` have no FastMCP equivalent at all, by design. For generation, [call an LLM from your server](/servers/sampling) with your own API key: your tool then behaves identically for every client, including the many that never implemented sampling, and you avoid paying a full round trip per generation step. For roots, take the paths as ordinary tool arguments, which is simpler whenever the caller can supply them.
 

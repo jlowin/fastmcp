@@ -71,7 +71,7 @@ TYPES THAT DISAPPEAR FROM YOUR CODE
 CONTEXT AND SIDE CHANNELS
 - `server.request_context`
 - `session.send_log_message(...)`, `session.send_progress_notification(...)`
-- direct session use for anything else — flag it, since FastMCP does not hand you the raw session
+- direct session use for anything else — a FastMCP `Context` has a `ctx.session` property returning the underlying SDK session, so this still works; prefer a `Context` method where one exists, and note the remaining uses as SDK-coupled
 
 ERRORS
 - `raise ValueError(f"Unknown tool: ...")` and other dispatch fallbacks — these become unnecessary

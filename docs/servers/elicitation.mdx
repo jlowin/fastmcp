@@ -27,7 +27,7 @@ Elicitation reaches the user two different ways, depending on the protocol era t
 - **On handshake-era connections (≤ 2025-11-25)**, a running tool calls [`ctx.elicit()`](#requesting-input-on-handshake-connections). The tool pauses mid-execution, the server sends a request over the session back-channel, and the tool resumes with the answer. This is the original elicitation API and the rest of this page's first half covers it in full.
 - **On the modern protocol (2026-07-28)**, that back-channel is gone — server-initiated requests were removed from the wire (SEP-2577), so a tool cannot issue a request mid-execution and block on the answer. Instead a tool asks for input by *returning* a description of what it needs; each round completes normally and the client issues a new call with the answer attached. This is the [guard pattern](#elicitation-on-the-modern-protocol), covered in the second half.
 
-The era gate is strict: `ctx.elicit()` only works on handshake connections, and the guard pattern only works on modern ones. A tool that returns a guard result on a handshake connection — or calls `ctx.elicit()` on a modern one — raises a clear era error rather than failing obscurely. A server that serves both eras may need both paths; branch on `ctx.protocol_version` to pick the right one. `fastmcp.Client` drives whichever the connection negotiated automatically.
+The era gate is strict: `ctx.elicit()` only works on handshake connections, and the guard pattern only works on modern ones. A tool that returns a guard result on a handshake connection — or calls `ctx.elicit()` on a modern one — raises a clear era error rather than failing obscurely. A server that serves both eras may need both paths; branch on `ctx.request_context.protocol_version` to pick the right one. `fastmcp.Client` drives whichever the connection negotiated automatically.
 
 ## Requesting input on handshake connections
 
@@ -539,7 +539,7 @@ connection negotiated '2025-11-25'. Use ctx.elicit() for server-initiated input
 on handshake-era connections.
 ```
 
-If you need to support both eras, branch on `ctx.protocol_version`: return an `InputRequiredResult` on modern connections and fall back to [`ctx.elicit()`](#requesting-input-on-handshake-connections) on handshake-era ones.
+If you need to support both eras, branch on `ctx.request_context.protocol_version`: return an `InputRequiredResult` on modern connections and fall back to [`ctx.elicit()`](#requesting-input-on-handshake-connections) on handshake-era ones.
 
 ### Prompts and resources
 
