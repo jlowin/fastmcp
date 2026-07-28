@@ -475,6 +475,24 @@ async def process_data(ctx: Context) -> str:
 
 The `Context` object provides logging (`ctx.debug()`, `ctx.info()`, `ctx.warning()`, `ctx.error()`), progress reporting (`ctx.report_progress()`), resource subscriptions, session state, and more. See [Context](/servers/context) for the full API.
 
+## Errors
+
+Most of the errors a low-level server raises disappear with the dispatch that raised them: the `ValueError(f"Unknown tool: {name}")` fallback is unnecessary once FastMCP routes calls, and an exception from your function body is converted to a tool error for you.
+
+Deliberate protocol errors are the exception, and they need a small rewrite. The v1 pattern wrapped an `ErrorData` and passed it positionally; FastMCP's `McpError` takes the fields directly:
+
+```python test="skip"
+from fastmcp.exceptions import McpError
+
+# Before (SDK v1):
+#   raise McpError(ErrorData(code=-32000, message="Upstream unavailable"))
+
+# After:
+raise McpError(code=-32000, message="Upstream unavailable")
+```
+
+An optional third argument, `data=`, carries the structured payload `ErrorData` used to hold. Catching is unchanged — `except McpError` still works, and `err.error.code` still reads the code — so only construction sites need touching.
+
 ## Complete Example
 
 A full server upgrade, showing how all the pieces fit together:

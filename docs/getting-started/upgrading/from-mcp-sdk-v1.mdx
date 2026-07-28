@@ -79,6 +79,11 @@ CONSTRUCTOR ARGUMENTS THAT MOVED TO run()
 - `FastMCP(...)` receiving any of: host, port, log_level, debug, sse_path, streamable_http_path, json_response, stateless_http
 - note when reporting: FastMCP names the streamable HTTP transport "http", not "streamable-http"
 
+AUTHENTICATION (the one case where the single import change is NOT enough)
+- `token_verifier=` and `auth_server_provider=` — both raise TypeError on FastMCP 4
+- `auth=AuthSettings(...)` — the keyword survives but the value does not: FastMCP's `auth=` takes a FastMCP `AuthProvider`, not the SDK settings object
+Report these as a real migration, not a rename: FastMCP consolidates all three into one provider, and ships `JWTVerifier` for tokens you already issue, `RemoteAuthProvider` for delegating to an external authorization server, `OAuthProxy` for wrapping a provider without Dynamic Client Registration, and named providers for GitHub, Google, Auth0, Keycloak, and others. Look up the right one at https://gofastmcp.com/servers/auth/authentication rather than guessing.
+
 PROMPT RETURN VALUES
 - prompt functions returning `PromptMessage`, or `TextContent`-wrapped content
 - prompt functions returning raw dicts with "role"/"content" keys — FastMCP 1.0 coerced these silently, standalone FastMCP does not
@@ -115,6 +120,28 @@ mcp.run(transport="http", host="0.0.0.0", port=8080)
 ```
 
 If you pass the old kwargs, you'll get a clear `TypeError` naming the replacement.
+
+### Authentication
+
+This is the one case where the import change alone won't do. FastMCP 1.0 exposed the SDK's auth plumbing as three separate constructor arguments — `token_verifier=`, `auth_server_provider=`, and `auth=AuthSettings(...)`. The first two raise `TypeError` on FastMCP 4, and while `auth=` survives as a keyword, its value doesn't: FastMCP expects one of its own `AuthProvider` objects rather than the SDK's settings object.
+
+The replacement is a single provider carrying the whole configuration, chosen by what you're actually doing:
+
+| What you were doing | FastMCP provider |
+|---|---|
+| Validating JWTs you already issue | `JWTVerifier` |
+| Delegating to an external authorization server | `RemoteAuthProvider` |
+| Wrapping a provider without Dynamic Client Registration | `OAuthProxy` |
+| GitHub, Google, Auth0, Keycloak, WorkOS, … | the matching named provider |
+
+```python
+from fastmcp import FastMCP
+from fastmcp.server.auth import JWTVerifier
+
+mcp = FastMCP("my-server", auth=JWTVerifier(jwks_uri="https://example.com/.well-known/jwks.json"))
+```
+
+See [Authentication](/servers/auth/authentication) for the full set and their configuration.
 
 ### Prompts
 
