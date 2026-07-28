@@ -277,10 +277,12 @@ class Tool(FastMCPComponent):
         # caller renaming or re-annotating a tool doesn't get a stale title.
         name = overrides.get("name", self.name)
         annotations = overrides.get("annotations", self.annotations)
+        if isinstance(annotations, dict):
+            annotations = ToolAnnotations(**annotations)
 
         if self.title:
             title = self.title
-        elif isinstance(annotations, ToolAnnotations) and annotations.title:
+        elif annotations and annotations.title:
             title = annotations.title
         else:
             title = _default_title(name)
