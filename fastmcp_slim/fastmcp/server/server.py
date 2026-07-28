@@ -719,21 +719,29 @@ class FastMCP(
         if not payload_has_identities(payload):
             return result
 
-        by_identity: dict[str, list[str]] = {}
+        # Binding is safe only where identity and name agree one-to-one, so
+        # both directions are needed. Versions are listed individually but
+        # share a name that resolves to the highest on its own, so they
+        # collapse to one target rather than counting as competing copies.
+        names_of: dict[str, set[str]] = {}
+        owners_of: dict[str, set[str | None]] = {}
         for tool in await self.list_tools(run_middleware=False):
             identity = _tool_identity(tool)
-            if identity is None:
-                continue
-            names = by_identity.setdefault(identity, [])
-            # Versions are listed individually but share a name, and that name
-            # resolves to the highest version on its own. They are one target;
-            # only distinct names mean distinct copies of an app.
-            if tool.name not in names:
-                names.append(tool.name)
+            owners_of.setdefault(tool.name, set()).add(identity)
+            if identity is not None:
+                names_of.setdefault(identity, set()).add(tool.name)
 
         def resolve(identity: str) -> str | None:
-            candidates = by_identity.get(identity, [])
-            return candidates[0] if len(candidates) == 1 else None
+            names = names_of.get(identity, set())
+            if len(names) != 1:
+                # Several names carry this identity: the app is composed more
+                # than once and nothing says which copy the UI belongs to.
+                return None
+            (name,) = names
+            # And the name has to lead back. Two apps can each expose `save`,
+            # or a plain tool can share the name — binding then hands one
+            # app's button to someone else's implementation.
+            return name if owners_of.get(name) == {identity} else None
 
         rewrite_payload_tool_names(payload, resolve)
         return result

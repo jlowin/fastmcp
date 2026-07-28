@@ -447,6 +447,51 @@ class TestLateBoundToolNames:
         clicked = await server.call_tool(ref, {"name": "alice"})
         assert clicked.content[0].text == "v2 saved alice"  # type: ignore[union-attr]  # ty:ignore[unresolved-attribute]
 
+    async def test_distinct_apps_sharing_a_backend_name(self):
+        """Identity and name must agree in both directions. Two apps can each
+        expose `save`: the identities differ and each has one candidate, but
+        the shared name resolves to only one of them.
+        """
+        server = FastMCP("Platform")
+        for app_name, entry, marker in (
+            ("crm", "crm_ui", "CRM"),
+            ("billing", "billing_ui", "BILLING"),
+        ):
+            app = FastMCPApp(app_name)
+
+            @app.tool()
+            def save(name: str, _marker: str = marker) -> str:
+                return f"[{_marker}] saved {name}"
+
+            @app.ui(entry)
+            def form() -> Column:
+                return Column(
+                    children=[Button(label="Save", on_click=CallTool(tool="save"))]
+                )
+
+            server.add_provider(app)
+
+        result = await server.call_tool("billing_ui", {})
+        (ref,) = _tool_refs(result.structured_content)
+        assert ref == hashed_backend_name("billing", "save")
+
+    async def test_proxy_refuses_a_remote_that_duplicates_an_app(self):
+        """A remote mounting one app twice sends back two tools claiming one
+        identity, and the proxy must refuse on the same terms a local
+        composition would rather than returning whichever came first.
+        """
+        backend = FastMCP("Backend")
+        backend.add_provider(self._app(marker="A"), namespace="a")
+        backend.add_provider(self._app(marker="B"), namespace="b")
+
+        gateway = FastMCP("Gateway")
+        gateway.add_provider(ProxyProvider(lambda: ProxyClient(backend)))
+
+        with pytest.raises(ToolError, match="composed more than once"):
+            await gateway.call_tool(
+                hashed_backend_name("contacts", "save"), {"name": "alice"}
+            )
+
     async def test_unresolvable_identity_is_restored(self):
         """An inner server binds to a name that means nothing further out, so
         a reference this server cannot resolve is restored to its identity
