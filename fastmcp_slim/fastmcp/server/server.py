@@ -727,29 +727,39 @@ class FastMCP(
         if not payload_has_identities(payload):
             return result
 
-        # Binding is safe only where identity and name agree one-to-one, so
-        # both directions are needed. Versions are listed individually but
-        # share a name that resolves to the highest on its own, so they
-        # collapse to one target rather than counting as competing copies.
-        names_of: dict[str, set[str]] = {}
-        owners_of: dict[str, set[str | None]] = {}
+        # Binding is safe only where one identity, one name, and one
+        # component all agree. Each is tracked separately: collapsing them
+        # early is what lets a duplicated app pass as a single tool.
+        #
         # The middleware chain runs, because the binding has to describe the
         # listing a client will actually see. Middleware adds, removes and
         # shadows tools — an injected tool sharing a backend's name owns that
         # name at call time, and a listing taken beneath middleware would not
         # know it exists.
+        claimed_by: dict[str, list[Tool]] = {}
+        owners_of: dict[str, set[str | None]] = {}
         for tool in await self.list_tools():
             identity = _tool_identity(tool)
             owners_of.setdefault(tool.name, set()).add(identity)
             if identity is not None:
-                names_of.setdefault(identity, set()).add(tool.name)
+                claimed_by.setdefault(identity, []).append(tool)
 
         def resolve(identity: str) -> str | None:
-            names = names_of.get(identity, set())
+            tools = claimed_by.get(identity, [])
+            names = {tool.name for tool in tools}
             if len(names) != 1:
                 # Several names carry this identity: the app is composed more
                 # than once and nothing says which copy the UI belongs to.
                 return None
+
+            # One name can still be several components. `key` is the canonical
+            # identity — type, name and version — so versions of one tool have
+            # distinct keys while copies of one app repeat a key. A repeat
+            # means two components are indistinguishable, which is worse than
+            # the renamed case, not better.
+            if len({tool.key for tool in tools}) != len(tools):
+                return None
+
             (name,) = names
             # And the name has to lead back. Two apps can each expose `save`,
             # or a plain tool can share the name — binding then hands one

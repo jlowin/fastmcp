@@ -589,6 +589,34 @@ class TestLateBoundToolNames:
         clicked = await gateway.call_tool(ref, {"name": "alice"})
         assert clicked.content[0].text == "[be] saved alice"  # type: ignore[union-attr]  # ty:ignore[unresolved-attribute]
 
+    async def test_duplicate_copies_are_not_collapsed_by_a_shared_name(self):
+        """Copies whose backends collide on a name are the worst case, not the
+        safe one: two components become indistinguishable. Counting names
+        alone would see a single unambiguous target and bind to it.
+        """
+        server = FastMCP("Platform")
+        for entry, marker in (("form_a", "A"), ("form_b", "B")):
+            app = FastMCPApp("contacts")
+
+            @app.tool()
+            def save(name: str, _marker: str = marker) -> str:
+                return f"[{_marker}] saved {name}"
+
+            @app.ui(entry)
+            def form() -> Column:
+                return Column(
+                    children=[Button(label="Save", on_click=CallTool(tool="save"))]
+                )
+
+            server.add_provider(app)
+
+        listed = await server.list_tools()
+        assert [t.key for t in listed].count("tool:save@") == 2
+
+        result = await server.call_tool("form_b", {})
+        (ref,) = _tool_refs(result.structured_content)
+        assert ref == hashed_backend_name("contacts", "save")
+
     async def test_unresolvable_identity_is_restored(self):
         """An inner server binds to a name that means nothing further out, so
         a reference this server cannot resolve is restored to its identity
