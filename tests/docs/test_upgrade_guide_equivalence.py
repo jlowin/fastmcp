@@ -78,30 +78,31 @@ def _normalize(schema: dict[str, Any] | None) -> dict[str, Any]:
     return stripped
 
 
-def _reconcile_declared_strictness(
-    sdk_schema: dict[str, Any], fastmcp_schema: dict[str, Any]
-) -> dict[str, Any]:
-    """Allow exactly one documented, verified schema addition: "additionalProperties": false.
+def _split_declared_strictness(
+    before: dict[str, dict[str, Any]], after: dict[str, dict[str, Any]]
+) -> dict[str, dict[str, Any]]:
+    """Pop `"additionalProperties": false` from every migrated schema, asserting it's there.
 
-    FastMCP's generated tool schemas declare `"additionalProperties": false`; the
-    raw SDK's do not declare it at all. Both actually reject an unexpected keyword
-    argument at call time (the underlying Python function has no **kwargs) — this
-    is a difference in what the wire schema *advertises*, not in what either
-    implementation *does*. Popping the key here only fires when it is exactly that
-    known, additive difference: `False` on the FastMCP side and altogether absent
-    on the SDK side. Any other schema difference — a missing `required` entry, a
-    changed `enum`, `additionalProperties: true` on one side — is left in place and
-    fails the equality check that follows, which is the whole point of comparing
-    the full schema rather than a hand-picked subset of it.
+    FastMCP's generated tool schemas declare `"additionalProperties": false`; a
+    schema built by either SDK server API does not declare it. This is a real
+    contract change, not a cosmetic one — both SDK APIs *accept* an unexpected
+    argument at call time, and FastMCP rejects it (pinned by
+    `test_fastmcp_tightens_the_argument_contract` in each class below). It is
+    popped here only so the rest of the schema can be compared field for field,
+    and popping is an assertion rather than a silent discard: if FastMCP ever
+    stops declaring it, or the SDK starts, this fails.
     """
-    if (
-        fastmcp_schema.get("additionalProperties") is False
-        and "additionalProperties" not in sdk_schema
-    ):
-        fastmcp_schema = {
-            k: v for k, v in fastmcp_schema.items() if k != "additionalProperties"
-        }
-    return fastmcp_schema
+    stripped: dict[str, dict[str, Any]] = {}
+    for name, schema in after.items():
+        schema = dict(schema)
+        assert schema.pop("additionalProperties", None) is False, (
+            f"expected FastMCP to declare additionalProperties: false for {name!r}"
+        )
+        assert "additionalProperties" not in before.get(name, {}), (
+            f"expected the SDK schema for {name!r} not to declare additionalProperties"
+        )
+        stripped[name] = schema
+    return stripped
 
 
 async def _fastmcp_surface(mcp: FastMCP) -> dict[str, Any]:
@@ -145,11 +146,26 @@ class TestMCPServerGuide:
         }
 
         after = await _fastmcp_surface(mcp)
-        after["tools"] = {
-            name: _reconcile_declared_strictness(before["tools"].get(name, {}), schema)
-            for name, schema in after["tools"].items()
-        }
+        after["tools"] = _split_declared_strictness(before["tools"], after["tools"])
         assert before == after
+
+    async def test_fastmcp_tightens_the_argument_contract(self, pair):
+        """FastMCP rejects an unexpected argument where MCPServer accepts it.
+
+        This is the behavior behind the `additionalProperties` schema difference,
+        and it is a real change for any caller that was passing extra keys.
+        """
+        server, mcp = pair
+
+        tolerated = await server.call_tool(
+            "greet", {"name": "World", "extra": "surprise"}
+        )
+        assert tolerated.is_error is False
+        assert tolerated.content[0].text == "Hello, World!"
+
+        async with Client(mcp) as client:
+            with pytest.raises(Exception):
+                await client.call_tool("greet", {"name": "World", "extra": "surprise"})
 
     async def test_migrated_tools_still_work(self, pair):
         _, mcp = pair
@@ -187,11 +203,28 @@ class TestLowLevelGuide:
         }
 
         after = await _fastmcp_surface(mcp)
-        after["tools"] = {
-            name: _reconcile_declared_strictness(before["tools"].get(name, {}), schema)
-            for name, schema in after["tools"].items()
-        }
+        after["tools"] = _split_declared_strictness(before["tools"], after["tools"])
         assert before == after
+
+    async def test_fastmcp_tightens_the_argument_contract(self, pair):
+        """FastMCP rejects an unexpected argument where the handler ignored it.
+
+        A low-level handler reads `params.arguments` as a plain dict and never
+        looks at keys it doesn't need, so extras pass through silently. The
+        migrated tool rejects them. Pinned rather than normalized away, because
+        it is a real change for any caller that was passing extra keys.
+        """
+        handlers, mcp = pair
+        params = type(
+            "Params", (), {"name": "greet", "arguments": {"name": "World", "extra": 1}}
+        )()
+
+        tolerated = await handlers["call_tool"](None, params)
+        assert tolerated.content[0].text == "Hello, World!"
+
+        async with Client(mcp) as client:
+            with pytest.raises(Exception):
+                await client.call_tool("greet", {"name": "World", "extra": 1})
 
     async def test_handlers_and_tools_agree(self, pair):
         """The rewritten tool returns what the hand-written handler returned."""

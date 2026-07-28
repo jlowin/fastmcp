@@ -71,8 +71,8 @@ CONTEXT — these ten properties do NOT exist on FastMCP's Context and raise Att
 - `ctx.protocol_version` → `ctx.request_context.protocol_version`
 - `ctx.client_capabilities` → read it off `ctx.session` / `ctx.request_context`
 - `ctx.notify_tools_changed()`, `notify_resources_changed()`, `notify_prompts_changed()`, `notify_resource_updated()` → `ctx.send_notification(...)` with the matching `mcp_types` notification. FastMCP emits the list-changed ones for you when components change visibility through `ctx.enable_components` / `ctx.disable_components`.
-- `ctx.elicit_url` → no direct equivalent; FastMCP has `ctx.elicit` for form elicitation
-- `ctx.close_standalone_sse_stream` → reach it through `ctx.request_context`
+- `ctx.elicit_url` → not the same thing as `ctx.elicit` (that one is form elicitation, with a different signature and wire behavior). The URL flow survives on the raw session as `ctx.session.elicit_url(...)` — use that rather than deleting an OAuth or payment handoff.
+- `ctx.close_standalone_sse_stream` → no public FastMCP equivalent, and NOT on `ctx.request_context`. Flag it for the user.
 Everything else carries over unchanged, including logging, progress, `elicit`, `read_resource`, `request_id`, `client_id`, `input_responses`, `request_state`, `session`, and `request_context`.
 
 RESOLVERS — the one part that is not a rename, so check for it first
@@ -240,6 +240,18 @@ Renaming `streamable_http_app()` to `http_app()` is only mechanical for a call w
 | `host=...` | pass to `mcp.run(host=...)` instead |
 
 `json_response`, `stateless_http`, `event_store`, and `retry_interval` keep their names. See [Deploying HTTP servers](/deployment/http) for the host and origin settings.
+
+### Stricter Arguments
+
+One behavior change survives the rename and is worth knowing before you migrate. `MCPServer` binds the arguments it recognizes and ignores the rest, so a call carrying an unexpected key succeeds. FastMCP declares `"additionalProperties": false` on every generated schema and enforces it, so the same call fails:
+
+```python test="skip"
+# Against MCPServer: succeeds, "extra" ignored.
+# Against FastMCP:   raises, "extra" is not a parameter of greet().
+await client.call_tool("greet", {"name": "World", "extra": "surprise"})
+```
+
+For most servers this is an improvement that costs nothing — a caller sending keys your tool never reads was already a bug. It matters if a client in your fleet passes extra metadata alongside real arguments, since those calls start failing the moment you migrate. Accept the extras explicitly as optional parameters if you need to keep them working.
 
 ## Asking for Input
 

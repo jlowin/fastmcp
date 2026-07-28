@@ -61,7 +61,6 @@ DOCUMENTED_AS_ABSENT = {
     "notify_resource_updated",
     "params",
     "meta",
-
 }
 
 
@@ -71,7 +70,9 @@ def test_absent_context_attributes_are_really_absent():
     If one of these gains an implementation, the guides are now telling people
     to work around something that works, and this test says so.
     """
-    resurrected = [n for n in sorted(DOCUMENTED_AS_ABSENT) if hasattr(FastMCPContext, n)]
+    resurrected = [
+        n for n in sorted(DOCUMENTED_AS_ABSENT) if hasattr(FastMCPContext, n)
+    ]
     assert not resurrected, (
         f"guides describe these as absent from fastmcp.Context, but they exist: {resurrected}"
     )
@@ -130,7 +131,9 @@ def test_every_mcpserver_constructor_param_is_mapped():
     reach a reader as an unmapped keyword that raises ``TypeError`` on FastMCP.
     """
     guide = _guide("from-mcp-sdk-v2.mdx")
-    params = [p for p in inspect.signature(MCPServer.__init__).parameters if p != "self"]
+    params = [
+        p for p in inspect.signature(MCPServer.__init__).parameters if p != "self"
+    ]
 
     unmapped = []
     for param in params:
