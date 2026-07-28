@@ -75,7 +75,9 @@ The `visibility` field controls where a tool appears:
 
 This is useful when you have tools that only make sense as part of the app's interactive flow, not as standalone LLM actions.
 
-Visibility is a declaration, not server-side filtering. Every tool appears in `tools/list` carrying its `visibility` metadata, and the host decides what to show the model — the division the MCP Apps specification defines. Listing them is also what lets a proxy or gateway forward them: an intermediary can only route to a tool it can see.
+Visibility is a declaration, and on `tools/list` the host does the filtering — the division the MCP Apps specification defines. Every tool is advertised carrying its `visibility` metadata, which is also what lets a proxy or gateway forward it: an intermediary can only route to a tool it can see.
+
+That division assumes a host stands between the server and the model. Where one doesn't, FastMCP applies the declaration itself. [Tool search](/servers/transforms/tool-search) and code mode reach the model as ordinary tool output rather than as an advertised listing, and their call-tool proxies execute a name the model supplies — nothing downstream can filter either, so app-only tools are excluded from both. The app's own UI still reaches its backends, because a UI calling by identity is not the model.
 
 ```python
 @mcp.tool(
