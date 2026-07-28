@@ -52,7 +52,7 @@ CONSTRUCTION AND TRANSPORT
 - `async with stdio_server() as (r, w): await server.run(r, w, server.create_initialization_options())`
 - `SseServerTransport` / `StreamableHTTPSessionManager` and any Starlette wiring around them
 - `asyncio.run(main())` boilerplate
-- `lifespan=` and anything reading the lifespan context
+- `lifespan=` — carries over directly: pass the same async context manager to `FastMCP(lifespan=...)`, and read what it yields from `ctx.lifespan_context` in any tool. Do not drop it — the tools that depended on it (a DB connection, a client pool) lose their dependency silently if you do.
 
 HANDLERS TO DELETE (each becomes one or more decorated functions)
 - `@server.list_tools()` + `@server.call_tool()` — note the `if name == ...` dispatch chain inside call_tool; each branch becomes its own `@mcp.tool`

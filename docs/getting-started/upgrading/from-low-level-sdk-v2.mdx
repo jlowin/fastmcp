@@ -29,7 +29,7 @@ CONSTRUCTION AND TRANSPORT
 - `server.run(read_stream, write_stream, server.create_initialization_options())` and its `stdio_server()` context manager
 - `server.streamable_http_app()` and any Starlette app assembled around it
 - `asyncio.run(main())` boilerplate
-- `lifespan=` — carries over directly: pass the same async context manager to `FastMCP(lifespan=...)`, and read what it yields from `ctx.request_context.lifespan_context` in any tool. Do not drop it — the tools that depended on it (a DB connection, a client pool) lose their dependency silently if you do.
+- `lifespan=` — carries over directly: pass the same async context manager to `FastMCP(lifespan=...)`, and read what it yields from `ctx.lifespan_context` in any tool. Do not drop it — the tools that depended on it (a DB connection, a client pool) lose their dependency silently if you do.
 
 HANDLERS TO DELETE, EACH REPLACED BY ONE DECORATOR (not simply removed)
 - `on_list_tools` + `on_call_tool` → one `@mcp.tool` function per branch of the `if params.name == ...` dispatch chain inside `on_call_tool`
@@ -51,7 +51,8 @@ TYPES THAT DISAPPEAR FROM YOUR CODE
 CONTEXT AND SIDE CHANNELS
 - `ctx.session.send_log_message(...)` — `ctx.info()` / `ctx.debug()` / `ctx.warning()` / `ctx.error()` on a `fastmcp.Context` parameter
 - `ctx.session.report_progress(...)` — `ctx.report_progress()`
-- `ctx.params`, `ctx.request_id`, `ctx.meta`, `ctx.protocol_version` — on a FastMCP Context these live on `ctx.request_context` (note `ctx.protocol_version` itself does not exist)
+- `ctx.request_id`, `ctx.meta`, `ctx.protocol_version` — these live on `ctx.request_context` in FastMCP (`ctx.request_context.request_id`, and so on); note that `ctx.protocol_version` directly on the Context does not exist
+- `ctx.params` — no equivalent, and none is needed: the raw request params were how a low-level handler read the tool's arguments, and those are now the decorated function's typed parameters. `ctx.request_context.params` does NOT exist and raises AttributeError.
 - Direct `ctx.session` use for anything else — `Context.session` exists in FastMCP too and returns the same raw SDK session, so this still works; prefer a `Context` method where one exists, and note the remaining uses as SDK-coupled
 
 ERRORS AND AUTH

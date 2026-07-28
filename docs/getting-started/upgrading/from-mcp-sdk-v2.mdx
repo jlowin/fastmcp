@@ -78,7 +78,7 @@ Everything else carries over unchanged, including logging, progress, `elicit`, `
 RESOLVERS — the one part that is not a rename, so check for it first
 - any `Annotated[T, Resolve(fn)]` parameter, and the resolvers behind it
 - resolvers returning `Elicit[...]`, `Sample`, or `ListRoots`
-FastMCP has no resolver injection. `Elicit` has two replacements depending on protocol era; `Sample` and `ListRoots` have no equivalent by design. Flag every one for the user with the guide's reasoning rather than picking a rewrite yourself. Also note that a resolved parameter is hidden from the tool's input schema, so replacing it with an ordinary argument changes the schema clients see.
+FastMCP has no resolver injection, but the underlying requests survive in a different shape: on a modern connection `Elicit`, `Sample`, and `ListRoots` all ride the guard pattern, where the tool returns an `InputRequiredResult` and the client answers on the next call. Do not tell the user these capabilities are simply unavailable. Flag every resolver with the guide's per-capability reasoning (server-side LLM call is usually better than guard-routed sampling; roots are often simplest as ordinary tool arguments) rather than picking a rewrite yourself. Also note that a resolved parameter is hidden from the tool's input schema, so replacing it with an ordinary argument changes the schema clients see.
 
 For each item found, show the original code, name what changed, and give the FastMCP equivalent from the guide. Call out anything you could not find a documented replacement for instead of inventing one.
 </Prompt>
@@ -217,11 +217,29 @@ if __name__ == "__main__":
 | `dependencies=[...]` | a [`fastmcp.json`](/deployment/server-configuration) configuration file |
 | `title=`, `description=` | `instructions=` |
 | `tools=[Tool, ...]` | `tools=[callable, ...]`, or FastMCP's own `Tool` |
+| `resources=[Resource, ...]` | no constructor keyword — register with `@mcp.resource` or `mcp.add_resource()` |
+| `subscriptions=<SubscriptionBus>` | no equivalent — see below |
 | `token_verifier=`, `auth_server_provider=`, `auth=AuthSettings(...)` | a single `auth=` provider |
 | `cache_hints={...}` | `cache_ttl=`, `cache_scope=` |
 | `extensions=[...]` | `mcp.add_extension(...)` |
 
 Authentication is the largest of these, and it consolidates rather than moves. `MCPServer` exposes the SDK's raw auth plumbing — a token verifier, an authorization-server provider, and an `AuthSettings` object, configured separately. FastMCP takes one `auth=` provider that carries the whole configuration, and ships providers for the common cases: `JWTVerifier` for validating tokens you already issue, `RemoteAuthProvider` for delegating to an external authorization server, `OAuthProxy` for wrapping a provider that lacks Dynamic Client Registration, and named providers for GitHub, Google, Auth0, Keycloak, WorkOS, and others. See [Authentication](/servers/auth/authentication).
+
+Two rows are worth reading before you delete the argument. `resources=` has no constructor equivalent, so pre-built `Resource` objects need registering through `@mcp.resource` or `mcp.add_resource()` instead — dropping the keyword silently drops the resources with it. And `subscriptions=`, which an `MCPServer` uses to plug in an external pub/sub bus so resource-update notifications reach clients across replicas, has no FastMCP equivalent at all. A multi-replica deployment that relies on it should confirm it can live without cross-replica subscription fan-out before migrating, because a mechanical rename removes that behavior without any error to warn you.
+
+### Serving HTTP
+
+Renaming `streamable_http_app()` to `http_app()` is only mechanical for a call with no arguments. The keywords were renamed and regrouped, so an existing call carries arguments `http_app()` does not accept:
+
+| SDK v2 | FastMCP |
+|---|---|
+| `streamable_http_app(streamable_http_path=...)` | `http_app(path=...)` |
+| `sse_app(sse_path=...)` | `http_app(path=..., transport="sse")` |
+| `sse_app(message_path=...)` | no equivalent |
+| `transport_security=TransportSecuritySettings(...)` | `host_origin_protection=`, `allowed_hosts=`, `allowed_origins=` |
+| `host=...` | pass to `mcp.run(host=...)` instead |
+
+`json_response`, `stateless_http`, `event_store`, and `retry_interval` keep their names. See [Deploying HTTP servers](/deployment/http) for the host and origin settings.
 
 ## Asking for Input
 
@@ -274,7 +292,9 @@ On the **modern protocol** (2026-07-28), server-initiated requests are gone from
 
 The two are era-gated in both directions: `ctx.elicit()` raises on a modern connection, and a guard result raises on a handshake one. A server that must serve both branches on `ctx.request_context.protocol_version`. See [Elicitation](/servers/elicitation#which-approach-to-use) for both shapes side by side.
 
-Resolvers that return `Sample` or `ListRoots` have no FastMCP equivalent at all, by design. For generation, [call an LLM from your server](/servers/sampling) with your own API key: your tool then behaves identically for every client, including the many that never implemented sampling, and you avoid paying a full round trip per generation step. For roots, take the paths as ordinary tool arguments, which is simpler whenever the caller can supply them.
+Resolvers that return `Sample` or `ListRoots` have no *injected* equivalent — FastMCP has no `ctx.sample()` or `ctx.list_roots()` — but the underlying request survives, so this is a change of shape rather than a loss of capability. On a modern connection both ride the same guard pattern as elicitation: the tool returns an `InputRequiredResult` describing the sampling or roots request, and the client answers on the next call.
+
+Which shape you want differs by capability. For **roots**, the guard route is the natural replacement, since one round buys the whole answer — and taking the paths as ordinary tool arguments is simpler still whenever the caller can supply them. For **generation**, prefer [calling an LLM from your server](/servers/sampling) with your own API key: your tool then behaves identically for every client, including the many that never implemented sampling, and you avoid paying a full request-response cycle per generation step. Reach for the guard route when using the *caller's* model is specifically the point.
 
 One schema detail is easy to miss during the rewrite. A resolved parameter never appears in the tool's input schema — `book_flight` above advertises no arguments at all. When you replace a resolver with an explicit tool argument, the schema the client sees gains a field, which is usually what you want but is a visible change to your tool's contract.
 
