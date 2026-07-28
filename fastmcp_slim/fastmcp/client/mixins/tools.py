@@ -147,7 +147,7 @@ class ClientToolsMixin:
         *,
         input_responses: mcp_types.InputResponses | None = None,
         request_state: str | None = None,
-        allow_input_required: Literal[False] = False,
+        drive: Literal[True] = True,
     ) -> mcp_types.CallToolResult: ...
 
     @overload
@@ -161,7 +161,7 @@ class ClientToolsMixin:
         *,
         input_responses: mcp_types.InputResponses | None = None,
         request_state: str | None = None,
-        allow_input_required: Literal[True],
+        drive: Literal[False],
     ) -> mcp_types.CallToolResult | mcp_types.InputRequiredResult: ...
 
     async def call_tool_mcp(
@@ -174,7 +174,7 @@ class ClientToolsMixin:
         *,
         input_responses: mcp_types.InputResponses | None = None,
         request_state: str | None = None,
-        allow_input_required: bool = False,
+        drive: bool = True,
     ) -> mcp_types.CallToolResult | mcp_types.InputRequiredResult:
         """Send a tools/call request and return the complete MCP protocol result.
 
@@ -185,13 +185,13 @@ class ClientToolsMixin:
         (SEP-2322) rather than a final result. By default that is resolved for
         you, the same way `call_tool` does it — each embedded request is
         dispatched to this client's handlers and the call is retried until it
-        completes. Pass `allow_input_required=True` to receive the ask instead
-        and drive the exchange one leg at a time, feeding the answers back
-        through `input_responses` and `request_state`:
+        completes. Pass `drive=False` to take the wheel: the ask is handed back
+        to you, and you answer it by calling again with `input_responses` and
+        the `request_state` from the previous leg.
 
         ```python
         async with Client(mcp) as client:
-            leg = await client.call_tool_mcp("book", {}, allow_input_required=True)
+            leg = await client.call_tool_mcp("book", {}, drive=False)
             answers = {
                 key: mcp_types.ElicitResult(action="accept", content={"value": "Paris"})
                 for key in leg.input_requests
@@ -201,7 +201,7 @@ class ClientToolsMixin:
                 {},
                 input_responses=answers,
                 request_state=leg.request_state,
-                allow_input_required=True,
+                drive=False,
             )
         ```
 
@@ -218,7 +218,8 @@ class ClientToolsMixin:
         Returns:
             The complete response object from the protocol. An
             `InputRequiredResult` when the tool asked for input and
-            `allow_input_required` is set; otherwise a `CallToolResult`.
+            `drive=False` and the tool asked for input; otherwise a
+            `CallToolResult`.
 
         Raises:
             RuntimeError: If called while the client is not connected.
@@ -274,9 +275,7 @@ class ClientToolsMixin:
             first = await self._await_with_session_monitoring(
                 _retry(input_responses, request_state)
             )
-            if allow_input_required and isinstance(
-                first, mcp_types.InputRequiredResult
-            ):
+            if not drive and isinstance(first, mcp_types.InputRequiredResult):
                 # The caller is driving the exchange, so hand back the ask
                 # untouched rather than resolving it against our own handlers.
                 return first
@@ -348,7 +347,7 @@ class ClientToolsMixin:
         meta: dict[str, Any] | None = None,
         input_responses: mcp_types.InputResponses | None = None,
         request_state: str | None = None,
-        allow_input_required: bool = False,
+        drive: bool = True,
     ) -> CallToolResult:
         """Call a tool on the server.
 
@@ -395,7 +394,7 @@ class ClientToolsMixin:
             meta=request_meta or None,
             input_responses=input_responses,
             request_state=request_state,
-            allow_input_required=cast("Literal[True]", allow_input_required),
+            drive=cast("Literal[False]", drive),
         )
         if isinstance(result, mcp_types.InputRequiredResult):
             # The caller is driving; hand the ask back rather than parsing it as
