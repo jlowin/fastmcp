@@ -54,16 +54,20 @@ F = TypeVar("F", bound=Callable[..., Any])
 
 
 def _make_resolver(app_name: str | None = None) -> Any:
-    """Create a CallTool resolver that prefixes tool names with a hash.
+    """Create a CallTool resolver that addresses peer tools by identity.
 
-    Structurally identical to the old ``___`` resolver — ``app_name`` is
-    the FastMCPApp's name, known at serialization time from the tool's
-    ``meta["fastmcp"]["app"]`` tag. The only change is the wire format:
-    ``<hash>_<local_name>`` instead of ``<app_name>___<local_name>``.
+    ``app_name`` is the FastMCPApp's name, known at serialization time from
+    the tool's ``meta["fastmcp"]["app"]`` tag. Serialization happens deep
+    inside whatever composition the server has, so nothing here can know
+    what these tools will be *called* by the time the payload reaches a
+    host. References therefore start out identity-addressed, as
+    ``<hash>_<local_name>``.
 
-    The dispatcher recognizes the hashed form and routes it via
-    ``get_tool_by_hash`` which walks the provider tree recursively —
-    same pattern as ``get_app_tool``.
+    Each FastMCP server rewrites those references on the way out to the
+    name it lists that tool under, so what a renderer finally receives is
+    an ordinary tool name (see ``server.providers.prefab_payload``). A
+    reference no server could resolve keeps this form, which the dispatcher
+    still routes via ``get_tool_by_hash``.
     """
     from fastmcp.server.providers.addressing import (
         hashed_backend_name,
@@ -227,14 +231,17 @@ class FastMCPApp(Provider):
                 raise ValueError(f"Cannot determine tool name for {fn!r}")
 
             from fastmcp.apps.config import AppConfig, app_config_to_meta_dict
-            from fastmcp.server.providers.addressing import hash_tool
+            from fastmcp.server.providers.addressing import (
+                TOOL_HASH_META_KEY,
+                hash_tool,
+            )
 
             app_config = AppConfig(visibility=visibility)
             meta: dict[str, Any] = {
                 "ui": app_config_to_meta_dict(app_config),
                 "fastmcp": {
                     "app": self.name,
-                    "_tool_hash": hash_tool(self.name, resolved_name),
+                    TOOL_HASH_META_KEY: hash_tool(self.name, resolved_name),
                 },
             }
 
@@ -318,7 +325,10 @@ class FastMCPApp(Provider):
 
         def _register(fn: F, tool_name: str | None) -> F:
             from fastmcp.apps.config import AppConfig, app_config_to_meta_dict
-            from fastmcp.server.providers.addressing import hash_tool
+            from fastmcp.server.providers.addressing import (
+                TOOL_HASH_META_KEY,
+                hash_tool,
+            )
             from fastmcp.server.providers.local_provider.decorators.tools import (
                 PREFAB_RENDERER_URI,
             )
@@ -334,7 +344,7 @@ class FastMCPApp(Provider):
                 "ui": app_config_to_meta_dict(app_config),
                 "fastmcp": {
                     "app": self.name,
-                    "_tool_hash": hash_tool(self.name, resolved),
+                    TOOL_HASH_META_KEY: hash_tool(self.name, resolved),
                 },
             }
 
@@ -373,12 +383,15 @@ class FastMCPApp(Provider):
         if not isinstance(tool, Tool):
             tool = Tool._ensure_tool(tool)
 
-        from fastmcp.server.providers.addressing import hash_tool
+        from fastmcp.server.providers.addressing import (
+            TOOL_HASH_META_KEY,
+            hash_tool,
+        )
 
         meta = dict(tool.meta) if tool.meta else {}
         fm = meta.setdefault("fastmcp", {})
         fm["app"] = self.name
-        fm["_tool_hash"] = hash_tool(self.name, tool.name)
+        fm[TOOL_HASH_META_KEY] = hash_tool(self.name, tool.name)
         ui = meta.setdefault("ui", {})
         if "visibility" not in ui:
             ui["visibility"] = ["app"]

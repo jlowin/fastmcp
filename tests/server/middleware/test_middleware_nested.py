@@ -149,10 +149,6 @@ def mcp_server(recording_middleware):
     async def log_tool(context: Context) -> None:
         await context.info(message="test log")
 
-    @mcp.tool
-    async def sample_tool(context: Context) -> None:
-        await context.sample("hello")
-
     mcp.add_middleware(recording_middleware)
 
     # Register a progress notification handler (v2 API: (ctx, params)).
@@ -204,10 +200,6 @@ class TestNestedMiddlewareHooks:
         @mcp.tool
         async def log_tool(context: Context) -> None:
             await context.info(message="test log")
-
-        @mcp.tool
-        async def sample_tool(context: Context) -> None:
-            await context.sample("hello")
 
         mcp.add_middleware(nested_middleware)
 
@@ -510,7 +502,7 @@ class TestProxyServer:
         async with Client(proxy_server) as client:
             await client.list_tools()
 
-        assert TAGS == [{"add-tool"}, set(), set(), set()]
+        assert TAGS == [{"add-tool"}, set(), set()]
 
 
 class TestToolCallDenial:

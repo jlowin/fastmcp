@@ -148,6 +148,40 @@ class TestParseMcpConfig:
         assert isinstance(servers[0].config, RemoteMCPServer)
         assert servers[0].config.url == "http://localhost:8000/mcp"
 
+    def test_reads_as_utf8_explicitly(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        """Regression test for GH-4689: config files must be read with an
+        explicit UTF-8 encoding, not the platform's preferred encoding
+        (e.g. cp949 on Windows with a non-UTF-8 locale), since that's what
+        every tool that writes these files emits."""
+        original_read_text = Path.read_text
+
+        def _tracking_read_text(self: Path, *args: Any, **kwargs: Any) -> str:
+            assert kwargs.get("encoding") == "utf-8", (
+                "path.read_text() must pass encoding='utf-8' explicitly"
+            )
+            return original_read_text(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "read_text", _tracking_read_text)
+
+        path = tmp_path / "config.json"
+        path.write_bytes(
+            json.dumps(
+                {
+                    "mcpServers": {
+                        "demo": {
+                            "command": "echo",
+                            "args": ["hello — world"],
+                        }
+                    }
+                }
+            ).encode("utf-8")
+        )
+        servers = _parse_mcp_config(path, "test")
+        assert len(servers) == 1
+        assert servers[0].name == "demo"
+
 
 # ---------------------------------------------------------------------------
 # Scanner: Claude Desktop

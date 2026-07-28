@@ -34,17 +34,34 @@ from fastmcp import Client, FastMCP, settings
 # longer resolves. `create_proxy`, `settings`, `McpError`, and
 # `CacheableToolResult` above are part of the same set.
 from fastmcp.apps import AppConfig
+from fastmcp.client.sampling.handlers.openai import OpenAISamplingHandler
 from fastmcp.client.transports import StreamableHttpTransport
 from fastmcp.dependencies import Depends
 from fastmcp.exceptions import McpError
 from fastmcp.prompts.function_prompt import FunctionPrompt
 from fastmcp.resources.function_resource import FunctionResource
 from fastmcp.server import create_proxy
+from fastmcp.server.auth import (
+    AuthCheck,
+    AuthContext,
+    require_roles,
+    require_scopes,
+    restrict_tag,
+    run_auth_checks,
+)
 from fastmcp.server.middleware.caching import CacheableToolResult
 from fastmcp.server.providers.openapi import OpenAPIProvider
 from fastmcp.server.providers.proxy import FastMCPProxy, ProxyClient
 from fastmcp.server.transforms import PromptsAsTools, ResourcesAsTools, ToolTransform
 from fastmcp.tools.function_tool import FunctionTool
+
+# The two authorization names the removed shim exported that `fastmcp.server.auth`
+# deliberately does not re-export (middleware plumbing, no documented user-facing
+# use). The upgrade guide sends them here instead, so pin that path too.
+from fastmcp.utilities.authorization import (
+    run_auth_checks_with_shortfall,
+    scope_requirements,
+)
 
 
 class TestCommonServersUpgradeCleanly:
@@ -152,6 +169,38 @@ class TestCanonicalReplacementsResolve:
         )
         assert all(sym is not None for sym in symbols)
 
+    def test_authorization_symbols_resolve_from_their_documented_paths(self):
+        # The removed `fastmcp.server.auth.authorization` shim exported eight
+        # names, and the upgrade guide splits them across two replacements. Pin
+        # both halves: the checks users write against reach the auth package,
+        # while the two middleware helpers stay on the utilities module.
+        from_auth_package = (
+            AuthCheck,
+            AuthContext,
+            require_roles,
+            require_scopes,
+            restrict_tag,
+            run_auth_checks,
+        )
+        from_utilities = (run_auth_checks_with_shortfall, scope_requirements)
+        assert all(sym is not None for sym in from_auth_package + from_utilities)
+
+        import fastmcp.server.auth as auth_package
+
+        for name in ("run_auth_checks_with_shortfall", "scope_requirements"):
+            assert not hasattr(auth_package, name)
+
+    def test_sampling_handler_resolves_from_its_submodule(self):
+        # The removed shim re-exported `OpenAISamplingHandler` from its package
+        # `__init__`. The canonical package keeps its `__init__` empty so that
+        # touching it never pulls in a vendor SDK, so the guide must name the
+        # submodule — pin both halves of that.
+        assert OpenAISamplingHandler is not None
+
+        import fastmcp.client.sampling.handlers as handlers_package
+
+        assert not hasattr(handlers_package, "OpenAISamplingHandler")
+
 
 # --- Hard removals: modules that no longer exist ---
 
@@ -162,7 +211,15 @@ REMOVED_MODULES = [
     "fastmcp.experimental.utilities.openapi",  # -> fastmcp.utilities.openapi
     "fastmcp.server.apps",  # -> fastmcp.apps
     "fastmcp.server.app",  # -> fastmcp.apps / fastmcp
-    "mcp.types",  # -> mcp_types
+    # The pre-rename component modules. `tool.py`/`resource.py`/`prompt.py` are
+    # now `base.py`; import the types from the package itself (`from
+    # fastmcp.tools import Tool`) rather than naming the private module.
+    "fastmcp.tools.tool",  # -> fastmcp.tools
+    "fastmcp.resources.resource",  # -> fastmcp.resources
+    "fastmcp.prompts.prompt",  # -> fastmcp.prompts
+    "fastmcp.experimental.sampling",  # -> fastmcp.client.sampling
+    "fastmcp.experimental.sampling.handlers",  # -> fastmcp.client.sampling.handlers
+    "fastmcp.server.auth.authorization",  # -> fastmcp.server.auth / fastmcp.utilities.authorization
 ]
 
 # Names that were re-export shims and are gone; import them from the canonical
@@ -174,10 +231,9 @@ REMOVED_NAMES = [
     # old misspelled names renamed to Cacheable* (no alias)  codespell:ignore
     ("fastmcp.server.middleware.caching", "CachableToolResult"),  # codespell:ignore
     ("fastmcp.server.middleware.caching", "CachablePromptResult"),  # codespell:ignore
-    # component-import shims -> fastmcp.tools.function_tool, etc.
-    ("fastmcp.tools.tool", "FunctionTool"),
-    ("fastmcp.resources.resource", "FunctionResource"),
-    ("fastmcp.prompts.prompt", "FunctionPrompt"),
+    # 3.0-era rename alias -> SkillsDirectoryProvider
+    ("fastmcp.server.providers.skills", "SkillsProvider"),
+    ("fastmcp.server.providers", "SkillsProvider"),
 ]
 
 
@@ -186,6 +242,20 @@ class TestRemovedSurfacesFailLoudly:
     def test_removed_module_raises_module_not_found(self, module_path):
         with pytest.raises(ModuleNotFoundError):
             importlib.import_module(module_path)
+
+    def test_mcp_types_import_path_restored_by_stable_sdk(self):
+        # The MCP Python SDK beta (2.0.0b2, what v4 was built against) dropped
+        # `mcp.types` entirely, so `from mcp.types import X` was documented as a
+        # hard break requiring a switch to `from mcp_types import X`. The stable
+        # SDK release (2.0.0) reintroduced `mcp.types` as a deliberate mirror of
+        # `mcp_types` — same objects, same snake_case fields, not a v1 API
+        # restoration — specifically so old import paths keep working. Both
+        # spellings resolve to the identical class.
+        import mcp.types
+        import mcp_types
+
+        assert mcp.types.Tool is mcp_types.Tool
+        assert set(mcp.types.__all__) == set(mcp_types.__all__)
 
     @pytest.mark.parametrize(
         "module_path, name",

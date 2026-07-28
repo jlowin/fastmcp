@@ -36,7 +36,6 @@ from fastmcp.server.providers.skills import (
     ClaudeSkillsProvider,
     SkillProvider,
     SkillsDirectoryProvider,
-    SkillsProvider,
 )
 
 if TYPE_CHECKING:
@@ -54,7 +53,6 @@ __all__ = [
     "ProxyProvider",
     "SkillProvider",
     "SkillsDirectoryProvider",
-    "SkillsProvider",  # Backwards compatibility alias for SkillsDirectoryProvider
 ]
 
 

@@ -344,7 +344,6 @@ class OAuth(OAuthClientProvider):
             storage=self.token_storage_adapter,
             redirect_handler=self.redirect_handler,
             callback_handler=self.callback_handler,
-            timeout=self._callback_timeout,
             client_metadata_url=self._client_metadata_url,
         )
 

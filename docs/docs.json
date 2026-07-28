@@ -16,7 +16,7 @@
       "dark": "#475569",
       "light": "#1e3a5f"
     },
-    "content": "FastMCP 4 is in alpha — you're reading the v4 docs. [What's new](/getting-started/whats-new) · [FastMCP 3 docs](/v3/getting-started/welcome)"
+    "content": "FastMCP 4 is in beta — check out [what's new](/getting-started/whats-new)!"
   },
   "colors": {
     "dark": "#f72585",
@@ -358,10 +358,12 @@
                     "group": "Upgrading",
                     "icon": "up",
                     "pages": [
-                      "getting-started/upgrading/from-fastmcp-2",
                       "getting-started/upgrading/from-fastmcp-3",
-                      "getting-started/upgrading/from-mcp-sdk",
-                      "getting-started/upgrading/from-low-level-sdk"
+                      "getting-started/upgrading/from-fastmcp-2",
+                      "getting-started/upgrading/from-mcp-sdk-v1",
+                      "getting-started/upgrading/from-mcp-sdk-v2",
+                      "getting-started/upgrading/from-low-level-sdk-v1",
+                      "getting-started/upgrading/from-low-level-sdk-v2"
                     ]
                   },
                   {
@@ -372,19 +374,7 @@
                       "development/contributing",
                       "development/tests",
                       "development/releases",
-                      "patterns/contrib",
-                      {
-                        "collapsed": true,
-                        "group": "v4 Notes",
-                        "pages": [
-                          "development/v4-notes/index",
-                          "development/v4-notes/change-register",
-                          "development/v4-notes/feature-program",
-                          "development/v4-notes/background-tasks",
-                          "development/v4-notes/protocol-2026",
-                          "development/v4-notes/known-gaps"
-                        ]
-                      }
+                      "patterns/contrib"
                     ]
                   },
                   {
@@ -413,7 +403,7 @@
             "icon": "code"
           }
         ],
-        "version": "v4.0.0 (alpha 1)"
+        "version": "v4.0.0 (beta 1)"
       },
       {
         "$ref": "./v3-navigation.json"
@@ -424,6 +414,30 @@
     ]
   },
   "redirects": [
+    {
+      "destination": "/getting-started/whats-new",
+      "source": "/development/v4-notes/index"
+    },
+    {
+      "destination": "/getting-started/upgrading/from-fastmcp-3",
+      "source": "/development/v4-notes/change-register"
+    },
+    {
+      "destination": "/getting-started/whats-new",
+      "source": "/development/v4-notes/feature-program"
+    },
+    {
+      "destination": "/getting-started/whats-new",
+      "source": "/development/v4-notes/protocol-2026"
+    },
+    {
+      "destination": "/getting-started/upgrading/from-fastmcp-3",
+      "source": "/development/v4-notes/known-gaps"
+    },
+    {
+      "destination": "/servers/tasks",
+      "source": "/development/v4-notes/background-tasks"
+    },
     {
       "destination": "/apps/fastmcp-app",
       "source": "/apps/interactive-apps"
@@ -497,12 +511,20 @@
       "source": "/development/upgrade-guide"
     },
     {
-      "destination": "/getting-started/upgrading/from-mcp-sdk",
+      "destination": "/getting-started/upgrading/from-mcp-sdk-v1",
       "source": "/getting-started/upgrading-from-sdk"
     },
     {
-      "destination": "/getting-started/upgrading/from-low-level-sdk",
+      "destination": "/getting-started/upgrading/from-mcp-sdk-v1",
+      "source": "/getting-started/upgrading/from-mcp-sdk"
+    },
+    {
+      "destination": "/getting-started/upgrading/from-low-level-sdk-v1",
       "source": "/getting-started/low-level-sdk"
+    },
+    {
+      "destination": "/getting-started/upgrading/from-low-level-sdk-v1",
+      "source": "/getting-started/upgrading/from-low-level-sdk"
     },
     {
       "destination": "/getting-started/upgrading/from-fastmcp-3",

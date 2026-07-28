@@ -60,7 +60,7 @@ When modifying MCP functionality, changes typically need to be applied across al
 
 - Prek hooks are required (run automatically on commits)
 - Never amend commits to fix prek failures
-- Never apply labels manually or invent new ones — the GitHub API auto-creates any unknown label name, polluting the repo's label list. Note the appropriate label in the PR body and let the maintainer/automation apply it. Canonical names: `bugs`, `breaking change`, `enhancements`, `features` (it's `breaking change`, not `breaking`). See the review-pr skill.
+- Never apply labels manually or invent new ones — issues and PRs are auto-labeled by a bot based on title/body/code changes. Don't note a "suggested" or "appropriate" label anywhere in the PR body either. See the review-pr skill.
 - Improvements = enhancements (not features) unless specified
 - **NEVER** force-push on collaborative repos
 - **ALWAYS** run prek before PRs
@@ -68,6 +68,12 @@ When modifying MCP functionality, changes typically need to be applied across al
 - **NEVER** merge a PR marked as do-not-merge or draft. Check title, body, AND labels for `[DNM]`, `DNM`, `DO NOT MERGE`, `DON'T MERGE`, `DONT MERGE`, `do-not-merge`, `dont-merge`, `[DRAFT]`, or `DRAFT` (case-insensitive, any variation — some authors use `[DRAFT]` in the title even when `isDraft` is false). Authors use these as hard stops — respect them even if CI is green and review looks clean. When triaging a batch of PRs, filter these out up front AND re-check each one's labels immediately before merging, since labels can change mid-session.
 - **ALWAYS** read review-bot comments before approving a PR. CodeRabbit and chatgpt-codex-connector (Codex) leave substantive review comments on most PRs in this repo — these bots have read the diff and often flag real issues that aren't in the PR description. Use `gh pr view <num> --comments` and read the bot feedback as part of review. Unlike proposed solutions from issue reporters, review-bot feedback should be evaluated on its merits, not discounted.
 - **Be constructively skeptical of bot review comments on your own PRs.** CodeRabbit, Codex, and claude[bot] run a fresh review pass on every push, which means a PR with active churn can accumulate bot comments in a stream that never really ends — each fix surfaces a new edge case the next pass can flag. Most of the early feedback is real and worth acting on; diminishing returns set in fast. Evaluate each comment on its merits, the same way you would a human reviewer: is this a real bug users will hit, or a hypothetical that requires an adversarial setup? Does the fix introduce more complexity than the problem? Has the bot missed context that's obvious to a human reader (a `*,` keyword-only marker, a design decision documented elsewhere, something already resolved on a later commit)? When a comment is pedantic, a false positive, or flagging something already fixed, reply on the thread explaining the reasoning and move on — don't keep iterating just because more comments arrive. If you find yourself three rounds deep and the feedback is shifting toward "what if someone does X" hypotheticals, you're past the point where each fix is improving the PR. Stop, document the contract as-is, and ship.
+- **Resolve a review thread when you fix it; reply when you're declining it.** A fix explains itself through the commit, so resolving is enough — and it leaves unresolved threads meaning unfinished business, which is the signal worth having. A decline needs a one-line reason in a reply, because resolving collapses the thread and a hidden objection is worse than a visible one. Doing both is noise. Get thread ids from the GraphQL `reviewThreads` field, then resolve:
+
+  ```bash
+  gh api graphql -f query='query($n:Int!){repository(owner:"PrefectHQ",name:"fastmcp"){pullRequest(number:$n){reviewThreads(first:50){nodes{id isResolved path}}}}}' -F n=<pr-number>
+  gh api graphql -f query='mutation($id:ID!){resolveReviewThread(input:{threadId:$id}){thread{isResolved}}}' -F id=PRRT_...
+  ```
 
 ### Outbound Comments and Shell Interpolation
 

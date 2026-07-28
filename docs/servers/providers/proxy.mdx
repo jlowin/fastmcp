@@ -172,6 +172,8 @@ backend = ProxyClient(
 
 ### Tool Results Are Relayed, Not Inspected
 
+<VersionBadge version="4.0.0" />
+
 A proxy passes a backend's tool results through untouched, including results that don't match the output schema the backend advertised. Deciding whether a server honored its own contract belongs to the client consuming the result, and that client validates for itself.
 
 This matters when a backend's declared schema is subtly wrong — an enum missing a variant it actually returns, say. A proxy that enforced the schema would replace the backend's working response with an error of its own, and the client would never see what the backend actually said.
