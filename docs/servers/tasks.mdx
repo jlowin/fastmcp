@@ -225,30 +225,35 @@ A tool can ask the client a question partway through — the same [guard pattern
 ```python
 from fastmcp import Context, FastMCP
 from fastmcp_tasks import TasksExtension
-import mcp.types
+from mcp.types import (
+    ElicitRequest,
+    ElicitRequestFormParams,
+    ElicitResult,
+    InputRequiredResult,
+)
 
 mcp = FastMCP("MyServer")
 mcp.add_extension(TasksExtension())
 
 @mcp.tool(task=True)
-async def plan_dinner(ctx: Context) -> str | mcp.types.InputRequiredResult:
+async def plan_dinner(ctx: Context) -> str | InputRequiredResult:
     responses = ctx.input_responses
     if responses is None:
         # First leg: ask a question and end here.
-        request = mcp.types.ElicitRequest(
-            params=mcp.types.ElicitRequestFormParams(
+        request = ElicitRequest(
+            params=ElicitRequestFormParams(
                 message="What are you in the mood for?",
                 requested_schema={"type": "object", "properties": {"cuisine": {"type": "string"}}},
             )
         )
-        return mcp.types.InputRequiredResult(
+        return InputRequiredResult(
             result_type="input_required",
             input_requests={"prefs": request},
         )
 
     # Re-entered leg: the client's answer is on ctx.input_responses.
     answer = responses["prefs"]
-    assert isinstance(answer, mcp.types.ElicitResult)
+    assert isinstance(answer, ElicitResult)
     return f"Tonight: {answer.content['cuisine']}!"
 ```
 
