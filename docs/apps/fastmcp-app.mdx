@@ -89,7 +89,11 @@ A fair question. Any [Interactive Tool](/apps/prefab) can call a server tool —
 - What happens to `CallTool("add_note")` when you mount this server under a namespace and the tool becomes `notes_add_note`?
 - How do you keep it all wired correctly as you compose servers?
 
-`FastMCPApp` owns these concerns. Entry points register as model-visible. Backend tools register as UI-only by default. Backend tools get globally stable identifiers that survive namespacing, and `CallTool` accepts function references, so references stay valid when you compose servers.
+`FastMCPApp` owns these concerns. Entry points register as model-visible, backend tools register as UI-only, and hosts act on those declarations to decide what the model sees.
+
+Composition is handled by never writing the name down. `CallTool` takes a function reference, and FastMCP resolves it when the UI is serialized — to whatever that tool is actually called by then. Mount the server under a namespace and the button calls `notes_add_note`; put a gateway in front and it calls whatever the gateway lists. Since you never wrote a name, renaming cannot break it. [The architecture page](/apps/architecture) covers how that resolution works.
+
+The one rule that comes with this: **an app name must be unique within a server.** Composing the same app twice breaks its UI — two copies of `FastMCPApp("notes")` are indistinguishable no matter what namespaces you mount them under, so FastMCP declines to bind rather than picking one. Name apps for what they serve: `FastMCPApp("notes-acme")` and `FastMCPApp("notes-globex")`. [The architecture page](/apps/architecture) explains why identity works this way.
 
 The rest of this page covers each piece in turn.
 
