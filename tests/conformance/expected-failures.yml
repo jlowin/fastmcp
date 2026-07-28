@@ -10,7 +10,7 @@ server:
   # but the suite calls the methods regardless of the declared capability. Both
   # scenarios were removed in MCP 2026-07-28, the version FastMCP targets, so
   # this affects handshake-era clients only.
-  - resources-subscribe
+  - resources-subscribe 
   - resources-unsubscribe
 
   # SEP-2663 MRTR-to-tasks composition: a task-supporting guard tool is
