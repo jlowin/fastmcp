@@ -530,6 +530,14 @@ class Client(
             "sampling_callback": None,
             "list_roots_callback": None,
             "logging_callback": create_log_callback(log_handler),
+            # Log delivery is opt-in per request on the modern protocol: the
+            # session stamps this level into each request's `_meta`, and a
+            # server sends nothing without it. FastMCP's contract is that a
+            # client receives everything unless it narrows the level itself, so
+            # request the most permissive level and let the server's own
+            # `client_log_level` (and legacy `set_logging_level`) do the
+            # filtering. Inert on the handshake eras, which have no such opt-in.
+            "log_level": "debug",
             "message_handler": effective_message_handler,
             "read_timeout_seconds": read_timeout_seconds,
             "client_info": client_info,

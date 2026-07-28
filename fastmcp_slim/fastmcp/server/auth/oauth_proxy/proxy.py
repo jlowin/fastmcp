@@ -983,9 +983,18 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
         # builds this object, so prefer the value the HTTP route recovered from
         # the raw request body. Fall back to the object's own field for direct
         # (non-HTTP) callers. Write it back so the DCR response echoes the type.
+        #
+        # The SDK splits the registration *request* model from the registered
+        # *client record*: `OAuthClientMetadata.application_type` defaults to
+        # "native", while `OAuthClientInformationFull.application_type` is
+        # `str | None` and defaults to None. Normalize the unset case back to
+        # "native" so a client that omits the field gets the RFC 7591 default
+        # recorded explicitly, on both the HTTP and direct-call paths.
         pending_application_type = _pending_application_type.get()
         if pending_application_type is not None:
             client_info.application_type = pending_application_type
+        elif client_info.application_type is None:
+            client_info.application_type = "native"
         application_type = client_info.application_type
 
         if client_info.redirect_uris:

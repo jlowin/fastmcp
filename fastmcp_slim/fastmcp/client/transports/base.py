@@ -29,6 +29,7 @@ class ClientSessionKwargs(TypedDict, total=False):
     sampling_capabilities: mcp_types.SamplingCapability | None
     list_roots_callback: ListRootsFnT | None
     logging_callback: LoggingFnT | None
+    log_level: mcp_types.LoggingLevel | None
     elicitation_callback: ElicitationFnT | None
     message_handler: MessageHandlerFnT | None
     client_info: mcp_types.Implementation | None
