@@ -9,7 +9,7 @@ If your server builds on the `mcp` package's low-level `Server` class as SDK v2 
 
 The core idea: instead of describing your tools to the SDK and then separately implementing them, you write ordinary Python functions and let FastMCP derive the protocol layer from your code. Type hints become JSON Schema. Docstrings become descriptions. Return values are serialized automatically. The dispatch you wrote to route a call by name, and the schemas you wrote by hand to describe it, both disappear.
 
-Migrating from SDK v2 is the most direct of the four upgrade paths, because you and FastMCP already share a protocol layer. FastMCP 4 is built on SDK v2, so `mcp_types` imports keep working, field names are already snake_case, and the era negotiation you get is the one you have. Nothing about the wire changes. Only the code you write to reach it does.
+Migrating from SDK v2 is the most direct of the four upgrade paths, because you and FastMCP already share a protocol layer. FastMCP 4 is built on SDK v2, so `mcp_types` imports keep working, field names are already snake_case, and the era negotiation you get is the one you have. Almost nothing about the wire changes — the one exception is [argument strictness](#stricter-arguments), covered below.
 
 <Note>
 On SDK v1's decorator-registered `Server` — `@server.list_tools()`, `@server.call_tool()` — instead? See [Upgrading from the Low-Level SDK v1](/getting-started/upgrading/from-low-level-sdk-v1), where the before-and-after code matches that API.
@@ -231,6 +231,18 @@ def create_chart(data: list[float]) -> Image:
 ```
 
 When you need full control over the wire result — multiple content blocks, or structured content that differs from the content blocks — return a `ToolResult` from `fastmcp.tools` instead.
+
+### Stricter Arguments
+
+Deriving the schema from your signature also tightens what callers may send, and this is the one behavior change the migration introduces. Your `on_call_tool` handler reads `params.arguments` as a plain dict and never looks at keys it doesn't need, so a call carrying an unexpected key succeeds. FastMCP declares `"additionalProperties": false` on the generated schema and enforces it, so the same call fails:
+
+```python test="skip"
+# Against the low-level handler: succeeds, "extra" never read.
+# Against FastMCP:               raises, "extra" is not a parameter of greet().
+await client.call_tool("greet", {"name": "World", "extra": "surprise"})
+```
+
+For most servers this is an improvement that costs nothing — a caller sending keys your handler never read was already a bug, and the hand-written schema never advertised that they were allowed. It matters if a client in your fleet attaches metadata alongside real arguments, since those calls start failing the moment you migrate. Accept them explicitly as optional parameters if you need to keep them working.
 
 ## Resources
 

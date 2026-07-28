@@ -73,7 +73,13 @@ CONTEXT — these ten properties do NOT exist on FastMCP's Context and raise Att
 - `ctx.notify_tools_changed()`, `notify_resources_changed()`, `notify_prompts_changed()`, `notify_resource_updated()` → `ctx.send_notification(...)` with the matching `mcp_types` notification. FastMCP emits the list-changed ones for you when components change visibility through `ctx.enable_components` / `ctx.disable_components`.
 - `ctx.elicit_url` → not the same thing as `ctx.elicit` (that one is form elicitation, with a different signature and wire behavior). The URL flow survives on the raw session as `ctx.session.elicit_url(...)` — use that rather than deleting an OAuth or payment handoff.
 - `ctx.close_standalone_sse_stream` → no public FastMCP equivalent, and NOT on `ctx.request_context`. Flag it for the user.
-Everything else carries over unchanged, including logging, progress, `elicit`, `read_resource`, `request_id`, `client_id`, `input_responses`, `request_state`, `session`, and `request_context`.
+These four exist on both but with DIFFERENT signatures, so a bare import swap compiles and then fails at runtime:
+- `ctx.log(level, data)` → `ctx.log(message, level=...)` — the first positional argument is now the message, not the level
+- `ctx.info(data)` / `debug` / `warning` / `error` → these take `message` as a string, where the SDK accepted any JSON-serializable `data`
+- `ctx.elicit(message, schema=Model)` → `ctx.elicit(message, response_type=Model)` — the keyword was renamed
+- `ctx.read_resource(uri)` → still takes a URI, but returns a `ResourceResult` whose payload is under `.contents`, where the SDK returned an iterable of content objects directly. Code that iterates or indexes the return value needs updating.
+
+Genuinely unchanged: `report_progress`, `request_id`, `client_id`, `input_responses`, `request_state`, `session`, and `request_context`.
 
 RESOLVERS — the one part that is not a rename, so check for it first
 - any `Annotated[T, Resolve(fn)]` parameter, and the resolvers behind it

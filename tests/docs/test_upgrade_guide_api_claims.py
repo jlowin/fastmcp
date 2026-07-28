@@ -124,6 +124,42 @@ def test_request_context_attributes_the_guides_route_to_exist():
     assert set(present) == {"request_id", "meta", "protocol_version"}
 
 
+# Context methods the SDK v2 guide says are *genuinely* unchanged. Existence is
+# not enough for that claim — a method present on both classes with a different
+# signature is worse than a missing one, because the import swap compiles and
+# fails at runtime. So these are compared signature-for-signature.
+CLAIMED_SIGNATURE_COMPATIBLE = ["report_progress"]
+
+# Present on both, but with signatures that differ. The guide must describe each
+# migration rather than list it as carrying over; this pins the difference so a
+# future SDK or FastMCP release that converges them shows up as a failure.
+KNOWN_SIGNATURE_DIFFERENCES = ["log", "info", "debug", "warning", "error", "elicit"]
+
+
+@pytest.mark.parametrize("method", CLAIMED_SIGNATURE_COMPATIBLE)
+def test_methods_claimed_unchanged_have_identical_signatures(method: str):
+    from mcp.server.mcpserver import Context as SDKContext
+
+    sdk = inspect.signature(getattr(SDKContext, method))
+    fastmcp = inspect.signature(getattr(FastMCPContext, method))
+    assert str(sdk) == str(fastmcp), (
+        f"the SDK v2 guide lists ctx.{method} as carrying over unchanged, but "
+        f"the signatures differ:\n  SDK    : {sdk}\n  FastMCP: {fastmcp}"
+    )
+
+
+@pytest.mark.parametrize("method", KNOWN_SIGNATURE_DIFFERENCES)
+def test_methods_with_known_signature_differences_still_differ(method: str):
+    from mcp.server.mcpserver import Context as SDKContext
+
+    sdk = inspect.signature(getattr(SDKContext, method))
+    fastmcp = inspect.signature(getattr(FastMCPContext, method))
+    assert str(sdk) != str(fastmcp), (
+        f"ctx.{method} signatures now match; the guide's migration note for it "
+        f"is stale and should be moved to the unchanged list"
+    )
+
+
 def test_every_mcpserver_constructor_param_is_mapped():
     """The SDK v2 guide claims an exhaustive constructor mapping — hold it to that.
 

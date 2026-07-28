@@ -38,7 +38,7 @@ Then search the provided code for each signal below. Most FastMCP 3 servers upgr
 
 ENVIRONMENT
 - a pydantic pin below 2.12
-- a FastAPI or Starlette pin that would hold Starlette below 1.0.1
+- a FastAPI pin below 0.133.0, the first release admitting Starlette 1.x (earlier ones cap it, e.g. 0.115.12 requires `starlette<0.47.0`), or any direct Starlette pin below 1.0.1
 
 IMPORTS THAT NO LONGER RESOLVE
 - `mcp.types` (anywhere, in any form)
@@ -99,7 +99,7 @@ The SDK v2 raises FastMCP's dependency floors, which matters before any of your 
 
 **pydantic >= 2.12 is now the floor.** If your project pins an older pydantic (for example `pydantic==2.11.*`), installing this FastMCP release fails with an unsatisfiable-resolution error from your installer — bump your pin to `>=2.12` first. If you don't pin pydantic at all, installers upgrade it silently as part of the FastMCP upgrade.
 
-**The server extra floors Starlette >= 1.0.1.** Modern FastAPI (0.11x and later) already runs on Starlette 1.x, so mounting a FastMCP server inside a FastAPI app coexists cleanly — verified with FastAPI 0.138.2. Only very old FastAPI versions pinned below Starlette 1.0.1 conflict; upgrade FastAPI if your resolver complains about Starlette.
+**The server extra floors Starlette >= 1.0.1.** This is the requirement most likely to force an unrelated upgrade, because FastAPI pinned Starlette to a sub-1.0 range for a long time — FastAPI 0.115.12, for example, requires `starlette<0.47.0`. **FastAPI 0.133.0 is the first release that admits Starlette 1.x**, so a project pinned below that gets an unsatisfiable resolution rather than a version bump. Raise your FastAPI pin to `>=0.133.0` before upgrading FastMCP. Mounting a FastMCP server inside a FastAPI app is otherwise unaffected — verified against FastAPI 0.135.2 on Starlette 1.3.1.
 
 ## What FastMCP Absorbs
 
