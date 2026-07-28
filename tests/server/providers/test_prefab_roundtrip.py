@@ -414,6 +414,37 @@ class TestLateBoundToolNames:
             clicked = await outer.call_tool(ref, {"name": "alice"})
             assert clicked.content[0].text == f"[{marker}] saved alice"  # type: ignore[union-attr]  # ty:ignore[unresolved-attribute]
 
+    async def test_copies_hiding_different_tools_do_not_cross(self):
+        """Copies can expose different subsets, so equal candidate counts do
+        not imply the candidates line up. A copy whose backend is hidden has
+        no correct target, and reaching for a sibling's would cross branches.
+        """
+        server = FastMCP("Platform")
+        for marker, namespace, hidden in (
+            ("A", "a", "save"),
+            ("B", "b", "form"),
+            ("C", "c", None),
+        ):
+            app = self._app(marker=marker)
+            if hidden:
+                app.disable(names={hidden})
+            server.add_provider(app, namespace=namespace)
+
+        listing = [t.name for t in await server.list_tools()]
+        assert listing == ["a_form", "b_save", "c_save", "c_form"]
+
+        # A's backend is hidden — decline rather than emit B's.
+        declined = await server.call_tool("a_form", {})
+        (ref,) = _tool_refs(declined.structured_content)
+        assert ref == hashed_backend_name("contacts", "save")
+
+        # C exposes both, so it still binds to its own.
+        resolved = await server.call_tool("c_form", {})
+        (own,) = _tool_refs(resolved.structured_content)
+        assert own == "c_save"
+        clicked = await server.call_tool(own, {"name": "alice"})
+        assert clicked.content[0].text == "[C] saved alice"  # type: ignore[union-attr]  # ty:ignore[unresolved-attribute]
+
     async def test_unresolvable_identity_is_restored(self):
         """An inner server binds to a name that means nothing further out, so
         a reference this server cannot resolve is restored to its identity

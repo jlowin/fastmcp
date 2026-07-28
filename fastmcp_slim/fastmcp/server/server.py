@@ -90,6 +90,7 @@ from fastmcp.settings import DuplicateBehavior as DuplicateBehaviorSetting
 from fastmcp.tools.base import Tool, ToolResult
 from fastmcp.tools.function_tool import FunctionTool
 from fastmcp.tools.tool_transform import ToolTransformConfig
+from fastmcp.utilities.async_utils import gather
 from fastmcp.utilities.components import FastMCPComponent, _coerce_version
 from fastmcp.utilities.exceptions import HTTP_STATUS_ERRORS, TIMEOUT_ERRORS
 from fastmcp.utilities.logging import get_logger
@@ -748,12 +749,26 @@ class FastMCP(
             if identity is not None:
                 by_identity.setdefault(identity, []).append(tool.name)
 
+        branch = await self._branch_names(called_name)
         instance = _calling_instance(by_identity, called_name)
 
         def resolve(identity: str) -> str | None:
             candidates = by_identity.get(identity, [])
             if len(candidates) == 1:
                 return candidates[0]
+
+            # Provider membership is exact where it discriminates: a name
+            # either is or isn't contributed by the caller's own branch.
+            if branch is not None:
+                within = [name for name in candidates if name in branch]
+                if len(within) == 1:
+                    return within[0]
+                if not within:
+                    # The caller's branch has no such tool — it is filtered or
+                    # unauthorized there. Any other copy's tool is the wrong
+                    # answer, so decline rather than reach across branches.
+                    return None
+
             if instance is None:
                 return None
             index, count = instance
@@ -761,6 +776,28 @@ class FastMCP(
 
         rewrite_payload_tool_names(payload, resolve)
         return result
+
+    async def _branch_names(self, called_name: str) -> set[str] | None:
+        """Names contributed by the provider subtree that served the call.
+
+        Providers are already namespace-wrapped, so a provider's listing is
+        exactly what its subtree contributes. Where a single provider claims
+        the entry tool this is an exact answer, and it stays exact when copies
+        of an app expose different subsets of their tools. Returns None when
+        no single provider claims the name — both copies can sit inside one
+        subtree — leaving the caller to fall back to positional pairing.
+        """
+        listings = await gather(
+            (provider.list_tools() for provider in self.providers),
+            return_exceptions=True,
+        )
+        matches = [
+            {tool.name for tool in listing}
+            for listing in listings
+            if not isinstance(listing, BaseException)
+            and any(tool.name == called_name for tool in listing)
+        ]
+        return matches[0] if len(matches) == 1 else None
 
     # -------------------------------------------------------------------------
     # Provider interface overrides - inherited from AggregateProvider
