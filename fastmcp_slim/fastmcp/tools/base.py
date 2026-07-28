@@ -273,23 +273,26 @@ class Tool(FastMCPComponent):
         **overrides: Any,
     ) -> MCPTool:
         """Convert the FastMCP tool to an MCP tool."""
-        title = None
+        # Title precedence follows the effective (post-override) values, so a
+        # caller renaming or re-annotating a tool doesn't get a stale title.
+        name = overrides.get("name", self.name)
+        annotations = overrides.get("annotations", self.annotations)
 
         if self.title:
             title = self.title
-        elif self.annotations and self.annotations.title:
-            title = self.annotations.title
+        elif isinstance(annotations, ToolAnnotations) and annotations.title:
+            title = annotations.title
         else:
-            title = _default_title(overrides.get("name", self.name))
+            title = _default_title(name)
 
         mcp_tool = MCPTool(
-            name=overrides.get("name", self.name),
+            name=name,
             title=overrides.get("title", title),
             description=overrides.get("description", self.description),
             input_schema=overrides.get("inputSchema", self.parameters),
             output_schema=overrides.get("outputSchema", self.output_schema),
             icons=overrides.get("icons", self.icons),
-            annotations=overrides.get("annotations", self.annotations),
+            annotations=annotations,
             execution=overrides.get("execution", self.execution),
             _meta=overrides.get(  # type: ignore[call-arg]  # _meta is Pydantic alias for meta field
                 "_meta", self.get_meta()

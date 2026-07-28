@@ -62,6 +62,18 @@ class TestToolTitle:
         assert mcp_tool.name == "renamed_tool"
         assert mcp_tool.title == "Renamed Tool"
 
+    def test_annotations_override_beats_derived_title(self):
+        """An `annotations` override still outranks the name-derived title."""
+        from mcp_types import ToolAnnotations
+
+        def multiply(a: int, b: int) -> int:
+            return a * b
+
+        tool = Tool.from_function(multiply)
+
+        mcp_tool = tool.to_mcp_tool(annotations=ToolAnnotations(title="Custom"))
+        assert mcp_tool.title == "Custom"
+
     def test_tool_title_priority(self):
         """Test that explicit title takes priority over annotations.title."""
         from mcp_types import ToolAnnotations
