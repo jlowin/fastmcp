@@ -525,8 +525,10 @@ def _prefab_to_json(app: Any, fastmcp_app_name: str | None = None) -> dict[str, 
     format and routes calls via ``get_tool_by_hash`` which walks the
     provider tree recursively — same pattern as the old ``get_app_tool``.
     """
+    from fastmcp.server.providers.prefab_payload import annotate_payload_identities
+
     data = app.to_json(tool_resolver=_get_tool_resolver(fastmcp_app_name))
-    return data
+    return annotate_payload_identities(data)
 
 
 def _get_fastmcp_app_name(tool: Tool) -> str | None:

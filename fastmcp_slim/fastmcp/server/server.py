@@ -224,6 +224,46 @@ def _get_auth_context() -> tuple[bool, Any]:
     return (False, get_access_token())
 
 
+def _tool_identity(tool: Tool) -> str | None:
+    """Read a tool's stable identity hash, if it carries one."""
+    from fastmcp.server.providers.addressing import TOOL_HASH_META_KEY
+
+    meta = tool.meta
+    if not meta:
+        return None
+    fastmcp_meta = meta.get("fastmcp")
+    if not isinstance(fastmcp_meta, dict):
+        return None
+    identity = fastmcp_meta.get(TOOL_HASH_META_KEY)
+    return identity if isinstance(identity, str) else None
+
+
+def _closest_sibling(candidates: list[str], called_name: str) -> str | None:
+    """Pick the candidate composed alongside ``called_name``.
+
+    One identity is claimed by several tools when the same app is composed
+    into more than one branch. The entry tool and its backends share a branch,
+    so they share whatever prefix that branch's namespaces produced — the
+    candidate sharing the longest prefix with the entry tool is the one in the
+    caller's own branch. Returns None if that does not pick a single winner,
+    leaving the reference for the identity-addressed path to resolve.
+    """
+
+    def shared_prefix(candidate: str) -> int:
+        length = 0
+        for left, right in zip(candidate, called_name, strict=False):
+            if left != right:
+                break
+            length += 1
+        return length
+
+    ranked = sorted(candidates, key=shared_prefix, reverse=True)
+    best = shared_prefix(ranked[0])
+    if best == 0 or (len(ranked) > 1 and shared_prefix(ranked[1]) == best):
+        return None
+    return ranked[0]
+
+
 @asynccontextmanager
 async def default_lifespan(server: FastMCP[LifespanResultT]) -> AsyncIterator[Any]:
     """Default lifespan context manager that does nothing.
@@ -682,6 +722,47 @@ class FastMCP(
         return [
             rewrite_tool_meta_for_wire(t) if _is_prefab_tool(t) else t for t in tools
         ]
+
+    async def _rebind_prefab_tool_names(
+        self, result: ToolResult, called_name: str
+    ) -> ToolResult:
+        """Re-address a Prefab payload's tool references to this server's names.
+
+        Runs on the way out of every ``tools/call``. Servers unwind
+        innermost-first, so the outermost server rewrites last and its names —
+        the only ones a client can actually invoke — are what ship.
+
+        Args:
+            result: The tool result, possibly carrying a Prefab payload.
+            called_name: The name this call arrived under. Used to pick a
+                branch when one identity is claimed by more than one tool,
+                which happens when the same app is composed more than once.
+        """
+        from fastmcp.server.providers.prefab_payload import (
+            payload_has_identities,
+            rewrite_payload_tool_names,
+        )
+
+        payload = result.structured_content
+        if not payload_has_identities(payload):
+            return result
+
+        by_identity: dict[str, list[str]] = {}
+        for tool in await self.list_tools(run_middleware=False):
+            identity = _tool_identity(tool)
+            if identity is not None:
+                by_identity.setdefault(identity, []).append(tool.name)
+
+        def resolve(identity: str) -> str | None:
+            candidates = by_identity.get(identity, [])
+            if len(candidates) == 1:
+                return candidates[0]
+            if not candidates:
+                return None
+            return _closest_sibling(candidates, called_name)
+
+        rewrite_payload_tool_names(payload, resolve)
+        return result
 
     # -------------------------------------------------------------------------
     # Provider interface overrides - inherited from AggregateProvider
@@ -1392,7 +1473,8 @@ class FastMCP(
                     raise NotFoundError(f"Unknown tool: {name!r}")
                 span.set_attributes(tool.get_span_attributes())
                 try:
-                    return await tool._run(arguments or {})
+                    result = await tool._run(arguments or {})
+                    return await self._rebind_prefab_tool_names(result, name)
                 except ValidationError as e:
                     # Argument-validation failure (a bad call). FunctionTool
                     # converts pydantic's call-validation error into fastmcp's

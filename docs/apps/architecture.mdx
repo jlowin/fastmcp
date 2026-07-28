@@ -61,19 +61,27 @@ The final tool result has two parts: `content` (a list of `TextContent` blocks f
 
 ## Tool call routing
 
-Normal tool calls go through the provider chain, which applies transforms (namespace prefixes, visibility filters) before resolving by name. App UI calls need a different path.
+A tool has two things that behave very differently. Its **name** is unstable by design — namespace transforms rename it, so `save_contact` becomes `contacts_save_contact` in one composition and something else in another. Its **identity** is a hash of the app name and the registered tool name, written once at registration and never changed.
 
-### The hashed lookup bypass
+A UI is serialized during the entry tool's call, deep inside whatever composition the server happens to have, so it cannot know what its backend tools will be called by the time the payload reaches a host.
 
-Backend tools appear in `tools/list` like any other tool — the host is what keeps them away from the model. What they can't rely on is a stable *name*: namespace transforms rename them, so `save_contact` becomes `contacts_save_contact` in one composition and something else in another, while the renderer was built before any of that was decided.
+### Late-bound tool names
 
-Hashed lookup solves that. FastMCP first tries normal tool resolution. If no tool matches and the requested name looks like `<hash>_<local_name>`, FastMCP calls `get_tool_by_hash(hash, local_name)`. That lookup walks the provider tree directly, skipping transforms. It finds an app-visible tool by its original registered name and verifies that its stored `meta["fastmcp"]["tool_hash"]` matches the requested hash.
+The payload leaves the app addressed by identity, and every FastMCP server rewrites those references on the way out to whatever it lists that tool as. Servers unwind innermost-first, so the outermost server rewrites last — and its names are the only ones a client can actually invoke.
 
-The hash is public metadata, deterministic from the app name and the tool's registered name. Because it survives every transform and every wire boundary, an intermediary holding a renamed tool can still tell which tool it is.
+Rewriting a name in place would destroy the identity for the next layer up, so the payload carries a name-to-identity map under `_meta.fastmcp.toolNames`. Each layer resolves through the map and updates it. The action objects keep the exact shape `prefab_ui` defines: only the value of `tool` changes, and only ever to another valid tool name.
 
-That's why `CallTool(save_contact)` keeps working when the server is mounted under a namespace. The renderer sends a deterministic hashed backend name; the server uses `get_tool_by_hash` to find the original tool without transforms in the way.
+The result is that a renderer receives names that exist in the listing the host is looking at. Under three layers of namespacing the button calls `c_b_a_save`; behind a gateway it calls whatever the gateway lists. No intermediary has to understand a FastMCP-specific convention.
 
-Authorization still applies. The hashed bypass skips name and visibility transforms, but auth checks still run against the tool's `auth` config before execution.
+A reference this server cannot resolve is left alone rather than corrupted, so a server that does not recognize a tool degrades to the identity-addressed form instead of emitting a broken name.
+
+### The hashed lookup fallback
+
+The identity-addressed form `<hash>_<local_name>` remains callable. FastMCP first tries normal tool resolution; if no tool matches and the name has that shape, it calls `get_tool_by_hash(hash, local_name)`, which walks the provider tree directly, skipping transforms.
+
+When one identity is claimed by more than one tool — which happens when the same app is composed into two branches — the call is refused rather than resolved, since picking either one would silently route into the wrong branch.
+
+Authorization still applies. The hashed path skips name and visibility transforms, but auth checks still run against the tool's `auth` config before execution.
 
 ### Provider delegation
 

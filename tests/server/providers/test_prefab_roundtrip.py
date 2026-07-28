@@ -8,8 +8,6 @@ single-server, namespaced mounts, and cross-server mounts.
 
 from __future__ import annotations
 
-import json
-
 import pytest
 
 from fastmcp import FastMCP, FastMCPApp
@@ -22,10 +20,28 @@ from prefab_ui.actions.mcp import CallTool  # noqa: E402
 from prefab_ui.components import Button, Column, Text  # noqa: E402
 
 
+def _tool_refs(payload) -> list[str]:
+    """Every tool name the rendered UI would call, in document order."""
+    refs: list[str] = []
+
+    def walk(node) -> None:
+        if isinstance(node, dict):
+            if node.get("action") == "toolCall" and isinstance(node.get("tool"), str):
+                refs.append(node["tool"])
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    walk(payload)
+    return refs
+
+
 class TestSingleServerRoundTrip:
-    async def test_ui_tool_serializes_hashed_peer_reference(self):
-        """The resolver converts a CallTool string reference to a hashed
-        name that appears in the tool result's structured_content."""
+    async def test_payload_carries_the_servers_own_tool_name(self):
+        """The renderer is handed a name that exists in this server's
+        tools/list, not the identity-addressed form."""
         app = FastMCPApp("contacts")
 
         @app.tool()
@@ -43,13 +59,30 @@ class TestSingleServerRoundTrip:
 
         result = await server.call_tool("contact_form", {})
         assert result.structured_content is not None
+        assert _tool_refs(result.structured_content) == ["save_contact"]
 
-        # The hashed name should appear somewhere in the serialized output.
-        sc_json = json.dumps(result.structured_content)
-        expected_hash = hashed_backend_name("contacts", "save_contact")
-        assert expected_hash in sc_json, (
-            f"Expected {expected_hash!r} in structured_content but got: {sc_json[:200]}"
-        )
+    async def test_payload_records_the_identity_behind_each_reference(self):
+        """The identity survives alongside the name so an outer server can
+        re-resolve it after this one has rewritten the name."""
+        app = FastMCPApp("contacts")
+
+        @app.tool()
+        def save_contact(name: str) -> str:
+            return f"saved {name}"
+
+        @app.ui()
+        def contact_form() -> Column:
+            return Column(
+                children=[Button(label="Save", on_click=CallTool(tool="save_contact"))]
+            )
+
+        server = FastMCP("Platform")
+        server.add_provider(app)
+
+        result = await server.call_tool("contact_form", {})
+        assert result.structured_content is not None
+        names = result.structured_content["_meta"]["fastmcp"]["toolNames"]
+        assert names == {"save_contact": hash_tool("contacts", "save_contact")}
 
     async def test_hashed_name_from_result_is_callable(self):
         """The hashed name that appears in structured_content actually
@@ -207,6 +240,115 @@ class TestProxiedServerRoundTrip:
         hashed_name = hashed_backend_name("contacts", "save")
         result = await top.call_tool(hashed_name, {"name": "Frank"})
         assert result.content[0].text == "saved Frank"  # type: ignore[union-attr]  # ty:ignore[unresolved-attribute]
+
+
+class TestLateBoundToolNames:
+    """The payload is re-addressed on the way out of every FastMCP server.
+
+    Servers unwind innermost-first, so the outermost one rewrites last and its
+    names — the only ones a client can invoke — are what the renderer receives.
+    """
+
+    @staticmethod
+    def _app(marker: str = "x", app_name: str = "contacts") -> FastMCPApp:
+        app = FastMCPApp(app_name)
+
+        @app.tool()
+        def save(name: str) -> str:
+            return f"[{marker}] saved {name}"
+
+        @app.ui()
+        def form() -> Column:
+            return Column(
+                children=[Button(label="Save", on_click=CallTool(tool="save"))]
+            )
+
+        return app
+
+    async def test_namespaced_server_emits_its_namespaced_name(self):
+        server = FastMCP("Platform")
+        server.add_provider(self._app(), namespace="crm")
+
+        result = await server.call_tool("crm_form", {})
+        assert _tool_refs(result.structured_content) == ["crm_save"]
+
+    async def test_name_accumulates_through_nested_mounts(self):
+        inner = FastMCP("Inner")
+        inner.add_provider(self._app(), namespace="a")
+        mid = FastMCP("Mid")
+        mid.add_provider(inner, namespace="b")
+        top = FastMCP("Top")
+        top.add_provider(mid, namespace="c")
+
+        result = await top.call_tool("c_b_a_form", {})
+        assert _tool_refs(result.structured_content) == ["c_b_a_save"]
+
+    async def test_gateway_emits_its_own_name_not_the_backends(self):
+        backend = FastMCP("Backend")
+        backend.add_provider(self._app())
+
+        gateway = FastMCP("Gateway")
+        gateway.add_provider(
+            ProxyProvider(lambda: ProxyClient(backend)), namespace="up"
+        )
+
+        result = await gateway.call_tool("up_form", {})
+        assert _tool_refs(result.structured_content) == ["up_save"]
+
+    async def test_emitted_name_is_callable_on_the_same_server(self):
+        """The whole point: what the renderer is told to call, it can call."""
+        backend = FastMCP("Backend")
+        backend.add_provider(self._app(marker="be"))
+
+        gateway = FastMCP("Gateway")
+        gateway.add_provider(
+            ProxyProvider(lambda: ProxyClient(backend)), namespace="up"
+        )
+
+        result = await gateway.call_tool("up_form", {})
+        (ref,) = _tool_refs(result.structured_content)
+        assert ref in [t.name for t in await gateway.list_tools()]
+
+        clicked = await gateway.call_tool(ref, {"name": "alice"})
+        assert clicked.content[0].text == "[be] saved alice"  # type: ignore[union-attr]  # ty:ignore[unresolved-attribute]
+
+    async def test_each_branch_resolves_within_itself(self):
+        """One app composed twice: each tenant's UI addresses its own tool."""
+        first = FastMCP("TenantA")
+        first.add_provider(self._app(marker="A"), namespace="inner")
+        second = FastMCP("TenantB")
+        second.add_provider(self._app(marker="B"), namespace="inner")
+
+        top = FastMCP("Top")
+        top.add_provider(first, namespace="a")
+        top.add_provider(second, namespace="b")
+
+        for branch, marker in (("a", "A"), ("b", "B")):
+            result = await top.call_tool(f"{branch}_inner_form", {})
+            (ref,) = _tool_refs(result.structured_content)
+            assert ref == f"{branch}_inner_save"
+
+            clicked = await top.call_tool(ref, {"name": "alice"})
+            assert clicked.content[0].text == f"[{marker}] saved alice"  # type: ignore[union-attr]  # ty:ignore[unresolved-attribute]
+
+    async def test_unresolvable_identity_is_left_alone(self):
+        """A reference this server cannot resolve keeps its identity-addressed
+        form rather than being corrupted, so the hashed path can still take it.
+        """
+        app = FastMCPApp("contacts")
+
+        @app.ui()
+        def form() -> Column:
+            return Column(
+                children=[Button(label="Go", on_click=CallTool(tool="not_registered"))]
+            )
+
+        server = FastMCP("Platform")
+        server.add_provider(app)
+
+        result = await server.call_tool("form", {})
+        (ref,) = _tool_refs(result.structured_content)
+        assert ref == hashed_backend_name("contacts", "not_registered")
 
 
 class TestDynamicToolAdd:
