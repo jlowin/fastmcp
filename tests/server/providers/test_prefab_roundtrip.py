@@ -394,6 +394,29 @@ class TestLateBoundToolNames:
         with pytest.raises(ToolError, match="composed more than once"):
             await server.call_tool(ref, {"name": "alice"})
 
+    @pytest.mark.parametrize("backend_namespace", [None, "crm"])
+    async def test_collapsed_catalog_over_a_proxy(self, backend_namespace):
+        """The collapsed-catalog fallback has to survive a backend that
+        renamed its app tools. Nothing named `save` was ever listed across
+        the wire, so the identity has to resolve against the remote listing
+        rather than against a name that only exists at the origin.
+        """
+        app = self._app(marker="be")
+        backend = FastMCP("Backend")
+        backend.add_provider(app, namespace=backend_namespace)
+
+        gateway = FastMCP("Gateway")
+        gateway.add_provider(ProxyProvider(lambda: ProxyClient(backend)))
+        gateway.add_transform(RegexSearchTransform())
+
+        entry = f"{backend_namespace}_form" if backend_namespace else "form"
+        result = await gateway.call_tool(entry, {})
+        (ref,) = _tool_refs(result.structured_content)
+        assert ref == hashed_backend_name("contacts", "save")
+
+        clicked = await gateway.call_tool(ref, {"name": "alice"})
+        assert clicked.content[0].text == "[be] saved alice"  # type: ignore[union-attr]  # ty:ignore[unresolved-attribute]
+
     async def test_unresolvable_identity_is_restored(self):
         """An inner server binds to a name that means nothing further out, so
         a reference this server cannot resolve is restored to its identity

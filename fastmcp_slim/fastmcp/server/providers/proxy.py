@@ -856,6 +856,38 @@ class ProxyProvider(Provider):
             return None
         return max(matching, key=version_sort_key)
 
+    async def get_tool_by_hash(self, tool_hash: str, tool_name: str) -> Tool | None:
+        """Resolve an identity against the remote listing.
+
+        The base implementation looks the tool up by its registered name,
+        which assumes the name survived to here. Across a proxy it need not:
+        a backend that mounts its app under a namespace advertises
+        ``crm_save``, and nothing named ``save`` was ever listed. Matching on
+        the identity carried in meta is what the identity is for.
+        """
+        from fastmcp.server.providers.addressing import TOOL_HASH_META_KEY
+
+        cache = self._tools_cache
+        if cache is None or not cache.is_fresh(self._cache_ttl):
+            await self._list_tools()
+            cache = self._tools_cache
+        assert cache is not None
+
+        for tool in cache.items:
+            meta = tool.meta or {}
+            fastmcp_meta = meta.get("fastmcp")
+            ui_meta = meta.get("ui")
+            visibility = (
+                ui_meta.get("visibility", []) if isinstance(ui_meta, dict) else []
+            )
+            if (
+                isinstance(fastmcp_meta, dict)
+                and fastmcp_meta.get(TOOL_HASH_META_KEY) == tool_hash
+                and "app" in visibility
+            ):
+                return tool
+        return None
+
     # -------------------------------------------------------------------------
     # Resource methods
     # -------------------------------------------------------------------------
