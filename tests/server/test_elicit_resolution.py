@@ -34,15 +34,19 @@ from fastmcp.tools.base import InputRequiredToolResult
 
 
 class RecordAsks(Middleware):
-    """Counts how many legs of a call resolved to a question."""
+    """Records the questions asked on each leg of a call."""
 
     def __init__(self) -> None:
-        self.asks = 0
+        self.rounds: list[list[str]] = []
+
+    @property
+    def asks(self) -> int:
+        return len(self.rounds)
 
     async def on_call_tool(self, context, call_next):
         result = await call_next(context)
         if isinstance(result, InputRequiredToolResult):
-            self.asks += 1
+            self.rounds.append(list(result.input_required.input_requests))
         return result
 
 
@@ -417,6 +421,71 @@ class TestInterop:
             result = await client.call_tool("book", {})
 
         assert result.data == "x:Paris!"
+
+
+class TestOrdering:
+    """Where and when a question is asked both fall out of the annotations."""
+
+    async def test_independent_questions_keep_signature_order(self):
+        """Signature order is the lever for presentation order — there is no other."""
+        mcp = FastMCP("x")
+        recorder = RecordAsks()
+        mcp.add_middleware(recorder)
+
+        @mcp.tool
+        async def book(
+            destination: Annotated[str, Elicit("Where?")],
+            date: Annotated[str, Elicit("When?")],
+            seat: Annotated[str, Elicit("Window or aisle?")],
+        ) -> str:
+            return f"{destination}/{date}/{seat}"
+
+        handler = accept_by_message(
+            {"Where": "Paris", "When": "2026-08-01", "Window": "window"}
+        )
+        async with Client(mcp, mode="auto", elicitation_handler=handler) as client:
+            await client.call_tool("book", {})
+
+        assert recorder.rounds == [["destination", "date", "seat"]]
+
+    async def test_confirmation_quoting_details_waits_for_them(self):
+        """A confirmation that names what it confirms is ordered by saying so,
+        rather than by a parameter added to hold it back."""
+        mcp = FastMCP("x")
+        recorder = RecordAsks()
+        mcp.add_middleware(recorder)
+
+        def confirm(destination: str, date: str) -> str:
+            return f"Book a flight to {destination} on {date}?"
+
+        @mcp.tool
+        async def book(
+            destination: Annotated[str, Elicit("Where?")],
+            date: Annotated[str, Elicit("When?")],
+            proceed: Annotated[bool, Elicit(confirm)],
+        ) -> str:
+            return f"Booked {destination}" if proceed else "Cancelled"
+
+        asked: list[str] = []
+
+        async def handler(message, response_type, params, ctx):
+            asked.append(message)
+            if "Where" in message:
+                return ElicitResult(
+                    action="accept", content=response_type(value="Paris")
+                )
+            if "When" in message:
+                return ElicitResult(
+                    action="accept", content=response_type(value="2026-08-01")
+                )
+            return ElicitResult(action="accept", content=response_type(value=True))
+
+        async with Client(mcp, mode="auto", elicitation_handler=handler) as client:
+            result = await client.call_tool("book", {})
+
+        assert recorder.rounds == [["destination", "date"], ["proceed"]]
+        assert asked[-1] == "Book a flight to Paris on 2026-08-01?"
+        assert result.data == "Booked Paris"
 
 
 class TestQuestionDependencies:

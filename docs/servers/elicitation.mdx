@@ -95,6 +95,34 @@ So this tool takes two rounds, and neither the round count nor the ordering appe
 
 Because a question can quote a tool argument, it can also quote something the model supplied — which is exactly what you want for `f"Which airport in {destination}?"`, and a good reason to treat the wording as untrusted display text rather than as an instruction to the user.
 
+There is no separate knob for ordering, and you rarely want one. A question that has to wait for another almost always has something to say about it, so saying it is both the better question and the thing that orders the asks. Confirmations show this most clearly. `Elicit("Book it?")` refers to nothing, so it goes out in the very first round, asking someone to approve a booking that nobody has described yet. Written as a function it quotes the details, which fixes the wording and the timing at once:
+
+```python
+from typing import Annotated
+
+from fastmcp import FastMCP
+from fastmcp.elicitation import Elicit
+
+mcp = FastMCP("Booking Server")
+
+
+def confirm(destination: str, date: str) -> str:
+    return f"Book a flight to {destination} on {date}?"
+
+
+@mcp.tool
+async def book_flight(
+    destination: Annotated[str, Elicit("Where would you like to fly?")],
+    date: Annotated[str, Elicit("When would you like to fly?")],
+    proceed: Annotated[bool, Elicit(confirm)],
+) -> str:
+    return f"Booked {destination}" if proceed else "Cancelled"
+```
+
+Where and when both fall out of the same annotations. The destination and date are independent, so they go out together in the first round; the confirmation quotes both, so it waits for the second. Questions that stay independent are asked in the order they appear in the signature, so moving a parameter down moves its question down in what the user sees — though it is the client that ultimately decides how to present a round.
+
+If you ever find yourself adding a parameter to a question function purely to hold it back, treat that as a sign the question is underspecified rather than a technique. It works, and it costs a round trip to ask something you could have asked earlier.
+
 A question may also declare its own [dependencies](/servers/dependency-injection) with `Depends(...)`, for the configuration and connections it needs to render itself. Those resolve the ordinary way and are not matched against the call's arguments.
 
 ### Optional questions
