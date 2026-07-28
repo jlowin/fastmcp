@@ -27,4 +27,4 @@ server:
   # if it is missing. The MCP protocol (SEP-2575) designates `clientInfo` as an
   # optional SHOULD requirement. FastMCP relies on the upstream SDK's
   # `classify_inbound_request` logic which incorrectly enforces this as a MUST.
-  - server-stateless
+  - server-stateless:sep-2575-request-meta-client-info-optional
