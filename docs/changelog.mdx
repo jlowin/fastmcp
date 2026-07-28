@@ -9,7 +9,7 @@ tag: NEW
 
 **[v4.0.0b1: Fourgone Conclusion](https://github.com/PrefectHQ/fastmcp/releases/tag/v4.0.0b1)**
 
-FastMCP 4 rebuilds the framework on the MCP Python SDK v2, and this beta is the first release to run on the SDK's stable 2.0. The SDK v2 rewrote the protocol layer end to end — protocol types moved into a standalone `mcp_types` package, every wire field renamed from camelCase to snake_case, and the server's request-handling model replaced — and FastMCP absorbs nearly all of it, so most FastMCP 3 servers run untouched. On that foundation v4 serves the sessionless `2026-07-28` protocol and the older handshake from one server, adds stateless session state and background tasks, makes protocol extensions a first-class surface, and removes server-initiated sampling and roots from the server API. This changelog spans the whole v4 line so far, since the `4.0.0a1` and `4.0.0a2` alphas shipped without notes.
+FastMCP 4 rebuilds the framework on the MCP Python SDK v2, and this beta is the first release to run on the SDK's stable 2.0. The SDK v2 rewrote the protocol layer end to end — protocol types moved into a standalone `mcp_types` package, every wire field renamed from camelCase to snake_case, and the server's request-handling model replaced — and FastMCP absorbs nearly all of it, so most FastMCP 3 servers run untouched. On that foundation v4 serves the sessionless `2026-07-28` protocol and the older handshake from one server, adds stateless session state and background tasks, makes protocol extensions a first-class surface, and removes server-initiated sampling and roots from the server API.
 
 ### New Features 🎉
 * Migrate to MCP Python SDK v2 by [@jlowin](https://github.com/jlowin) in [#4437](https://github.com/PrefectHQ/fastmcp/pull/4437)
@@ -64,6 +64,7 @@ FastMCP 4 rebuilds the framework on the MCP Python SDK v2, and this beta is the 
 * Add `valid_scopes` parameter to OIDC proxy valid scopes by [@Educg550](https://github.com/Educg550) in [#4660](https://github.com/PrefectHQ/fastmcp/pull/4660)
 * feat: Add telemetry interop mode for FastMCP by [@strawgate](https://github.com/strawgate) in [#4046](https://github.com/PrefectHQ/fastmcp/pull/4046)
 * Note that review comment threads should get an acknowledgement by [@jlowin](https://github.com/jlowin) in [#4678](https://github.com/PrefectHQ/fastmcp/pull/4678)
+* Late-bind app tool names so UIs survive composition by [@jlowin](https://github.com/jlowin) in [#4682](https://github.com/PrefectHQ/fastmcp/pull/4682)
 ### Security 🔒
 * Drive the FastMCP lifespan through the SDK session manager by [@jlowin](https://github.com/jlowin) in [#4446](https://github.com/PrefectHQ/fastmcp/pull/4446)
 * Route skill file access through SDK path-security primitives by [@jlowin](https://github.com/jlowin) in [#4449](https://github.com/PrefectHQ/fastmcp/pull/4449)
