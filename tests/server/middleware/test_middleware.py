@@ -147,10 +147,6 @@ def mcp_server(recording_middleware):
     async def log_tool(context: Context) -> None:
         await context.info(message="test log")
 
-    @mcp.tool
-    async def sample_tool(context: Context) -> None:
-        await context.sample("hello")
-
     mcp.add_middleware(recording_middleware)
 
     # Register a progress notification handler (v2 API: (ctx, params)).

@@ -23,13 +23,29 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
+      # Maintenance branches predate the standalone fastmcp-tasks package and
+      # resolve the `tasks` extra through fastmcp-slim instead. This workflow
+      # runs from the default branch for every fastmcp-slim release, including
+      # those tags, so detect the package rather than assume it is there.
+      - name: Check whether this ref builds fastmcp-tasks
+        id: package_present
+        run: |
+          if [ -d fastmcp_tasks ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "This ref has no fastmcp_tasks package; nothing to publish."
+          fi
+
       - name: Install uv
         uses: astral-sh/setup-uv@v7
 
       - name: Build fastmcp-tasks
+        if: steps.package_present.outputs.present == 'true'
         run: uv build --package fastmcp-tasks
 
       - name: Verify matching fastmcp-slim is published
+        if: steps.package_present.outputs.present == 'true'
         run: |
           SLIM_VERSION=$(python - <<'PY'
           import email.parser
@@ -84,4 +100,5 @@ jobs:
           exit 1
 
       - name: Publish fastmcp-tasks to PyPI
+        if: steps.package_present.outputs.present == 'true'
         run: uv publish -v dist/fastmcp_tasks-*.tar.gz dist/fastmcp_tasks-*.whl

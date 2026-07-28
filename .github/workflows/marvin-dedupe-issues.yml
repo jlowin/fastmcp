@@ -19,6 +19,13 @@ jobs:
       issues: write
       id-token: write
 
+    # TEMPORARY PIN — see the matching note in marvin-label-triage.yml.
+    # Claude Code 2.1.216 broke every Bash call under the action's subprocess
+    # isolation, which this workflow needs for all of its `gh` searching.
+    # https://github.com/anthropics/claude-code/issues/79997
+    env:
+      PINNED_CLAUDE_CODE_VERSION: "2.1.215"
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -91,9 +98,17 @@ jobs:
       - name: Clean up stale Claude locks
         run: rm -rf ~/.claude/.locks ~/.local/state/claude/locks || true
 
+      - name: Install pinned Claude Code
+        id: pin-claude
+        run: |
+          curl -fsSL https://claude.ai/install.sh | bash -s -- "$PINNED_CLAUDE_CODE_VERSION"
+          echo "path=$HOME/.local/bin/claude" >> "$GITHUB_OUTPUT"
+          "$HOME/.local/bin/claude" --version
+
       - name: Run Marvin dedupe command
         uses: anthropics/claude-code-action@v1
         with:
+          path_to_claude_code_executable: ${{ steps.pin-claude.outputs.path }}
           github_token: ${{ steps.marvin-token.outputs.token }}
           bot_name: "Marvin Context Protocol"
           prompt: ${{ steps.dedupe-prompt.outputs.PROMPT }}

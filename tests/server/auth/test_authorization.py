@@ -8,10 +8,11 @@ from mcp.server.auth.middleware.bearer_auth import AuthenticatedUser
 
 from fastmcp import FastMCP
 from fastmcp.client import Client
-from fastmcp.exceptions import AuthorizationError
+from fastmcp.exceptions import AuthorizationError, InsufficientScopeError
 from fastmcp.server.auth import (
     AccessToken,
     AuthContext,
+    require_roles,
     require_scopes,
     restrict_tag,
     run_auth_checks,
@@ -19,6 +20,7 @@ from fastmcp.server.auth import (
 from fastmcp.server.middleware import AuthMiddleware
 from fastmcp.server.transforms import ToolTransform
 from fastmcp.tools.tool_transform import ToolTransformConfig, TransformedTool
+from fastmcp.utilities.authorization import scope_requirements
 from fastmcp.utilities.versions import VersionSpec
 
 # =============================================================================
@@ -26,14 +28,17 @@ from fastmcp.utilities.versions import VersionSpec
 # =============================================================================
 
 
-def make_token(scopes: list[str] | None = None) -> AccessToken:
+def make_token(
+    scopes: list[str] | None = None,
+    claims: dict | None = None,
+) -> AccessToken:
     """Create a test access token."""
     return AccessToken(
         token="test-token",
         client_id="test-client",
         scopes=scopes or [],
         expires_at=None,
-        claims={},
+        claims=claims or {},
     )
 
 
@@ -84,6 +89,155 @@ class TestRequireScopes:
         ctx = AuthContext(token=None, component=make_tool())
         check = require_scopes("admin")
         assert check(ctx) is False
+
+
+# =============================================================================
+# Tests for require_roles
+# =============================================================================
+
+
+KEYCLOAK = {"realm_access": {"roles": ["admin", "viewer"]}}
+
+
+def keycloak_roles(claims: dict) -> list[str]:
+    return claims["realm_access"]["roles"]
+
+
+class TestRequireRoles:
+    @pytest.mark.parametrize(
+        "claims, extract",
+        [
+            (KEYCLOAK, keycloak_roles),
+            ({"roles": ["admin"]}, lambda c: c["roles"]),
+            ({"cognito:groups": ["admin"]}, lambda c: c["cognito:groups"]),
+            ({"permissions": ["admin"]}, lambda c: c["permissions"]),
+            (
+                {"https://app.example.com/roles": ["admin"]},
+                lambda c: c["https://app.example.com/roles"],
+            ),
+        ],
+    )
+    def test_reads_roles_from_provider_specific_claim(self, claims, extract):
+        ctx = AuthContext(token=make_token(claims=claims), component=make_tool())
+        assert require_roles("admin", extract=extract)(ctx) is True
+
+    def test_requires_all_roles(self):
+        ctx = AuthContext(token=make_token(claims=KEYCLOAK), component=make_tool())
+        check = require_roles("admin", "viewer", extract=keycloak_roles)
+        assert check(ctx) is True
+
+    def test_denies_when_one_role_missing(self):
+        ctx = AuthContext(token=make_token(claims=KEYCLOAK), component=make_tool())
+        check = require_roles("admin", "auditor", extract=keycloak_roles)
+        assert check(ctx) is False
+
+    def test_denies_without_token(self):
+        ctx = AuthContext(token=None, component=make_tool())
+        assert require_roles("admin", extract=keycloak_roles)(ctx) is False
+
+    @pytest.mark.parametrize(
+        "claims",
+        [{}, {"realm_access": {}}, {"realm_access": None}, {"realm_access": []}],
+    )
+    def test_denies_when_claim_absent_or_malformed(self, claims):
+        """A token without the claim is an ordinary denial, not a broken check."""
+        ctx = AuthContext(token=make_token(claims=claims), component=make_tool())
+        assert require_roles("admin", extract=keycloak_roles)(ctx) is False
+
+    def test_rejects_empty_role_list(self):
+        """A check with no roles would admit any authenticated caller."""
+        with pytest.raises(ValueError, match="at least one role"):
+            require_roles(extract=keycloak_roles)
+
+    def test_is_opaque_to_scope_shortfall(self):
+        """Roles cannot be requested via OAuth, so they yield no step-up."""
+        ctx = AuthContext(token=make_token(claims=KEYCLOAK), component=make_tool())
+        check = require_roles("auditor", extract=keycloak_roles)
+        assert scope_requirements(check, ctx) is None
+
+    def test_suppresses_shortfall_disclosure_of_sibling_scope_checks(self):
+        """One opaque check withholds the whole list's scope requirements."""
+        token = make_token(scopes=["read"], claims=KEYCLOAK)
+        ctx = AuthContext(token=token, component=make_tool())
+        checks = [
+            require_scopes("write"),
+            require_roles("admin", extract=keycloak_roles),
+        ]
+        assert scope_requirements(checks, ctx) is None
+        assert scope_requirements([require_scopes("write")], ctx) == ["write"]
+
+    @pytest.mark.parametrize(
+        "required, expected",
+        [("admin", True), ("a", False), ("dmin", False)],
+    )
+    def test_scalar_role_claim_is_one_role(self, required: str, expected: bool):
+        """A provider storing one role as a string must not be iterated.
+
+        `str` satisfies `Iterable[str]`, so a bare "admin" would otherwise
+        become the character set {a, d, m, i, n} — denying the "admin" it
+        plainly grants and granting any single character it contains.
+        """
+        ctx = AuthContext(
+            token=make_token(claims={"role": "admin"}), component=make_tool()
+        )
+        check = require_roles(required, extract=lambda c: c["role"])
+        assert check(ctx) is expected
+
+    async def test_role_denial_suppresses_scope_challenge(self):
+        """A caller blocked by their role is not told to obtain a scope."""
+        mcp = FastMCP(
+            middleware=[
+                AuthMiddleware(
+                    auth=[
+                        require_scopes("api"),
+                        require_roles("admin", extract=keycloak_roles),
+                    ]
+                )
+            ]
+        )
+
+        @mcp.tool
+        def t() -> str:
+            return "ok"
+
+        token = make_token(scopes=["read"], claims={"realm_access": {"roles": ["v"]}})
+        tok = set_token(token)
+        try:
+            with pytest.raises(AuthorizationError) as exc_info:
+                await mcp.call_tool("t", {})
+        finally:
+            auth_context_var.reset(tok)
+
+        assert not isinstance(exc_info.value, InsufficientScopeError)
+
+    async def test_passing_role_still_allows_scope_challenge(self):
+        """Mixing the two checks does not disable step-up on its own."""
+        mcp = FastMCP(
+            middleware=[
+                AuthMiddleware(
+                    auth=[
+                        require_scopes("api"),
+                        require_roles("admin", extract=keycloak_roles),
+                    ]
+                )
+            ]
+        )
+
+        @mcp.tool
+        def t() -> str:
+            return "ok"
+
+        token = make_token(
+            scopes=["read"], claims={"realm_access": {"roles": ["admin"]}}
+        )
+        tok = set_token(token)
+        try:
+            with pytest.raises(InsufficientScopeError) as exc_info:
+                await mcp.call_tool("t", {})
+        finally:
+            auth_context_var.reset(tok)
+
+        assert exc_info.value.required_scopes == ["api"]
 
 
 # =============================================================================
@@ -1008,3 +1162,324 @@ class TestComponentAuthDenialMessage:
             assert "not found or not authorized" in message
         finally:
             auth_context_var.reset(tok)
+
+
+# =============================================================================
+# Tests for component-level scope step-up signalling (SEP-2350)
+# =============================================================================
+
+
+class TestInsufficientScopeSignal:
+    """A scope shortfall on a globally-authorized component is surfaced as an
+    ``InsufficientScopeError`` naming the unmet scopes, the component-level
+    analog of the transport-level ``insufficient_scope`` challenge. The named
+    scopes are only those the token lacks, so an existing grant accumulates
+    rather than being replaced when the caller re-authorizes.
+    """
+
+    async def test_call_tool_missing_scope_names_required_scope(self):
+        mcp = FastMCP(middleware=[AuthMiddleware(auth=require_scopes("api"))])
+
+        @mcp.tool
+        def api_tool() -> str:
+            return "ok"
+
+        tok = set_token(make_token(scopes=["read"]))
+        try:
+            with pytest.raises(InsufficientScopeError) as exc_info:
+                await mcp.call_tool("api_tool", {})
+        finally:
+            auth_context_var.reset(tok)
+
+        assert exc_info.value.required_scopes == ["api"]
+        assert "api" in str(exc_info.value)
+
+    async def test_insufficient_scope_error_is_authorization_error(self):
+        # Existing `except AuthorizationError` sites must still catch it.
+        assert issubclass(InsufficientScopeError, AuthorizationError)
+
+    async def test_call_tool_sufficient_scope_passes(self):
+        mcp = FastMCP(middleware=[AuthMiddleware(auth=require_scopes("api"))])
+
+        @mcp.tool
+        def api_tool() -> str:
+            return "ok"
+
+        tok = set_token(make_token(scopes=["api", "read"]))
+        try:
+            result = await mcp.call_tool("api_tool", {})
+        finally:
+            auth_context_var.reset(tok)
+
+        assert result.content[0].text == "ok"  # type: ignore[union-attr]  # ty:ignore[unresolved-attribute]
+
+    async def test_shortfall_names_only_unmet_scopes(self):
+        # The token already carries "read"; only the missing "api" is named, so a
+        # re-authorization accumulates scopes rather than dropping "read".
+        mcp = FastMCP(middleware=[AuthMiddleware(auth=require_scopes("read", "api"))])
+
+        @mcp.tool
+        def api_tool() -> str:
+            return "ok"
+
+        tok = set_token(make_token(scopes=["read"]))
+        try:
+            with pytest.raises(InsufficientScopeError) as exc_info:
+                await mcp.call_tool("api_tool", {})
+        finally:
+            auth_context_var.reset(tok)
+
+        assert exc_info.value.required_scopes == ["api"]
+
+    async def test_missing_token_is_not_insufficient_scope(self):
+        # No token is an authentication failure (RFC 6750 §3.1), not a scope
+        # shortfall: it must not be turned into an insufficient_scope signal.
+        mcp = FastMCP(middleware=[AuthMiddleware(auth=require_scopes("api"))])
+
+        @mcp.tool
+        def api_tool() -> str:
+            return "ok"
+
+        with pytest.raises(AuthorizationError) as exc_info:
+            await mcp.call_tool("api_tool", {})
+
+        assert not isinstance(exc_info.value, InsufficientScopeError)
+
+    async def test_non_scope_denial_stays_opaque_and_names_no_scope(self):
+        # A non-scope check (e.g. a custom tenant policy) fails first and
+        # short-circuits before the scope check runs. The denial must stay a
+        # plain AuthorizationError and must NOT disclose or request the "admin"
+        # scope for a component the caller could not otherwise reach.
+        def deny_tenant(ctx: AuthContext) -> bool:
+            return False
+
+        mcp = FastMCP(
+            middleware=[
+                AuthMiddleware(auth=[deny_tenant, require_scopes("admin")]),
+            ]
+        )
+
+        @mcp.tool
+        def api_tool() -> str:
+            return "ok"
+
+        tok = set_token(make_token(scopes=["read"]))
+        try:
+            with pytest.raises(AuthorizationError) as exc_info:
+                await mcp.call_tool("api_tool", {})
+        finally:
+            auth_context_var.reset(tok)
+
+        assert not isinstance(exc_info.value, InsufficientScopeError)
+        assert "admin" not in str(exc_info.value)
+
+    async def test_shortfall_unions_every_unmet_scope_check(self):
+        # Naming only the first failing check would strand the caller in a
+        # step-up loop: they obtain "read", retry, and are denied for "write".
+        mcp = FastMCP(
+            middleware=[
+                AuthMiddleware(auth=[require_scopes("read"), require_scopes("write")]),
+            ]
+        )
+
+        @mcp.tool
+        def api_tool() -> str:
+            return "ok"
+
+        tok = set_token(make_token(scopes=[]))
+        try:
+            with pytest.raises(InsufficientScopeError) as exc_info:
+                await mcp.call_tool("api_tool", {})
+        finally:
+            auth_context_var.reset(tok)
+
+        assert exc_info.value.required_scopes == ["read", "write"]
+
+    async def test_shortfall_union_drops_already_granted_scope(self):
+        mcp = FastMCP(
+            middleware=[
+                AuthMiddleware(auth=[require_scopes("read"), require_scopes("write")]),
+            ]
+        )
+
+        @mcp.tool
+        def api_tool() -> str:
+            return "ok"
+
+        tok = set_token(make_token(scopes=["read"]))
+        try:
+            with pytest.raises(InsufficientScopeError) as exc_info:
+                await mcp.call_tool("api_tool", {})
+        finally:
+            auth_context_var.reset(tok)
+
+        assert exc_info.value.required_scopes == ["write"]
+
+    async def test_shortfall_unions_across_middleware_chain(self):
+        # Scope requirements split across two AuthMiddleware instances. The
+        # outer one raises before the inner ever runs, so its shortfall has to
+        # account for the inner requirement or the caller loops.
+        mcp = FastMCP(
+            middleware=[
+                AuthMiddleware(auth=require_scopes("admin")),
+                AuthMiddleware(auth=require_scopes("write")),
+            ]
+        )
+
+        @mcp.tool
+        def api_tool() -> str:
+            return "ok"
+
+        tok = set_token(make_token(scopes=[]))
+        try:
+            with pytest.raises(InsufficientScopeError) as exc_info:
+                await mcp.call_tool("api_tool", {})
+        finally:
+            auth_context_var.reset(tok)
+
+        assert exc_info.value.required_scopes == ["admin", "write"]
+
+    async def test_chain_shortfall_drops_already_granted_scope(self):
+        mcp = FastMCP(
+            middleware=[
+                AuthMiddleware(auth=require_scopes("admin")),
+                AuthMiddleware(auth=require_scopes("write")),
+            ]
+        )
+
+        @mcp.tool
+        def api_tool() -> str:
+            return "ok"
+
+        tok = set_token(make_token(scopes=["admin"]))
+        try:
+            with pytest.raises(InsufficientScopeError) as exc_info:
+                await mcp.call_tool("api_tool", {})
+        finally:
+            auth_context_var.reset(tok)
+
+        assert exc_info.value.required_scopes == ["write"]
+
+    async def test_opaque_denial_in_chain_stays_opaque(self):
+        # An opaque check denies in the outer middleware; the inner middleware's
+        # scope requirement must not be disclosed.
+        def deny_tenant(ctx: AuthContext) -> bool:
+            return False
+
+        mcp = FastMCP(
+            middleware=[
+                AuthMiddleware(auth=deny_tenant),
+                AuthMiddleware(auth=require_scopes("write")),
+            ]
+        )
+
+        @mcp.tool
+        def api_tool() -> str:
+            return "ok"
+
+        tok = set_token(make_token(scopes=[]))
+        try:
+            with pytest.raises(AuthorizationError) as exc_info:
+                await mcp.call_tool("api_tool", {})
+        finally:
+            auth_context_var.reset(tok)
+
+        assert not isinstance(exc_info.value, InsufficientScopeError)
+        assert "write" not in str(exc_info.value)
+
+    async def test_chain_shortfall_withholds_scopes_of_opaque_sibling(self):
+        # The outer middleware has a real scope shortfall, but the inner one
+        # pairs its scope requirement with an opaque check whose verdict is
+        # unknown. That layer's scope must not be disclosed.
+        def opaque_policy(ctx: AuthContext) -> bool:
+            return True
+
+        mcp = FastMCP(
+            middleware=[
+                AuthMiddleware(auth=require_scopes("admin")),
+                AuthMiddleware(auth=[opaque_policy, require_scopes("write")]),
+            ]
+        )
+
+        @mcp.tool
+        def api_tool() -> str:
+            return "ok"
+
+        tok = set_token(make_token(scopes=[]))
+        try:
+            with pytest.raises(InsufficientScopeError) as exc_info:
+                await mcp.call_tool("api_tool", {})
+        finally:
+            auth_context_var.reset(tok)
+
+        assert exc_info.value.required_scopes == ["admin"]
+
+    async def test_chain_shortfall_stops_at_unevaluated_opaque_layer(self):
+        # The opaque middleware sits between two scope layers. The outer one
+        # raises before it ever runs, so whether it would admit the caller is
+        # unknown — and the scope behind it must not be disclosed. It returns
+        # True here to show the walk stops regardless of what the verdict
+        # would have been.
+        def tenant_check(ctx: AuthContext) -> bool:
+            return True
+
+        mcp = FastMCP(
+            middleware=[
+                AuthMiddleware(auth=require_scopes("admin")),
+                AuthMiddleware(auth=tenant_check),
+                AuthMiddleware(auth=require_scopes("write")),
+            ]
+        )
+
+        @mcp.tool
+        def api_tool() -> str:
+            return "ok"
+
+        tok = set_token(make_token(scopes=[]))
+        try:
+            with pytest.raises(InsufficientScopeError) as exc_info:
+                await mcp.call_tool("api_tool", {})
+        finally:
+            auth_context_var.reset(tok)
+
+        assert exc_info.value.required_scopes == ["admin"]
+
+    async def test_chain_shortfall_spans_consecutive_scope_only_layers(self):
+        # The same chain without the opaque layer aggregates all of it, proving
+        # the reachability bound does not over-correct.
+        mcp = FastMCP(
+            middleware=[
+                AuthMiddleware(auth=require_scopes("admin")),
+                AuthMiddleware(auth=require_scopes("write")),
+                AuthMiddleware(auth=require_scopes("delete")),
+            ]
+        )
+
+        @mcp.tool
+        def api_tool() -> str:
+            return "ok"
+
+        tok = set_token(make_token(scopes=[]))
+        try:
+            with pytest.raises(InsufficientScopeError) as exc_info:
+                await mcp.call_tool("api_tool", {})
+        finally:
+            auth_context_var.reset(tok)
+
+        assert exc_info.value.required_scopes == ["admin", "delete", "write"]
+
+    async def test_restrict_tag_shortfall_names_scope(self):
+        mcp = make_restricted_tag_server()
+
+        @mcp.tool(tags={"admin"})
+        def admin_tool() -> str:
+            return "ok"
+
+        tok = set_token(make_token(scopes=["read"]))
+        try:
+            with pytest.raises(InsufficientScopeError) as exc_info:
+                await mcp.call_tool("admin_tool", {})
+        finally:
+            auth_context_var.reset(tok)
+
+        assert exc_info.value.required_scopes == ["admin"]

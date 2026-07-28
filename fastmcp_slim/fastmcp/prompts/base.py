@@ -10,6 +10,7 @@ import pydantic_core
 
 if TYPE_CHECKING:
     from fastmcp.prompts.function_prompt import FunctionPrompt
+import mcp_types
 from mcp import GetPromptResult
 from mcp_types import (
     AudioContent,
@@ -188,6 +189,38 @@ class PromptResult(pydantic.BaseModel):
         )
 
 
+class InputRequiredPromptResult(PromptResult):
+    """The full result of a single multi-round-trip prompt leg (SEP-2322).
+
+    `InputRequiredResult` is a result type, not a `tools/call` feature: any
+    request may resolve to one. When a prompt returns an `InputRequiredResult`
+    from its body to ask the client for input, that ask is the legitimate
+    result of this `prompts/get` — so FastMCP wraps it in this `PromptResult`
+    subclass, mirroring `InputRequiredToolResult`, and it flows through the
+    middleware chain as an ordinary return value.
+
+    Invariant: the wrapped `InputRequiredResult` is never rendered as prompt
+    messages. `messages` is always empty; the wire handler (`_on_get_prompt`)
+    reads `.input_required` and returns it to the runner.
+    """
+
+    input_required: mcp_types.InputRequiredResult = Field(
+        description="The client-input request this leg resolved to (SEP-2322)"
+    )
+
+    def __init__(self, input_required: mcp_types.InputRequiredResult) -> None:
+        # Bypass PromptResult's message-normalizing __init__: an input-required
+        # leg carries no messages (see the invariant above), and
+        # `input_required` is a required field PromptResult.__init__ can't set.
+        pydantic.BaseModel.__init__(
+            self,
+            messages=[],
+            description=None,
+            meta=None,
+            input_required=input_required,
+        )
+
+
 class Prompt(FastMCPComponent):
     """A prompt template that can be rendered with parameters."""
 
@@ -286,6 +319,12 @@ class Prompt(FastMCPComponent):
         """
         if isinstance(raw_value, PromptResult):
             return raw_value
+
+        if isinstance(raw_value, mcp_types.InputRequiredResult):
+            # The prompt asked the client for input (SEP-2322). Wrap it so the
+            # ask travels the middleware chain as an ordinary result; the wire
+            # handler unwraps it.
+            return InputRequiredPromptResult(raw_value)
 
         if isinstance(raw_value, str):
             return PromptResult(raw_value, description=self.description, meta=self.meta)

@@ -18,6 +18,7 @@ from fastmcp.client.transports import (
     FastMCPTransport,
 )
 from fastmcp.server.server import FastMCP
+from tests.conftest import user_meta
 
 
 async def test_list_tools(fastmcp_server):
@@ -848,7 +849,7 @@ async def test_client_unwraps_result_using_meta():
         result = await client.call_tool("list_tool", {})
         assert result.structured_content == {"result": [1, 2, 3]}
         assert result.data == [1, 2, 3]
-        assert result.meta == {"fastmcp": {"wrap_result": True}}
+        assert user_meta(result.meta) == {"fastmcp": {"wrap_result": True}}
 
 
 async def test_client_does_not_unwrap_dict_result():
@@ -864,7 +865,7 @@ async def test_client_does_not_unwrap_dict_result():
         result = await client.call_tool("dict_tool", {})
         assert result.structured_content == {"a": 1}
         assert result.data == {"a": 1}
-        assert result.meta is None
+        assert user_meta(result.meta) is None
 
 
 async def test_client_list_dict_return_type():

@@ -22,6 +22,9 @@ from __future__ import annotations
 from typing import Any, Literal
 
 from mcp_types import RequestParams, Result
+from mcp_types.jsonrpc import (
+    MISSING_REQUIRED_CLIENT_CAPABILITY as _MISSING_REQUIRED_CLIENT_CAPABILITY,
+)
 from pydantic import BaseModel, ConfigDict, Field
 
 __all__ = [
@@ -42,8 +45,10 @@ __all__ = [
 
 #: JSON-RPC error code for "Missing Required Client Capability" (SEP-2663). A
 #: tool whose task mode is `required` returns this when the client did not opt
-#: the tasks extension in for the request.
-MISSING_REQUIRED_CLIENT_CAPABILITY = -32003
+#: the tasks extension in for the request, as do the `tasks/*` methods when the
+#: client never negotiated the extension. Re-exported from the SDK so the code
+#: tracks the protocol rather than an early draft's number.
+MISSING_REQUIRED_CLIENT_CAPABILITY = _MISSING_REQUIRED_CLIENT_CAPABILITY
 
 TaskStatus = Literal["working", "input_required", "completed", "failed", "cancelled"]
 
@@ -186,7 +191,7 @@ class CancelTaskRequest(BaseModel):
 
 
 def missing_capability_error_data() -> dict[str, Any]:
-    """Build the `data.requiredCapabilities` payload for a -32003 error.
+    """Build the `data.requiredCapabilities` payload for a -32021 error.
 
     A `required`-mode tool called without the client opting the tasks extension
     in for the request returns this so the client learns which capability to

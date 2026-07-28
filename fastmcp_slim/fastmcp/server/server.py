@@ -31,6 +31,7 @@ from mcp_types import (
     CallToolRequestParams,
     ToolAnnotations,
 )
+from mcp_types.jsonrpc import MISSING_REQUIRED_CLIENT_CAPABILITY
 from pydantic import AnyUrl
 from pydantic import ValidationError as PydanticValidationError
 from starlette.routing import BaseRoute
@@ -102,7 +103,6 @@ from fastmcp.utilities.versions import (
 if TYPE_CHECKING:
     from fastmcp.client import Client
     from fastmcp.client.client import SDKServer
-    from fastmcp.client.sampling import SamplingHandler
     from fastmcp.client.transports import ClientTransport, ClientTransportT
     from fastmcp.server.extensions import ServerExtension
     from fastmcp.server.providers.openapi import ComponentFn as OpenAPIComponentFn
@@ -145,8 +145,9 @@ def _version_request_meta(
 
 
 # The MCP SDK warns "Tool X not listed, no validation will be performed"
-# for every call to app-only tools (hidden from list_tools by design).
-# This fires even when validate_input=False. Suppress it.
+# for every call addressed by hashed backend name, since that address is
+# an identity rather than a listed tool name. This fires even when
+# validate_input=False. Suppress it.
 class _SuppressUnlistedToolWarning(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         return "not listed, no validation" not in record.getMessage()
@@ -178,11 +179,13 @@ _REMOVED_KWARGS: dict[str, str] = {
     "include_tags": "Use `server.enable(tags=..., only=True)` after creating the server.",
     "exclude_tags": "Use `server.disable(tags=...)` after creating the server.",
     "tool_transformations": "Use `server.add_transform(ToolTransform(...))` after creating the server.",
+    "sampling_handler": "Server-initiated sampling was removed from MCP by SEP-2577. Call an LLM directly from your tool.",
+    "sampling_handler_behavior": "Server-initiated sampling was removed from MCP by SEP-2577. Call an LLM directly from your tool.",
 }
 
 
 def _check_removed_kwargs(kwargs: dict[str, Any]) -> None:
-    """Raise helpful TypeErrors for kwargs removed in v3."""
+    """Raise helpful TypeErrors for kwargs FastMCP no longer accepts."""
     for key in kwargs:
         if key in _REMOVED_KWARGS:
             raise TypeError(
@@ -221,64 +224,18 @@ def _get_auth_context() -> tuple[bool, Any]:
     return (False, get_access_token())
 
 
-def _is_backend_tool(tool: Tool) -> bool:
-    """Check whether a tool is handled specially as backend tool
+def _tool_identity(tool: Tool) -> str | None:
+    """Read a tool's stable identity hash, if it carries one."""
+    from fastmcp.server.providers.addressing import TOOL_HASH_META_KEY
 
-    Tools registered via ``@app.tool()`` (without ``model=True``) have
-    ``meta["ui"]["visibility"] == ["app"]`` — they are callable by app UIs
-    but should not appear in tool list the client passes to the model.
-
-    They are handled specially for in various ways - e.g. they are looked
-    up via get_app_tool(), and don't appear in the tools/list output.
-    (FIXME: the latter isn't correct behavior according to the mcp-apps spec.)
-
-    Returns True (a backend tool) when:
-    - The tool has ``meta.fastmcp.app``.
-    - The tool has ``meta.ui.visibility``.
-    - The visibility is precisely ``["app"]``.
-
-    Returns False otherwise.
-    """
     meta = tool.meta
     if not meta:
-        return False
-    fastmcp = meta.get("fastmcp")
-    if not isinstance(fastmcp, dict):
-        return False
-    if fastmcp.get("app") is None:
-        return False
-    ui = meta.get("ui")
-    if not isinstance(ui, dict):
-        return False
-    visibility = ui.get("visibility")
-    if not isinstance(visibility, list):
-        return False
-    return len(visibility) == 1 and visibility[0] == "app"
-
-
-def _is_app_visible(tool: Tool) -> bool:
-    """Check whether a tool has explicitly opted into app-callable visibility.
-
-    Gates the dispatcher's hashed-name routing path: only tools whose
-    ``meta.ui.visibility`` list contains ``"app"`` can be reached via
-    ``<hash>_<local_name>`` calls. Tools without an explicit visibility
-    declaration are NOT app-callable — they must be reached by their
-    display name through the normal transform-aware resolution path.
-
-    This is the inverse of the "everything is dot-callable" trap: the
-    hashed-name path is an opt-in mechanism for FastMCPApp backend tools,
-    not a general bypass for arbitrary tools.
-    """
-    meta = tool.meta
-    if not meta:
-        return False
-    ui = meta.get("ui")
-    if not isinstance(ui, dict):
-        return False
-    visibility = ui.get("visibility")
-    if not isinstance(visibility, list):
-        return False
-    return "app" in visibility
+        return None
+    fastmcp_meta = meta.get("fastmcp")
+    if not isinstance(fastmcp_meta, dict):
+        return None
+    identity = fastmcp_meta.get(TOOL_HASH_META_KEY)
+    return identity if isinstance(identity, str) else None
 
 
 @asynccontextmanager
@@ -355,8 +312,6 @@ class FastMCP(
         cache_scope: Literal["public", "private"] | None = None,
         tasks: bool | None = None,
         session_state_store: AsyncKeyValue | None = None,
-        sampling_handler: SamplingHandler | None = None,
-        sampling_handler_behavior: Literal["always", "fallback"] | None = None,
         client_log_level: mcp_types.LoggingLevel | None = None,
         experimental_capabilities: dict[str, dict[str, Any]] | None = None,
         **kwargs: Any,
@@ -537,11 +492,6 @@ class FastMCP(
 
         # Set up MCP protocol handlers
         self._setup_handlers()
-
-        self.sampling_handler: SamplingHandler | None = sampling_handler
-        self.sampling_handler_behavior: Literal["always", "fallback"] = (
-            sampling_handler_behavior or "fallback"
-        )
 
     def __repr__(self) -> str:
         return f"{type(self).__name__}({self.name!r})"
@@ -733,7 +683,7 @@ class FastMCP(
         """Replace placeholder Prefab URIs with per-tool hashed ones.
 
         For each tool whose ``meta.ui.resourceUri`` is the placeholder,
-        reads the tool's stored hash from ``meta.fastmcp._tool_hash``
+        reads the tool's stored hash from ``meta.fastmcp.tool_hash``
         and rewrites the URI to the per-tool form. Also strips CSP from
         tool meta (it belongs on the resource). Produces ``model_copy``
         views — originals are untouched.
@@ -746,6 +696,78 @@ class FastMCP(
         return [
             rewrite_tool_meta_for_wire(t) if _is_prefab_tool(t) else t for t in tools
         ]
+
+    async def _rebind_prefab_tool_names(self, result: Any) -> Any:
+        """Re-address a Prefab payload's tool references to this server's names.
+
+        Runs on the way out of every ``tools/call``, above the middleware
+        chain so a payload is re-addressed however it was produced. Servers
+        unwind innermost-first, so the outermost server rewrites last and its
+        names — the only ones a client can actually invoke — are what ship.
+
+        A call does not always answer with a tool result: submitting a task
+        answers with the task's metadata. Anything that is not a tool result
+        passes through untouched.
+
+        An identity claimed by more than one tool is not bound. That happens
+        when one app is composed into a server twice, which leaves no fact
+        anywhere in the listing that says which copy a UI belongs to. The
+        reference keeps its identity-addressed form, and the dispatcher
+        reports the ambiguity rather than binding to a coin flip.
+        """
+        from fastmcp.server.providers.prefab_payload import (
+            payload_has_identities,
+            rewrite_payload_tool_names,
+        )
+
+        if not isinstance(result, ToolResult):
+            return result
+
+        payload = result.structured_content
+        if not payload_has_identities(payload):
+            return result
+
+        # Binding is safe only where one identity, one name, and one
+        # component all agree. Each is tracked separately: collapsing them
+        # early is what lets a duplicated app pass as a single tool.
+        #
+        # The middleware chain runs, because the binding has to describe the
+        # listing a client will actually see. Middleware adds, removes and
+        # shadows tools — an injected tool sharing a backend's name owns that
+        # name at call time, and a listing taken beneath middleware would not
+        # know it exists.
+        claimed_by: dict[str, list[Tool]] = {}
+        owners_of: dict[str, set[str | None]] = {}
+        for tool in await self.list_tools():
+            identity = _tool_identity(tool)
+            owners_of.setdefault(tool.name, set()).add(identity)
+            if identity is not None:
+                claimed_by.setdefault(identity, []).append(tool)
+
+        def resolve(identity: str) -> str | None:
+            tools = claimed_by.get(identity, [])
+            names = {tool.name for tool in tools}
+            if len(names) != 1:
+                # Several names carry this identity: the app is composed more
+                # than once and nothing says which copy the UI belongs to.
+                return None
+
+            # One name can still be several components. `key` is the canonical
+            # identity — type, name and version — so versions of one tool have
+            # distinct keys while copies of one app repeat a key. A repeat
+            # means two components are indistinguishable, which is worse than
+            # the renamed case, not better.
+            if len({tool.key for tool in tools}) != len(tools):
+                return None
+
+            (name,) = names
+            # And the name has to lead back. Two apps can each expose `save`,
+            # or a plain tool can share the name — binding then hands one
+            # app's button to someone else's implementation.
+            return name if owners_of.get(name) == {identity} else None
+
+        rewrite_payload_tool_names(payload, resolve)
+        return result
 
     # -------------------------------------------------------------------------
     # Provider interface overrides - inherited from AggregateProvider
@@ -805,7 +827,7 @@ class FastMCP(
     async def list_tools(self, *, run_middleware: bool = True) -> Sequence[Tool]:
         """List all enabled tools from providers.
 
-        Overrides Provider.list_tools() to add visibility filtering, auth filtering,
+        Overrides Provider.list_tools() to add enabled filtering, auth filtering,
         and middleware execution. Returns all versions (no deduplication).
         Protocol handlers deduplicate for MCP wire format.
         """
@@ -825,11 +847,14 @@ class FastMCP(
 
             # Core logic: list tools
             with server_span("tools/list", "tools/list", self.name, "tool", ""):
-                # Get all tools, apply session transforms, then filter enabled
-                # and model-visible (app-only tools are hidden from the model).
+                # Get all tools, apply session transforms, then filter enabled.
+                # App-only tools (meta.ui.visibility == ["app"]) are listed:
+                # the mcp-apps spec puts visibility filtering on the host, and
+                # a tool absent from tools/list cannot be forwarded by any
+                # intermediary that routes by name.
                 tools = list(await super().list_tools())
                 tools = await apply_session_transforms(tools)
-                tools = [t for t in tools if is_enabled(t) and not _is_backend_tool(t)]
+                tools = [t for t in tools if is_enabled(t)]
 
                 # Rewrite per-tool Prefab renderer URIs based on the tool's
                 # mount-point address. The walk pairs each tool with the
@@ -887,7 +912,7 @@ class FastMCP(
     ) -> Tool | None:
         """Get a tool by name, filtering disabled tools.
 
-        Overrides Provider.get_tool() to add visibility filtering after all
+        Overrides Provider.get_tool() to filter disabled tools after all
         transforms (including session-level) have been applied. This ensures
         session transforms can override provider-level disables.
 
@@ -907,18 +932,18 @@ class FastMCP(
 
         # Apply session transforms to single item
         tools = await apply_session_transforms([tool])
-        if tools and is_enabled(tools[0]) and not _is_backend_tool(tools[0]):
+        if tools and is_enabled(tools[0]):
             return tools[0]
 
-        # The highest version is disabled (or app-only). If an explicit version
-        # was requested, respect that. Otherwise fall back to the next-highest
-        # enabled, model-visible version.
+        # The highest version is disabled. If an explicit version was
+        # requested, respect that. Otherwise fall back to the next-highest
+        # enabled version.
         if version is not None:
             return None
 
         all_tools = [t for t in await super().list_tools() if t.name == name]
         all_tools = list(await apply_session_transforms(all_tools))
-        enabled = [t for t in all_tools if is_enabled(t) and not _is_backend_tool(t)]
+        enabled = [t for t in all_tools if is_enabled(t)]
 
         skip_auth, token = _get_auth_context()
         authorized: list[Tool] = []
@@ -1403,7 +1428,7 @@ class FastMCP(
                 # the whole thing (so it observes every call), and the
                 # interceptors sit between it and the tool body (so each is the
                 # last gate before execution).
-                return await self._dispatch_component_middleware(
+                dispatched = await self._dispatch_component_middleware(
                     context=mw_context,
                     call_next=self._compose_tool_call_interceptors(
                         lambda context: self.call_tool(
@@ -1414,6 +1439,10 @@ class FastMCP(
                         )
                     ),
                 )
+                # Above the chain, so a Prefab payload is re-addressed however
+                # it was produced — middleware can answer a call itself, and
+                # such a result never reaches the core path below.
+                return await self._rebind_prefab_tool_names(dispatched)
 
             # Core logic: find and execute tool
             with server_span(
@@ -1484,6 +1513,24 @@ class FastMCP(
                     )
                     raise
                 except Exception as e:
+                    # Most MCPErrors raised under a tool describe how the call
+                    # went — a timeout, an upstream error a proxy forwarded —
+                    # and are masked into an `isError` result like any other
+                    # failure. A missing-client-capability error is different:
+                    # it says the request cannot be serviced at all, and
+                    # SEP-2575 requires it on the wire as -32021 (HTTP 400).
+                    # Flattening it into a result would drop the code and tell
+                    # the client the call had succeeded.
+                    if (
+                        isinstance(e, MCPError)
+                        and e.error.code == MISSING_REQUIRED_CLIENT_CAPABILITY
+                    ):
+                        logger.debug(
+                            "Tool %r requires a client capability the client did "
+                            "not declare",
+                            name,
+                        )
+                        raise
                     logger.exception(f"Error calling tool {name!r}")
                     # Handle actionable errors that should reach the LLM
                     # even when masking is enabled

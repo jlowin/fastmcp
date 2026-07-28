@@ -25,7 +25,7 @@ from collections.abc import AsyncIterator, Sequence
 from contextlib import AsyncExitStack, asynccontextmanager
 from typing import TYPE_CHECKING, Literal, TypeVar
 
-from fastmcp.exceptions import NotFoundError
+from fastmcp.exceptions import NotFoundError, ToolError
 from fastmcp.server.providers.base import Provider
 from fastmcp.server.transforms import Namespace
 from fastmcp.utilities.async_utils import gather
@@ -221,19 +221,41 @@ class AggregateProvider(Provider):
         return None
 
     async def get_tool_by_hash(self, tool_hash: str, tool_name: str) -> Tool | None:
-        """Query all child providers for a tool matching a hash."""
+        """Query all child providers for a tool matching a hash.
+
+        The hash identifies a tool by app name and registered name, with no
+        mount-point component, so composing one app into two branches yields
+        two distinct tools claiming the same identity. That is ambiguous
+        rather than resolvable: picking either one silently routes a UI's
+        call into the wrong branch. Raise instead.
+
+        An ambiguity raised by a child is a verdict, not a provider failure,
+        so it propagates whatever the error strategy is. Swallowing it would
+        turn a duplicated app into "unknown tool", which sends whoever hits
+        it looking for a missing registration instead of a duplicate one.
+        """
         results = await gather(
             (p.get_tool_by_hash(tool_hash, tool_name) for p in self.providers),
             return_exceptions=True,
         )
+        matches: list[Tool] = []
         for r in results:
             if isinstance(r, BaseException):
-                if self.provider_error_strategy == "raise":
+                if isinstance(r, ToolError) or self.provider_error_strategy == "raise":
                     raise r
                 continue
             if r is not None:
-                return r
-        return None
+                matches.append(r)
+
+        if not matches:
+            return None
+        if len(matches) > 1:
+            raise ToolError(
+                f"Ambiguous app tool {tool_name!r}: {len(matches)} components share "
+                f"the identity {tool_hash!r}. The same app is composed more than "
+                f"once, so this call cannot be routed to a single tool."
+            )
+        return matches[0]
 
     # -------------------------------------------------------------------------
     # Resources

@@ -245,7 +245,7 @@ class ClientCredentialsOAuthProvider(_SDKClientCredentialsOAuthProvider):
             client_id=self._client_id,
             client_secret=self._client_secret,
             token_endpoint_auth_method=self._token_endpoint_auth_method,
-            scopes=self._scopes,
+            scope=self._scopes,
         )
         self._bound = True
 
@@ -371,7 +371,7 @@ class PrivateKeyJWTOAuthProvider(_SDKPrivateKeyJWTOAuthProvider):
             ),
             client_id=self._client_id,
             assertion_provider=self._assertion_provider,
-            scopes=self._scopes,
+            scope=self._scopes,
         )
         self._bound = True
 

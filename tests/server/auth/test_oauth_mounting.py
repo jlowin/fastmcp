@@ -209,7 +209,8 @@ class TestOAuthMounting:
         Scenario: FastMCP server mounted at /api prefix
         - issuer_url: https://api.example.com (root level)
         - base_url: https://api.example.com/api (includes mount prefix)
-        - Expected: metadata declares endpoints at base_url
+        - Expected: metadata declares endpoints at base_url and issuer at
+          issuer_url
         """
         # Create OAuth proxy with different base_url and issuer_url
         token_verifier = StaticTokenVerifier(tokens=test_tokens)
@@ -261,12 +262,10 @@ class TestOAuthMounting:
                 == "https://api.example.com/api/register"
             )
 
-            # The issuer field should use base_url (where the server is actually running)
-            # Note: MCP SDK may or may not add a trailing slash
-            assert metadata["issuer"] in [
-                "https://api.example.com/api",
-                "https://api.example.com/api/",
-            ]
+            # The issuer field reports issuer_url: it is the identifier the
+            # client used for RFC 8414 discovery, and §3.3 requires the two to
+            # match. Only the endpoint URLs follow base_url.
+            assert metadata["issuer"] == "https://api.example.com/"
 
     async def test_oauth_authorization_server_metadata_path_aware_discovery(
         self, test_tokens

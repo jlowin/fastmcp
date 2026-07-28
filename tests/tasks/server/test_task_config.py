@@ -166,7 +166,7 @@ class TestToolModeEnforcement:
         return mcp
 
     async def test_required_mode_without_opt_in_raises(self):
-        """Required mode raises -32003 when called without a tasks opt-in."""
+        """Required mode raises -32021 when called without a tasks opt-in."""
         mcp = self._server()
         async with running_task_server(mcp):
             with pytest.raises(MCPError) as exc_info:

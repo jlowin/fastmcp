@@ -4,14 +4,23 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from contextvars import ContextVar
 
+from opentelemetry import context as otel_context
 from opentelemetry.context import Context
-from opentelemetry.trace import Span, SpanKind, Status, StatusCode, get_current_span
+from opentelemetry.trace import (
+    INVALID_SPAN,
+    Span,
+    SpanKind,
+    Status,
+    StatusCode,
+    get_current_span,
+)
 
 from fastmcp.exceptions import ToolError as _ToolError
 from fastmcp.telemetry import (
     extract_trace_context,
     get_tracer,
     restore_dropped_attributes,
+    telemetry_mode,
 )
 
 # Marker attribute set on the SERVER span opened at the FastMCP middleware seam
@@ -87,6 +96,32 @@ def _get_parent_trace_context() -> Context | None:
     return None
 
 
+@contextmanager
+def _propagation_only_span() -> Generator[Span, None, None]:
+    """Attach the incoming `_meta` trace context without creating a span.
+
+    This is what separates `propagation_only` from `off`. Both create no
+    FastMCP spans, but `off` is fully transparent while `propagation_only`
+    still has to *parent* whatever the request goes on to do: without the
+    attach here, the trace context carried in `_meta` would be extracted and
+    then thrown away, and a span created inside a tool handler — by the user or
+    by the outer instrumentation layer that owns the MCP hierarchy — would
+    start a brand new trace instead of continuing the caller's.
+
+    Yields `INVALID_SPAN`, which is non-recording, so callers' `is_recording()`
+    guards skip attribute and error bookkeeping on it.
+    """
+    parent_context = _get_parent_trace_context()
+    if parent_context is None:
+        yield INVALID_SPAN
+        return
+    token = otel_context.attach(parent_context)
+    try:
+        yield INVALID_SPAN
+    finally:
+        otel_context.detach(token)
+
+
 def _build_server_span_attrs(
     method: str,
     server_name: str,
@@ -138,7 +173,16 @@ def seam_span(method: str, server_name: str) -> Generator[Span, None, None]:
     opening a second one. Exceptions raised anywhere below the seam — including
     rejections *before* the high-level path (auth, not-found, middleware vetoes)
     that would otherwise produce no SERVER span at all — are recorded here.
+
+    In `propagation_only` mode no span is opened at all — this is the one place
+    that has to know the difference, because the seam is where the incoming
+    `_meta` parent context is applied for the whole request.
     """
+    if telemetry_mode() == "propagation_only":
+        with _propagation_only_span() as span:
+            yield span
+        return
+
     attrs = {
         SEAM_SPAN_MARKER: True,
         "mcp.method.name": method,
@@ -198,7 +242,17 @@ def server_span(
     new SERVER span as before.
 
     Automatically records any exception on the span and sets error status.
+
+    In `propagation_only` mode no span is opened or enriched. The seam has
+    normally already attached the incoming parent context for this request;
+    doing it again here is a no-op, and covers the in-process callers that
+    bypass the dispatcher and so never reach the seam at all.
     """
+    if telemetry_mode() == "propagation_only":
+        with _propagation_only_span() as span:
+            yield span
+        return
+
     attrs = _build_server_span_attrs(
         method,
         server_name,

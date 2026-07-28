@@ -72,7 +72,11 @@ members = ["fastmcp_slim", "fastmcp_remote", "fastmcp_tasks"]
 [tool.uv]
 default-groups = ["dev"]
 exclude-newer = "1 week"
-exclude-newer-package = { fastmcp = false, fastmcp-slim = false, fastmcp-remote = false, prefab-ui = false, mcp = false, mcp-types = false, httpx2 = false, httpcore2 = false, truststore = false }
+# The cooldown above refuses anything published in the last week. Exempt the
+# first-party packages, whose fresh releases we install deliberately, and the
+# MCP SDK, where a new major is the only version satisfying our floor and so
+# has nothing older to fall back to.
+exclude-newer-package = { fastmcp = false, fastmcp-slim = false, fastmcp-remote = false, prefab-ui = false, mcp = false, mcp-types = false }
 
 [dependency-groups]
 dev = [

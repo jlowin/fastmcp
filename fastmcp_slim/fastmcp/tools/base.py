@@ -518,15 +518,17 @@ def _get_tool_resolver(app_name: str | None = None) -> Callable[..., str] | None
 
 
 def _prefab_to_json(app: Any, fastmcp_app_name: str | None = None) -> dict[str, Any]:
-    """Call PrefabApp.to_json() with the hash-based resolver.
+    """Serialize a PrefabApp, addressing its peer-tool references by identity.
 
-    The resolver prefixes peer-tool references with a deterministic hash
-    derived from the app name + tool name. The dispatcher recognizes that
-    format and routes calls via ``get_tool_by_hash`` which walks the
-    provider tree recursively — same pattern as the old ``get_app_tool``.
+    The resolver writes each reference as ``<hash>_<local_name>``, and the
+    identity behind it is recorded in the payload's meta so that servers
+    can re-address the reference on the way out without losing track of
+    what it points at.
     """
+    from fastmcp.server.providers.prefab_payload import annotate_payload_identities
+
     data = app.to_json(tool_resolver=_get_tool_resolver(fastmcp_app_name))
-    return data
+    return annotate_payload_identities(data)
 
 
 def _get_fastmcp_app_name(tool: Tool) -> str | None:

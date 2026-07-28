@@ -13,21 +13,15 @@ Code blocks marked as sketches show the *intended* API and do not resolve agains
 
 ## Sampling removal
 
-**Status: Deprecation and era-gating shipped (#4448); removal slated for 4.0.**
+**Status: Shipped in 4.0.**
 
-Sampling is the push-shaped API where a server borrows the client's model mid-call (`ctx.sample`, `ctx.sample_step`). The `2026-07-28` era removes server-initiated requests, so this API cannot work on modern connections. Background-task sampling is dead under v2 — a worker's back-channel is gone once the submitting request returns, and no sampling relay was ever built (sdk-feedback #9).
+Sampling was the push-shaped API where a server borrows the client's model mid-call (`ctx.sample`, `ctx.sample_step`). The `2026-07-28` era removes server-initiated requests, so it cannot work on modern connections, and `Client`'s flip to `mode="auto"` made a modern connection the default — the era gate had become the default experience rather than an edge case. Background-task sampling was dead under v2 in any event: a worker's back-channel is gone once the submitting request returns, and no relay was ever built (sdk-feedback #9).
 
-The plan is Option A: **deprecate the push-sampling API now and remove it in the 4.0 release.** The first two steps shipped in #4448:
+Deprecation and era-gating shipped in #4448. The removal completes the plan: `ctx.sample`, `ctx.sample_step`, `ctx.list_roots`, `server/sampling/` (including `SamplingTool` and structured-result sampling), `FastMCP(sampling_handler=..., sampling_handler_behavior=...)`, and `examples/sampling/` are all gone. The server-authoring API is now the modern protocol's API, with nothing in it that only works against old clients.
 
-- **Done:** `ctx.sample` / `ctx.sample_step` emit a `FastMCPDeprecationWarning` (once per process, gated on `settings.deprecation_warnings`).
-- **Done:** both are era-gated to raise a clear, era-aware `ToolError` on `2026-07-28` before the wire, which also fixed the opaque "Method not found" of sdk-feedback #10.
-- **Pending 4.0:** remove `ctx.sample`, `ctx.sample_step`, `server/sampling/`, `SamplingTool`, and structured-result sampling.
+The migration story is honest: there is **no drop-in**. The guidance is architectural — call an LLM from your server directly, with your own API key, rather than borrowing the client's model. For roots, take paths as tool arguments or ask through the guard pattern, whose `input_requests` map still carries a `ListRootsRequest`.
 
-The migration story is honest: there is **no drop-in** on modern connections. The guidance is architectural — call an LLM from your server directly, with your own API key, rather than borrowing the client's model. That shift is the real answer, and it is why the removal justifies a major version.
-
-The client-side provider handlers (Anthropic, OpenAI, Google GenAI) are **retained** regardless: MRTR needs them to answer sampling input-requests from the client side. What is removed is the server-side push emitter, which the SDK never built for the modern era.
-
-Sampling still functions on the legacy eras. Users also see an SDK-level `MCPDeprecationWarning` on ordinary `ctx.sample` usage (the SDK deprecated the capability wire-side per SEP-2577). FastMCP's own deprecation — the warning with migration guidance, plus the era-gating — shipped in #4448; only the final removal remains for 4.0.
+The client-side provider handlers (Anthropic, OpenAI, Google GenAI) and `Client(sampling_handler=..., roots=...)` are **retained**: a FastMCP client still has to answer a legacy server's requests, and MRTR needs them from the client side. What is removed is the server-side push emitter. `ProxyClient`'s default relay handlers are retained for the same interop reason and now call the SDK session directly.
 
 ## MRTR elicitation
 
@@ -35,11 +29,11 @@ Sampling still functions on the legacy eras. Users also see an SDK-level `MCPDep
 
 Elicitation survives the modern era through multi-round-trip (MRTR). The 2026 wire envelope carries elicitation as a multi-round input-request: a tool returns an `InputRequiredResult` and re-runs per round, each round a complete request→response cycle. Imperative `ctx.elicit` relies on the session back-channel, which is gone on `2026-07-28` foreground calls; on the modern era, elicitation is reachable through MRTR instead.
 
-The **guard form** of this is shipped in 4.0 (see [Elicitation on the modern protocol](/servers/elicitation#elicitation-on-the-modern-protocol)): a tool returns an `InputRequiredResult` and reads the client's answers off `ctx.input_responses` / `ctx.request_state`, re-running each round. It mirrors the SDK's base guard model exactly — no FastMCP-invented DX, the framework owns `request_state` sealing, and returning this result on a handshake-era connection produces a clear era error.
+The **guard form** of this is shipped in 4.0 (see [Elicitation on the modern protocol](https://gofastmcp.com/servers/elicitation#elicitation-on-the-modern-protocol)): a tool returns an `InputRequiredResult` and reads the client's answers off `ctx.input_responses` / `ctx.request_state`, re-running each round. It mirrors the SDK's base guard model exactly — no FastMCP-invented DX, the framework owns `request_state` sealing, and returning this result on a handshake-era connection produces a clear era error.
 
 What remains is the declarative `Resolve(...)` layer that sits *on top of* that shipped primitive. It is designed, not built: a new `fastmcp.elicitation` module — `Resolve`, `Elicit`, and `ElicitationResult` — thin wrappers over the SDK's resolver, wired into FastMCP's own tool layer (FastMCP tools do not inherit the SDK's auto-resolver wiring). It would detect `Annotated[_, Resolve(...)]` parameters, build resolver plans, and return the SDK's `InputRequiredResult` instead of the tool body on the first round.
 
-Imperative `ctx.elicit` is **not** re-plumbed to survive the modern era. It works on the legacy eras through the session back-channel, and on `2026-07-28` foreground calls it is era-gated to raise a clear error (shipped in #4448) pointing at the guard form. The earlier plan to keep imperative `ctx.elicit` alive on modern connections through a background-task relay is dead twice over: the guard model shipped in its place, and the 2025 task machinery the relay depended on is slated for removal (see [Known Gaps](/development/v4-notes/known-gaps#the-xfail-register)).
+Imperative `ctx.elicit` is **not** re-plumbed to survive the modern era. It works on the legacy eras through the session back-channel, and on `2026-07-28` foreground calls it is era-gated to raise a clear error (shipped in #4448) pointing at the guard form. The earlier plan to keep imperative `ctx.elicit` alive on modern connections through a background-task relay is dead twice over: the guard model shipped in its place, and the 2025 task machinery the relay depended on is slated for removal (see [Known Gaps](known-gaps.md#the-xfail-register)).
 
 The intended declarative DX (sketch — the module does not exist yet):
 
@@ -100,7 +94,7 @@ The migration already routed `initialize` interception through the SDK's `Server
 
 The decision here was **compose, not wrap** (D16): rebuild `fastmcp.Client` on the SDK's high-level `mcp.Client` rather than wrapping `mcp.ClientSession`. The parts that compose cleanly have shipped. The rest is **blocked upstream on two counts**. First, `mcp.Client` constructs its `ClientSession` at a single hardcoded site with no injection hook, while FastMCP's `session_class` is load-bearing (`ProxyClient` substitutes a session that skips result validation so a backend's schema violation surfaces at the end client rather than becoming a proxy error) — a `session_factory=` hook on `mcp.Client`, the same shape as the `notification_bindings=` parameter added earlier, would solve this. Second, `mcp.Client.__aenter__` refuses reentry, but FastMCP's client is deliberately reentrant (its refcounted context manager exists to fix a proxy session-reuse deadlock), so the rebuild also needs the SDK client to tolerate reentrant entry. Both must land upstream before the full rebuild is possible; `session_factory=` alone is necessary but not sufficient.
 
-This workstream also owns the server-side statelessness design holes — `ctx.session_id` / `set_state` round-tripping and stateful-proxy affinity — since they turn on the same "what is a session without a session?" question. See [Statelessness on 2026-07-28](/development/v4-notes/known-gaps#statelessness-on-2026-07-28) for the full accounting.
+This workstream also owns the server-side statelessness design holes — `ctx.session_id` / `set_state` round-tripping and stateful-proxy affinity — since they turn on the same "what is a session without a session?" question. See [Statelessness on 2026-07-28](known-gaps.md#statelessness-on-2026-07-28) for the full accounting.
 
 ## Subscriptions, cache hints, extensions, OTel
 
@@ -109,7 +103,7 @@ This workstream also owns the server-side statelessness design holes — `ctx.se
 A cluster of protocol features tracked for v4. Their statuses have diverged:
 
 - **Cache hints — shipped (#4464).** Server-level authoring (`FastMCP(cache_ttl=..., cache_scope=...)`, SEP-2549) stamps every cacheable result, and the FastMCP client honors hints with an opt-in response cache.
-- **OpenTelemetry — shipped (#4481).** Spans are on by default (a no-op without an exporter), with SDK-aligned attributes and a `FASTMCP_ENABLE_TELEMETRY=false` off-switch.
+- **OpenTelemetry — shipped (#4481).** Spans are on by default (a no-op without an exporter), with SDK-aligned attributes and a `FASTMCP_TELEMETRY_MODE` setting (`native` / `propagation_only` / `off`).
 - **Extensions — client side shipped (#4572).** `Client(extensions=..., result_claims=...)` advertises opt-in client extensions (SEP-2133). The server side is a Designed workstream in its own right (see [FastMCP-native extension API](#fastmcp-native-extension-api)). The cross-era reconciliation of the `extensions` / MCP Apps capability advertisement is still open (the capability is stripped at pre-2026 negotiated versions — sdk-feedback #2).
 - **Subscriptions — not started.** A `subscriptions/listen` surface backed by a subscription bus.
 
@@ -121,7 +115,7 @@ MCP extensions (SEP-2133) are optional, capability-negotiated protocol features 
 
 FastMCP already forwards `ClientExtension` natively (`Client(extensions=...)`, #4572). The **server** side does not use the SDK's `Extension` class at all: MCP Apps predates the abstraction, so FastMCP hand-splices the `ui` capability into `get_capabilities()` on the low-level server and walks tool metadata directly. That worked for one extension, but every new protocol extension currently means bespoke surgery on core.
 
-The Designed work is a FastMCP-native server extension API — a single registration point (`mcp.add_extension(...)`) that contributes a negotiated capability, request methods, and a `tools/call` interceptor, with access to FastMCP-level constructs the SDK's `Extension` withholds (the component registry, `Context`, auth scope). It is designed against the SEP-2663 tasks extension because tasks exercises the full surface — capability *and* methods *and* interception *and* client claims/notifications — where MCP Apps exercises only a subset. Tasks is the pathfinder; MCP Apps migrates onto the extension API as a fast-follow, deleting the hand-rolled splices, and confirms the design generalizes. The discriminator that keeps the extension API distinct from [middleware](/servers/middleware): an extension is a *negotiated contract change* the client must understand, where middleware is unilateral server behavior the client never sees. Delete a capability advertisement and nothing about the client changes — that is middleware, not an extension.
+The Designed work is a FastMCP-native server extension API — a single registration point (`mcp.add_extension(...)`) that contributes a negotiated capability, request methods, and a `tools/call` interceptor, with access to FastMCP-level constructs the SDK's `Extension` withholds (the component registry, `Context`, auth scope). It is designed against the SEP-2663 tasks extension because tasks exercises the full surface — capability *and* methods *and* interception *and* client claims/notifications — where MCP Apps exercises only a subset. Tasks is the pathfinder; MCP Apps migrates onto the extension API as a fast-follow, deleting the hand-rolled splices, and confirms the design generalizes. The discriminator that keeps the extension API distinct from [middleware](https://gofastmcp.com/servers/middleware): an extension is a *negotiated contract change* the client must understand, where middleware is unilateral server behavior the client never sees. Delete a capability advertisement and nothing about the client changes — that is middleware, not an extension.
 
 ## Background tasks (SEP-2663)
 
@@ -129,7 +123,7 @@ The Designed work is a FastMCP-native server extension API — a single registra
 
 Background tasks return to the modern era as `fastmcp-tasks`, an in-repo optional package rebuilt on the `io.modelcontextprotocol/tasks` extension (SEP-2663, Final, merged upstream 2026-05-15). SEP-2663 supersedes SEP-1686 but keeps its polling core: a client that advertises the tasks capability issues an augmented `tools/call`; the server decides whether to run it as a task and returns a `CreateTaskResult` carrying a server-generated task id; the client polls `tasks/get` until terminal and reads the result inlined there. FastMCP's existing SEP-1686 wire layer is removed while the Docket/Redis execution engine underneath moves into `fastmcp-tasks` intact — the spec moved toward what FastMCP already built, so the rebuild is mostly deletion plus a thin wire adapter. `task=True` stays the authoring surface (gated by the `fastmcp[tasks]` extra and an explicit `mcp.add_extension(TasksExtension(...))`, the first consumer of the [extension API](#fastmcp-native-extension-api) above), so a server that already uses tasks needs no code change. Scope for v1 is polling-only and `tools/call`-only.
 
-The full design — wire delta, the engine/wire split, packaging, client experience, sequencing, risks, and the five resolved decisions — is on the dedicated [Background Tasks (SEP-2663)](/development/v4-notes/background-tasks) page.
+The full design — wire delta, the engine/wire split, packaging, client experience, sequencing, risks, and the five resolved decisions — is on the dedicated [Background Tasks (SEP-2663)](background-tasks.md) page.
 
 ## SDK delegation, round two
 
@@ -141,6 +135,6 @@ The real HTTP simplification is a v4 project, not this PR. FastMCP can collapse 
 2. a user-middleware injection hook,
 3. a lifespan hook.
 
-The payoff is not only less code — FastMCP would also inherit the SDK's session-owner credential enforcement, a security gain it lacks today. These are the three upstream feature requests to file (alongside the advisory dossier described in [Known Gaps](/development/v4-notes/known-gaps)). Until they land, the four HTTP overrides in the [Change Register](/development/v4-notes/change-register#http) stay.
+The payoff is not only less code — FastMCP would also inherit the SDK's session-owner credential enforcement, a security gain it lacks today. These are the three upstream feature requests to file (alongside the advisory dossier described in [Known Gaps](known-gaps.md)). Until they land, the four HTTP overrides in the [Change Register](change-register.md#http) stay.
 
 One latent capability worth surfacing on FastMCP's side: `session_idle_timeout` is accepted by the manager but never set by `create_streamable_http_app` — a one-line plumb if FastMCP wants to expose it.

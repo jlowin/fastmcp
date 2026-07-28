@@ -153,6 +153,8 @@ Tools discovered through search can also be called directly via `client.call_too
 
 Search results respect the full authorization pipeline. Tools filtered by middleware, visibility transforms, or component-level auth checks won't appear in search results.
 
+App-only tools are excluded too. A [MCP app](/apps/overview) can declare backend tools that only its UI may call, and normally the host keeps those from the model. A search result is tool output rather than an advertised listing, so no host filtering applies to it — the exclusion happens here instead. The `call_tool` proxy enforces the same boundary, since it executes a name the model supplies.
+
 The search tool queries `list_tools()` through the complete pipeline at search time, so the same filtering that controls what a client sees in the listing also controls what they can discover through search.
 
 ```python
