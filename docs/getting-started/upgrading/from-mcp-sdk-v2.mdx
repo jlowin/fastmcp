@@ -87,7 +87,7 @@ uv add fastmcp
 
 FastMCP 4 depends on the MCP SDK v2, so nothing you already import from `mcp_types` moves. That is the practical benefit of migrating at this version rather than an earlier one: you and FastMCP are on the same protocol layer, with the same snake_case field names and the same type package, so the migration touches only the server API.
 
-## The mechanical part
+## The Mechanical Part
 
 Most of the work is renaming. This table covers the surfaces a typical `MCPServer` server touches:
 
@@ -190,7 +190,7 @@ if __name__ == "__main__":
 
 </CodeGroup>
 
-## Constructor arguments
+## Constructor Arguments
 
 `FastMCP()` describes your server's identity and behavior; how it gets deployed is decided when you serve it. Several `MCPServer` constructor arguments move accordingly, and each raises a `TypeError` naming its replacement rather than being silently ignored.
 
@@ -209,7 +209,7 @@ if __name__ == "__main__":
 
 Authentication is the largest of these, and it consolidates rather than moves. `MCPServer` exposes the SDK's raw auth plumbing — a token verifier, an authorization-server provider, and an `AuthSettings` object, configured separately. FastMCP takes one `auth=` provider that carries the whole configuration, and ships providers for the common cases: `JWTVerifier` for validating tokens you already issue, `RemoteAuthProvider` for delegating to an external authorization server, `OAuthProxy` for wrapping a provider that lacks Dynamic Client Registration, and named providers for GitHub, Google, Auth0, Keycloak, WorkOS, and others. See [Authentication](/servers/auth/authentication).
 
-## Asking the caller for input
+## Asking for Input
 
 This is the one part of the migration that is not a rename, so read it before you start if your tools use resolvers.
 
@@ -264,7 +264,7 @@ Resolvers that return `Sample` or `ListRoots` have no FastMCP equivalent at all,
 
 One schema detail is easy to miss during the rewrite. A resolved parameter never appears in the tool's input schema — `book_flight` above advertises no arguments at all. When you replace a resolver with an explicit tool argument, the schema the client sees gains a field, which is usually what you want but is a visible change to your tool's contract.
 
-## What you gain
+## What You Gain
 
 The migration is worth doing for what sits on the other side of it. FastMCP is a framework rather than a protocol surface, and these are the capabilities that most often motivate the move:
 

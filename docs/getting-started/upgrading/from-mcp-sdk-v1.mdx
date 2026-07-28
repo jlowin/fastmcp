@@ -21,13 +21,31 @@ That's it. Your `@mcp.tool`, `@mcp.resource`, and `@mcp.prompt` decorators, your
 **Why upgrade?** FastMCP 1.0 pioneered the Pythonic MCP server experience, and we're proud it was bundled into the `mcp` package. The standalone FastMCP project has since grown into a full framework for taking MCP servers from prototype to production — with composition, middleware, proxy servers, authentication, and much more. Upgrading gives you access to all of that, plus ongoing updates and fixes.
 </Tip>
 
-## The easier path off SDK v1
+## The SDK v2 Transition
 
-If you're weighing this against moving to MCP SDK v2, the arithmetic is unusual: **upgrading from MCP SDK v1 to FastMCP 4 is generally less work than upgrading from MCP SDK v1 to MCP SDK v2.**
+MCP SDK v2 is a substantial, deliberate modernization of the protocol layer, and part of that work rebuilt the high-level server as `MCPServer` under `mcp.server.mcpserver`. `mcp.server.fastmcp` does not exist there — so a FastMCP 1.0 server meets the change the moment its environment resolves `mcp` to v2:
 
-The reason is that `mcp.server.fastmcp` does not exist in SDK v2. The high-level server was rebuilt and renamed to `MCPServer`, at `mcp.server.mcpserver`, with a different decorator call style; the protocol types moved out of `mcp.types` into a standalone `mcp_types` package; and every wire field was renamed from camelCase to snake_case. A FastMCP 1.0 server that bumps its `mcp` pin to v2 gets a `ModuleNotFoundError` on its first line and a rewrite behind it.
+```
+ModuleNotFoundError: No module named 'mcp.server.fastmcp'
+```
 
-FastMCP 4 runs on that same SDK v2 and absorbs the break on your behalf. The framework does the adapting internally; the surface you write against is the one FastMCP 1.0 taught you. So the shorter route from a FastMCP 1.0 server to a modern, maintained one is the import swap above — not the migration to `MCPServer`.
+Often nobody chose that moment. An unpinned `mcp` dependency, a fresh lockfile, or a rebuilt container picks up the new major version and the module your server imports on line one has moved. Nothing is wrong with your code, and nothing is wrong with the SDK — major versions are exactly where a change like this belongs. Your build just crossed it earlier than you planned to.
+
+Pinning the SDK back restores the old module immediately, with no code changes, and buys you time to choose deliberately:
+
+```bash
+pip install "mcp<2"
+```
+
+## Two Upgrade Paths
+
+From here, both directions are reasonable, and which is less work depends on which API you already write.
+
+**`MCPServer`, the SDK's high-level server**, is a capable, well-designed API and the direct continuation of the SDK's own line. Because it was rebuilt rather than renamed, expect real work: a new class and import, a different decorator call style, and protocol types imported from the standalone `mcp_types` package with snake_case field names.
+
+**FastMCP** is the import change at the top of this page. It is short for a specific, historical reason: FastMCP 1.0 *is* early FastMCP — it was contributed into the `mcp` package, and the standalone project kept developing that same high-level API. The surface you already write against is the surface FastMCP still offers. FastMCP 4 is itself built on MCP SDK v2, so both paths land you on the same modern protocol layer; FastMCP absorbs the adaptation internally rather than asking your code to do it.
+
+The claim is narrower than it may sound. It holds for FastMCP 1.0 servers specifically, because of shared lineage — not because one library is better than the other. Both projects are moving the same direction on the same protocol.
 
 If you have already moved to SDK v2 and write against `MCPServer` today, see [Upgrading from MCP SDK v2](/getting-started/upgrading/from-mcp-sdk-v2). If your server uses the low-level `Server` class rather than the high-level one, see [Upgrading from the Low-Level SDK v1](/getting-started/upgrading/from-low-level-sdk-v1).
 
@@ -72,11 +90,11 @@ DECORATOR RETURN VALUES
 For each item found, show the original line, name what changed, and give the corrected code from the guide. If the only change needed is the import, say so plainly rather than manufacturing work.
 </Prompt>
 
-## What might need updating
+## What Might Need Updating
 
 Most servers need nothing beyond the import change. Skim the sections below to see if any apply.
 
-### Constructor settings
+### Constructor Settings
 
 If you passed transport settings like `host` or `port` directly to `FastMCP()`, those now belong on `run()`. This keeps your server definition independent of how it's deployed:
 
@@ -126,7 +144,7 @@ def debug(error: str) -> list[Message]:
     ]
 ```
 
-### Other `mcp.*` imports
+### Other `mcp.*` Imports
 
 FastMCP 4 builds on MCP SDK v2, where the `mcp.types` module no longer exists. Protocol types moved to a standalone `mcp_types` package, and the field names were renamed from camelCase to snake_case (`inputSchema` → `input_schema`, `mimeType` → `mime_type`, and so on). Update `from mcp.types import X` to `from mcp_types import X`. For everything else SDK v2 changed, see [Upgrading from FastMCP 3](/getting-started/upgrading/from-fastmcp-3), which covers the same protocol rebuild from the FastMCP side.
 
@@ -142,7 +160,7 @@ Where FastMCP provides its own API for the same thing, it's worth switching over
 
 For protocol types without a FastMCP equivalent, import them from `mcp_types` directly.
 
-### Decorated functions
+### Decorated Functions
 
 In FastMCP 1.0, `@mcp.tool` replaced your function with a `FunctionTool` object. Now decorators return your original function unchanged, so decorated functions stay callable for testing, reuse, and composition:
 
@@ -162,7 +180,7 @@ assert greet("World") == "Hello, World!"
 
 Code that reads `.name`, `.description`, or other component attributes off the decorated result needs updating. This is uncommon — most servers never touch the tool object. When you do need the component itself, reach it through the server with `await mcp.get_tool("greet")`.
 
-## Verifying the upgrade
+## Verifying the Upgrade
 
 Run your server the way you always have. To confirm every component came across, inspect the server with the FastMCP CLI:
 
@@ -172,6 +190,6 @@ fastmcp inspect my_server.py
 
 The output lists every tool, resource, template, and prompt your server exposes, so a component that failed to register shows up here rather than at the first client call.
 
-## Looking ahead
+## Looking Ahead
 
 The MCP ecosystem is evolving fast. Part of FastMCP's job is to absorb that complexity on your behalf — as the protocol and its tooling grow, we do the work so your server code doesn't have to change. The SDK v1 to v2 transition is the clearest example so far: an entire protocol layer was rewritten underneath FastMCP 4, and the servers on this page cross it with one line.

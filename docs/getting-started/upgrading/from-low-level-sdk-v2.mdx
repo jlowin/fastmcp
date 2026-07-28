@@ -73,7 +73,7 @@ uv add fastmcp
 
 FastMCP 4 depends on the MCP SDK v2 you are already using, so `mcp_types` stays importable and every protocol type keeps its current name and fields. Most of those imports vanish from your code anyway — FastMCP derives them — but the ones you keep need no changes.
 
-## Server and transport
+## Server and Transport
 
 The `Server` class asks you to open a transport, connect its streams, build initialization options, and run an event loop. FastMCP collapses that into a constructor and a `run()` call.
 
@@ -191,7 +191,7 @@ def multiply(a: float, b: float) -> float:
 
 Each `@mcp.tool` function is self-contained: its name becomes the tool name, its docstring becomes the description, its annotations become the JSON Schema, and its return value is serialized for you. The dispatch chain, the schema dicts, the `CallToolResult` wrapper, the `TextContent` wrapper, and the unknown-tool fallback all go away — a tool that doesn't exist is now the framework's problem, not a branch you maintain.
 
-### Converting schemas to type hints
+### Type Mapping
 
 Your hand-written `input_schema` becomes the function's parameters:
 
@@ -207,7 +207,7 @@ Your hand-written `input_schema` becomes the function's parameters:
 
 Constraints carry over too. A schema with `"minimum"` and `"maximum"` becomes a Pydantic `Field`, and a nested object schema becomes a Pydantic model or dataclass used as the annotation — FastMCP generates the same schema back out of it.
 
-### Return values
+### Return Values
 
 The low-level class requires tools to return a `CallToolResult` wrapping a list of content blocks. FastMCP takes the value itself — strings, numbers, dicts, lists, dataclasses, Pydantic models — and handles both the content block and the structured output. For images and audio, FastMCP provides wrapper types that carry the format:
 
@@ -408,7 +408,7 @@ def debug_session(error: str) -> list[Message]:
     ]
 ```
 
-## Request context
+## Request Context
 
 The low-level class hands each handler a `ServerRequestContext` carrying the raw `ServerSession`, and you reach through it to send notifications. FastMCP injects a typed `Context` into any function that declares one, and puts the operations you actually want on it directly.
 
@@ -459,7 +459,7 @@ The `Context` parameter is injected by type annotation and never appears in the 
 
 One thing to check as you migrate: FastMCP does not hand you the raw `ServerSession`. If a handler reaches into `ctx.session` for something with no `Context` equivalent, that code needs a rethink rather than a translation.
 
-## A complete server
+## Complete Example
 
 Everything above, applied at once:
 
@@ -596,7 +596,7 @@ if __name__ == "__main__":
 
 </CodeGroup>
 
-## What you gain
+## What You Gain
 
 Deleting the handler machinery is the immediate payoff, but the reason to make this move is what becomes available once your server is a FastMCP server.
 

@@ -9,11 +9,30 @@ If you've been building MCP servers directly on the `mcp` package's `Server` cla
 
 The core idea: instead of telling the SDK what your tools look like and then separately implementing them, you write ordinary Python functions and let FastMCP derive the protocol layer from your code. Type hints become JSON Schema. Docstrings become descriptions. Return values are serialized automatically. The plumbing you wrote to satisfy the protocol just disappears.
 
-## The easier path off SDK v1
+## The SDK v2 Transition
 
-MCP SDK v2 landed sweeping breaking changes on the low-level `Server`, and every one of them lands on code like yours. The protocol types moved out of `mcp.types` into a separate `mcp_types` package. Every field was renamed from camelCase to snake_case. `McpError` was renamed. And the `Server` class itself was rebuilt: handlers are no longer registered with decorators but passed to the constructor as `on_*` callables, and their signatures changed from `(name, arguments)` to `(ctx, params)`, returning wrapped result objects instead of bare lists. Staying on the low-level SDK means rewriting your imports, every handler signature, every handler return, and your error construction.
+MCP SDK v2 is a substantial, deliberate modernization of the protocol layer. Protocol types moved into a standalone `mcp_types` package, wire fields moved from camelCase to snake_case, and the low-level `Server` was rebuilt so handlers are passed to the constructor as `on_*` callables taking `(ctx, params)` rather than registered with decorators. A v1 server meets that change the moment its environment resolves `mcp` to v2:
 
-**Migrating to FastMCP is generally less work than migrating to raw SDK v2** — and it is less work by a wide margin, because the low-level handler machinery is exactly the code that FastMCP deletes. You are not porting those handlers to a new signature; you are throwing them away. FastMCP 4 runs on SDK v2 and hides that whole surface behind a high-level API: you write `@mcp.tool`, FastMCP derives the protocol layer from your function signature, and the rename simply isn't something your code has to know about. You come out the other side with the framework as well — composition, middleware, proxies, authentication, and in-process testing. The SDK v2 break is the natural moment to make the jump.
+```
+ModuleNotFoundError: No module named 'mcp.types'
+AttributeError: 'Server' object has no attribute 'list_tools'
+```
+
+Often nobody chose that moment. An unpinned `mcp` dependency, a fresh lockfile, or a rebuilt container picks up the new major version. Nothing is wrong with your code, and nothing is wrong with the SDK — major versions are exactly where a change like this belongs. Your build just crossed it earlier than you planned to.
+
+Pinning the SDK back restores the decorator API immediately, with no code changes, and buys you time to choose deliberately:
+
+```bash
+pip install "mcp<2"
+```
+
+## Two Upgrade Paths
+
+Both directions are reasonable, and the choice is about which code you'd rather maintain.
+
+**Porting the low-level `Server` to SDK v2** keeps you in direct control of the protocol surface, which is the point of the low-level API and the right call for some servers. The work is real: your imports, every handler signature, every handler's return type, and your error construction all move.
+
+**Adopting FastMCP** is what the rest of this page walks through. What makes it less work is not that FastMCP is better — it's that the code most affected by the SDK v2 changes is precisely the code FastMCP doesn't ask you to write. Your `list_tools`/`call_tool` pair, hand-written JSON Schema, and content-block wrappers aren't ported to new signatures; they're deleted, and FastMCP derives all of it from your function signatures instead. FastMCP 4 runs on MCP SDK v2 underneath, so both paths land you on the same modern protocol layer.
 
 <Note>
 Already on SDK v2's rebuilt `Server` class, with constructor-registered `on_*` handlers? See [Upgrading from the Low-Level SDK v2](/getting-started/upgrading/from-low-level-sdk-v2) instead — the before-and-after code is different enough to warrant its own guide.
@@ -574,7 +593,7 @@ if __name__ == "__main__":
 
 </CodeGroup>
 
-## What you gain
+## What You Gain
 
 Deleting the handler machinery is the immediate payoff, but the reason to make this move is what becomes available once your server is a FastMCP server.
 
