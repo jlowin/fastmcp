@@ -90,7 +90,6 @@ from fastmcp.settings import DuplicateBehavior as DuplicateBehaviorSetting
 from fastmcp.tools.base import Tool, ToolResult
 from fastmcp.tools.function_tool import FunctionTool
 from fastmcp.tools.tool_transform import ToolTransformConfig
-from fastmcp.utilities.async_utils import gather
 from fastmcp.utilities.components import FastMCPComponent, _coerce_version
 from fastmcp.utilities.exceptions import HTTP_STATUS_ERRORS, TIMEOUT_ERRORS
 from fastmcp.utilities.logging import get_logger
@@ -237,27 +236,6 @@ def _tool_identity(tool: Tool) -> str | None:
         return None
     identity = fastmcp_meta.get(TOOL_HASH_META_KEY)
     return identity if isinstance(identity, str) else None
-
-
-def _calling_instance(
-    by_identity: dict[str, list[str]], called_name: str
-) -> tuple[int, int] | None:
-    """Locate which copy of an app the call came from.
-
-    Composing one app more than once leaves several tools claiming a single
-    identity, and only the caller's own copy is a correct target. The copies
-    are the same app, so each contributes the same identities in the same
-    registration order, and aggregation preserves that order — the k-th tool
-    claiming any identity belongs to the k-th copy.
-
-    So the position of ``called_name`` among the tools sharing its identity
-    *is* the copy the call came from. Returns that position and how many
-    copies there are, or None when the entry tool cannot be placed.
-    """
-    for names in by_identity.values():
-        if called_name in names:
-            return names.index(called_name), len(names)
-    return None
 
 
 @asynccontextmanager
@@ -719,20 +697,18 @@ class FastMCP(
             rewrite_tool_meta_for_wire(t) if _is_prefab_tool(t) else t for t in tools
         ]
 
-    async def _rebind_prefab_tool_names(
-        self, result: ToolResult, called_name: str
-    ) -> ToolResult:
+    async def _rebind_prefab_tool_names(self, result: ToolResult) -> ToolResult:
         """Re-address a Prefab payload's tool references to this server's names.
 
         Runs on the way out of every ``tools/call``. Servers unwind
         innermost-first, so the outermost server rewrites last and its names —
         the only ones a client can actually invoke — are what ship.
 
-        Args:
-            result: The tool result, possibly carrying a Prefab payload.
-            called_name: The name this call arrived under. Used to pick a
-                branch when one identity is claimed by more than one tool,
-                which happens when the same app is composed more than once.
+        An identity claimed by more than one tool is not bound. That happens
+        when one app is composed into a server twice, which leaves no fact
+        anywhere in the listing that says which copy a UI belongs to. The
+        reference keeps its identity-addressed form, and the dispatcher
+        reports the ambiguity rather than binding to a coin flip.
         """
         from fastmcp.server.providers.prefab_payload import (
             payload_has_identities,
@@ -749,55 +725,12 @@ class FastMCP(
             if identity is not None:
                 by_identity.setdefault(identity, []).append(tool.name)
 
-        branch = await self._branch_names(called_name)
-        instance = _calling_instance(by_identity, called_name)
-
         def resolve(identity: str) -> str | None:
             candidates = by_identity.get(identity, [])
-            if len(candidates) == 1:
-                return candidates[0]
-
-            # Provider membership is exact where it discriminates: a name
-            # either is or isn't contributed by the caller's own branch.
-            if branch is not None:
-                within = [name for name in candidates if name in branch]
-                if len(within) == 1:
-                    return within[0]
-                if not within:
-                    # The caller's branch has no such tool — it is filtered or
-                    # unauthorized there. Any other copy's tool is the wrong
-                    # answer, so decline rather than reach across branches.
-                    return None
-
-            if instance is None:
-                return None
-            index, count = instance
-            return candidates[index] if len(candidates) == count else None
+            return candidates[0] if len(candidates) == 1 else None
 
         rewrite_payload_tool_names(payload, resolve)
         return result
-
-    async def _branch_names(self, called_name: str) -> set[str] | None:
-        """Names contributed by the provider subtree that served the call.
-
-        Providers are already namespace-wrapped, so a provider's listing is
-        exactly what its subtree contributes. Where a single provider claims
-        the entry tool this is an exact answer, and it stays exact when copies
-        of an app expose different subsets of their tools. Returns None when
-        no single provider claims the name — both copies can sit inside one
-        subtree — leaving the caller to fall back to positional pairing.
-        """
-        listings = await gather(
-            (provider.list_tools() for provider in self.providers),
-            return_exceptions=True,
-        )
-        matches = [
-            {tool.name for tool in listing}
-            for listing in listings
-            if not isinstance(listing, BaseException)
-            and any(tool.name == called_name for tool in listing)
-        ]
-        return matches[0] if len(matches) == 1 else None
 
     # -------------------------------------------------------------------------
     # Provider interface overrides - inherited from AggregateProvider
@@ -1509,7 +1442,7 @@ class FastMCP(
                 span.set_attributes(tool.get_span_attributes())
                 try:
                     result = await tool._run(arguments or {})
-                    return await self._rebind_prefab_tool_names(result, name)
+                    return await self._rebind_prefab_tool_names(result)
                 except ValidationError as e:
                     # Argument-validation failure (a bad call). FunctionTool
                     # converts pydantic's call-validation error into fastmcp's

@@ -316,25 +316,6 @@ class TestLateBoundToolNames:
         clicked = await gateway.call_tool(ref, {"name": "alice"})
         assert clicked.content[0].text == "[be] saved alice"  # type: ignore[union-attr]  # ty:ignore[unresolved-attribute]
 
-    async def test_each_branch_resolves_within_itself(self):
-        """One app composed twice: each tenant's UI addresses its own tool."""
-        first = FastMCP("TenantA")
-        first.add_provider(self._app(marker="A"), namespace="inner")
-        second = FastMCP("TenantB")
-        second.add_provider(self._app(marker="B"), namespace="inner")
-
-        top = FastMCP("Top")
-        top.add_provider(first, namespace="a")
-        top.add_provider(second, namespace="b")
-
-        for branch, marker in (("a", "A"), ("b", "B")):
-            result = await top.call_tool(f"{branch}_inner_form", {})
-            (ref,) = _tool_refs(result.structured_content)
-            assert ref == f"{branch}_inner_save"
-
-            clicked = await top.call_tool(ref, {"name": "alice"})
-            assert clicked.content[0].text == f"[{marker}] saved alice"  # type: ignore[union-attr]  # ty:ignore[unresolved-attribute]
-
     @pytest.mark.parametrize(
         "transform_factory,expected_listing",
         [
@@ -368,82 +349,50 @@ class TestLateBoundToolNames:
         clicked = await server.call_tool(ref, {"name": "alice"})
         assert clicked.content[0].text == "[cat] saved alice"  # type: ignore[union-attr]  # ty:ignore[unresolved-attribute]
 
-    async def test_branch_is_tracked_not_inferred_from_names(self):
-        """Namespaces whose names prefix one another must not cross-resolve.
-
-        With namespaces `a` and `a_form`, the entry tool `a_form` belongs to
-        branch `a` while `a_form_save` belongs to branch `a_form`. Anything
-        matching on name similarity picks the longer shared prefix and routes
-        into the wrong branch.
+    @pytest.mark.parametrize(
+        "compose",
+        ["siblings", "nested", "prefixing-namespaces"],
+    )
+    async def test_a_duplicated_app_is_not_bound(self, compose):
+        """One app composed twice leaves no fact in the listing saying which
+        copy a UI belongs to, so no name is bound and the reference keeps its
+        identity. Covers copies as siblings, nested inside one subtree, and
+        under namespaces that prefix one another.
         """
-        top = FastMCP("Top")
-        top.add_provider(self._app(marker="A"), namespace="a")
-        top.add_provider(self._app(marker="AFORM"), namespace="a_form")
+        if compose == "nested":
+            inner = FastMCP("Inner")
+            inner.add_provider(self._app(marker="A"), namespace="a")
+            inner.add_provider(self._app(marker="B"), namespace="b")
+            server = FastMCP("Top")
+            server.add_provider(inner, namespace="outer")
+            entry = "outer_a_form"
+        else:
+            second = "a_form" if compose == "prefixing-namespaces" else "b"
+            server = FastMCP("Top")
+            server.add_provider(self._app(marker="A"), namespace="a")
+            server.add_provider(self._app(marker="B"), namespace=second)
+            entry = "a_form"
 
-        result = await top.call_tool("a_form", {})
+        result = await server.call_tool(entry, {})
         (ref,) = _tool_refs(result.structured_content)
-        assert ref == "a_save"
+        assert ref == hashed_backend_name("contacts", "save")
 
-        clicked = await top.call_tool(ref, {"name": "alice"})
-        assert clicked.content[0].text == "[A] saved alice"  # type: ignore[union-attr]  # ty:ignore[unresolved-attribute]
-
-        other = await top.call_tool("a_form_form", {})
-        (other_ref,) = _tool_refs(other.structured_content)
-        assert other_ref == "a_form_save"
-
-        other_clicked = await top.call_tool(other_ref, {"name": "alice"})
-        assert other_clicked.content[0].text == "[AFORM] saved alice"  # type: ignore[union-attr]  # ty:ignore[unresolved-attribute]
-
-    async def test_duplicate_apps_nested_in_one_subtree(self):
-        """Both copies can live inside a single provider, so the copy cannot
-        be identified by which of this server's providers served the call."""
+    async def test_a_duplicated_app_reports_the_ambiguity(self):
+        """The unbound reference must fail with a message that names the real
+        cause, at any depth — a nested duplicate previously surfaced as
+        `Unknown tool`, sending readers after a missing registration.
+        """
         inner = FastMCP("Inner")
         inner.add_provider(self._app(marker="A"), namespace="a")
         inner.add_provider(self._app(marker="B"), namespace="b")
+        server = FastMCP("Top")
+        server.add_provider(inner, namespace="outer")
 
-        outer = FastMCP("Outer")
-        outer.add_provider(inner, namespace="outer")
+        result = await server.call_tool("outer_a_form", {})
+        (ref,) = _tool_refs(result.structured_content)
 
-        listing = [t.name for t in await outer.list_tools()]
-        for branch, marker in (("a", "A"), ("b", "B")):
-            result = await outer.call_tool(f"outer_{branch}_form", {})
-            (ref,) = _tool_refs(result.structured_content)
-            assert ref == f"outer_{branch}_save"
-            assert ref in listing
-
-            clicked = await outer.call_tool(ref, {"name": "alice"})
-            assert clicked.content[0].text == f"[{marker}] saved alice"  # type: ignore[union-attr]  # ty:ignore[unresolved-attribute]
-
-    async def test_copies_hiding_different_tools_do_not_cross(self):
-        """Copies can expose different subsets, so equal candidate counts do
-        not imply the candidates line up. A copy whose backend is hidden has
-        no correct target, and reaching for a sibling's would cross branches.
-        """
-        server = FastMCP("Platform")
-        for marker, namespace, hidden in (
-            ("A", "a", "save"),
-            ("B", "b", "form"),
-            ("C", "c", None),
-        ):
-            app = self._app(marker=marker)
-            if hidden:
-                app.disable(names={hidden})
-            server.add_provider(app, namespace=namespace)
-
-        listing = [t.name for t in await server.list_tools()]
-        assert listing == ["a_form", "b_save", "c_save", "c_form"]
-
-        # A's backend is hidden — decline rather than emit B's.
-        declined = await server.call_tool("a_form", {})
-        (ref,) = _tool_refs(declined.structured_content)
-        assert ref == hashed_backend_name("contacts", "save")
-
-        # C exposes both, so it still binds to its own.
-        resolved = await server.call_tool("c_form", {})
-        (own,) = _tool_refs(resolved.structured_content)
-        assert own == "c_save"
-        clicked = await server.call_tool(own, {"name": "alice"})
-        assert clicked.content[0].text == "[C] saved alice"  # type: ignore[union-attr]  # ty:ignore[unresolved-attribute]
+        with pytest.raises(ToolError, match="composed more than once"):
+            await server.call_tool(ref, {"name": "alice"})
 
     async def test_unresolvable_identity_is_restored(self):
         """An inner server binds to a name that means nothing further out, so

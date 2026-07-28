@@ -228,6 +228,11 @@ class AggregateProvider(Provider):
         two distinct tools claiming the same identity. That is ambiguous
         rather than resolvable: picking either one silently routes a UI's
         call into the wrong branch. Raise instead.
+
+        An ambiguity raised by a child is a verdict, not a provider failure,
+        so it propagates whatever the error strategy is. Swallowing it would
+        turn a duplicated app into "unknown tool", which sends whoever hits
+        it looking for a missing registration instead of a duplicate one.
         """
         results = await gather(
             (p.get_tool_by_hash(tool_hash, tool_name) for p in self.providers),
@@ -236,7 +241,7 @@ class AggregateProvider(Provider):
         matches: list[Tool] = []
         for r in results:
             if isinstance(r, BaseException):
-                if self.provider_error_strategy == "raise":
+                if isinstance(r, ToolError) or self.provider_error_strategy == "raise":
                     raise r
                 continue
             if r is not None:

@@ -93,6 +93,8 @@ A fair question. Any [Interactive Tool](/apps/prefab) can call a server tool —
 
 Composition is handled by never writing the name down. `CallTool` takes a function reference, and FastMCP resolves it when the UI is serialized — to whatever that tool is actually called by then. Mount the server under a namespace and the button calls `notes_add_note`; put a gateway in front and it calls whatever the gateway lists. Since you never wrote a name, renaming cannot break it. [The architecture page](/apps/architecture) covers how that resolution works.
 
+The one rule that comes with this: an app name must be unique within a server. Two copies of `FastMCPApp("notes")` under different namespaces are indistinguishable to the resolver, and FastMCP will refuse to bind rather than pick one. Name them for what they serve — `FastMCPApp("notes-acme")` and `FastMCPApp("notes-globex")`.
+
 The rest of this page covers each piece in turn.
 
 ## `@app.ui()` — entry points
