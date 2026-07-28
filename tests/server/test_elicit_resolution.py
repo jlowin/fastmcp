@@ -576,7 +576,7 @@ def carried(result) -> str | None:
 
 
 class TestDrivingLegsByHand:
-    """`drive=False` hands back each leg instead of resolving it,
+    """`` hands back each leg instead of resolving it,
     so a test can assert on the wire shape a client would actually receive."""
 
     async def test_each_leg_is_visible(self):
@@ -594,14 +594,13 @@ class TestDrivingLegsByHand:
 
         # No elicitation_handler — nothing drives the exchange but this test.
         async with Client(mcp) as client:
-            first = await client.call_tool("book", drive=False)
+            first = await client.call_tool("book")
             assert questions(first) == {"destination": "Where would you like to fly?"}
 
             second = await client.call_tool(
                 "book",
                 input_responses=accepted(destination="Paris"),
                 request_state=carried(first),
-                drive=False,
             )
             # Only the airport — the destination is not asked again.
             assert questions(second) == {"airport": "Which airport in Paris?"}
@@ -610,7 +609,6 @@ class TestDrivingLegsByHand:
                 "book",
                 input_responses=accepted(airport="CDG"),
                 request_state=carried(second),
-                drive=False,
             )
 
         assert final.input_required is None
@@ -627,7 +625,7 @@ class TestDrivingLegsByHand:
             return f"{destination} on {date}"
 
         async with Client(mcp) as client:
-            first = await client.call_tool("book", drive=False)
+            first = await client.call_tool("book")
             assert questions(first) == {
                 "destination": "Where to?",
                 "date": "When?",
@@ -637,7 +635,6 @@ class TestDrivingLegsByHand:
                 "book",
                 input_responses=accepted(destination="Paris", date="2026-08-01"),
                 request_state=carried(first),
-                drive=False,
             )
 
         assert final.data == "Paris on 2026-08-01"
@@ -660,9 +657,7 @@ class TestDrivingLegsByHand:
             return f"{destination}/{airport}"
 
         async with Client(mcp) as client:
-            result = await client.call_tool(
-                "book", {"destination": "London"}, drive=False
-            )
+            result = await client.call_tool("book", {"destination": "London"})
 
         # Terminal on the first leg — there was never anything to ask.
         assert result.input_required is None
