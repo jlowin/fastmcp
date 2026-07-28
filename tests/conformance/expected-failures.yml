@@ -21,3 +21,10 @@ server:
   # need the tool to declare which one it wants, which is an unmade API
   # decision rather than a bug.
   - tasks-mrtr-composition
+
+  # Upstream SDK Bug: The mcp-python SDK strictly validates that `clientInfo` is
+  # present in the request `_meta`, rejecting the request with -32602 Invalid params
+  # if it is missing. The MCP protocol (SEP-2575) designates `clientInfo` as an
+  # optional SHOULD requirement. FastMCP relies on the upstream SDK's
+  # `classify_inbound_request` logic which incorrectly enforces this as a MUST.
+  - server-stateless
