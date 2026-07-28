@@ -112,6 +112,17 @@ def _schema_type(schema: Any) -> str:
     return "object" if "properties" in schema else "any"
 
 
+def _synthetic_tool_title(name: str) -> str:
+    """Derive a display title for a synthetic tool from its name.
+
+    Some clients (notably ChatGPT) drop tools that have no `title`, so the
+    generated search/call tools always carry one. Deriving it from the
+    configured name keeps the title correct when the tools are renamed:
+    `call_read_tool` becomes "Call Read Tool".
+    """
+    return name.replace("_", " ").title()
+
+
 def _schema_section(schema: dict[str, Any] | None, title: str) -> list[str]:
     lines = [f"**{title}**"]
     if not isinstance(schema, dict):
@@ -242,7 +253,11 @@ class BaseSearchTransform(CatalogTransform):
                 )
             return await ctx.fastmcp.call_tool(name, arguments)
 
-        return Tool.from_function(fn=call_tool, name=self._call_tool_name)
+        return Tool.from_function(
+            fn=call_tool,
+            name=self._call_tool_name,
+            title=_synthetic_tool_title(self._call_tool_name),
+        )
 
     # ------------------------------------------------------------------
     # Serialization

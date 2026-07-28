@@ -139,6 +139,8 @@ mcp.add_transform(RegexSearchTransform(
 ))
 ```
 
+Both tools also carry an MCP `title` derived from their name — `find_tools` becomes "Find Tools" — since some clients drop tools that have no title.
+
 ## The `call_tool` Proxy
 
 The `call_tool` proxy forwards calls to the real tool. When a client calls `call_tool(name="search_database", arguments={...})`, the proxy resolves `search_database` through the server's normal tool pipeline — including transforms and middleware — and executes it.

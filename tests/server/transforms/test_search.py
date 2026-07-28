@@ -137,6 +137,36 @@ class TestBaseTransformBehavior:
         assert await mcp.get_tool("find_tools") is not None
         assert await mcp.get_tool("run_tool") is not None
 
+    @pytest.mark.parametrize(
+        "transform_cls", [RegexSearchTransform, BM25SearchTransform]
+    )
+    async def test_synthetic_tools_have_titles(self, transform_cls):
+        """Some clients require `title` to register a tool."""
+        mcp = _make_server_with_tools()
+        mcp.add_transform(transform_cls())
+        tools = await mcp.list_tools()
+        titles = {t.name: t.to_mcp_tool().title for t in tools}
+        assert titles == {"search_tools": "Search Tools", "call_tool": "Call Tool"}
+
+    @pytest.mark.parametrize(
+        "transform_cls", [RegexSearchTransform, BM25SearchTransform]
+    )
+    async def test_titles_follow_custom_tool_names(self, transform_cls):
+        """Renaming the synthetic tools renames their titles too."""
+        mcp = _make_server_with_tools()
+        mcp.add_transform(
+            transform_cls(
+                search_tool_name="find_tools",
+                call_tool_name="call_read_tool",
+            )
+        )
+        tools = await mcp.list_tools()
+        titles = {t.name: t.to_mcp_tool().title for t in tools}
+        assert titles == {
+            "find_tools": "Find Tools",
+            "call_read_tool": "Call Read Tool",
+        }
+
     async def test_search_respects_visibility_filtering(self):
         """Tools disabled via Visibility transform should not appear in search."""
         mcp = _make_server_with_tools()
