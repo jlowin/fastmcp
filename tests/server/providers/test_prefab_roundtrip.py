@@ -64,8 +64,8 @@ class TestSingleServerRoundTrip:
         assert _tool_refs(result.structured_content) == ["save_contact"]
 
     async def test_payload_records_the_identity_behind_each_reference(self):
-        """The identity survives alongside the name so an outer server can
-        re-resolve it after this one has rewritten the name."""
+        """The identity-addressed form survives alongside the rewritten name,
+        so an outer server can re-resolve it — or fall back to it."""
         app = FastMCPApp("contacts")
 
         @app.tool()
@@ -84,7 +84,9 @@ class TestSingleServerRoundTrip:
         result = await server.call_tool("contact_form", {})
         assert result.structured_content is not None
         names = result.structured_content["_meta"]["fastmcp"]["toolNames"]
-        assert names == {"save_contact": hash_tool("contacts", "save_contact")}
+        assert names == {
+            "save_contact": hashed_backend_name("contacts", "save_contact")
+        }
 
     async def test_hashed_name_from_result_is_callable(self):
         """The hashed name that appears in structured_content actually
@@ -392,9 +394,30 @@ class TestLateBoundToolNames:
         other_clicked = await top.call_tool(other_ref, {"name": "alice"})
         assert other_clicked.content[0].text == "[AFORM] saved alice"  # type: ignore[union-attr]  # ty:ignore[unresolved-attribute]
 
-    async def test_unresolvable_identity_is_left_alone(self):
-        """A reference this server cannot resolve keeps its identity-addressed
-        form rather than being corrupted, so the hashed path can still take it.
+    async def test_duplicate_apps_nested_in_one_subtree(self):
+        """Both copies can live inside a single provider, so the copy cannot
+        be identified by which of this server's providers served the call."""
+        inner = FastMCP("Inner")
+        inner.add_provider(self._app(marker="A"), namespace="a")
+        inner.add_provider(self._app(marker="B"), namespace="b")
+
+        outer = FastMCP("Outer")
+        outer.add_provider(inner, namespace="outer")
+
+        listing = [t.name for t in await outer.list_tools()]
+        for branch, marker in (("a", "A"), ("b", "B")):
+            result = await outer.call_tool(f"outer_{branch}_form", {})
+            (ref,) = _tool_refs(result.structured_content)
+            assert ref == f"outer_{branch}_save"
+            assert ref in listing
+
+            clicked = await outer.call_tool(ref, {"name": "alice"})
+            assert clicked.content[0].text == f"[{marker}] saved alice"  # type: ignore[union-attr]  # ty:ignore[unresolved-attribute]
+
+    async def test_unresolvable_identity_is_restored(self):
+        """An inner server binds to a name that means nothing further out, so
+        a reference this server cannot resolve is restored to its identity
+        rather than left — a stranded name has no route back, an identity does.
         """
         app = FastMCPApp("contacts")
 

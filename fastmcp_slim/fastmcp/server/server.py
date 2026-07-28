@@ -90,7 +90,6 @@ from fastmcp.settings import DuplicateBehavior as DuplicateBehaviorSetting
 from fastmcp.tools.base import Tool, ToolResult
 from fastmcp.tools.function_tool import FunctionTool
 from fastmcp.tools.tool_transform import ToolTransformConfig
-from fastmcp.utilities.async_utils import gather
 from fastmcp.utilities.components import FastMCPComponent, _coerce_version
 from fastmcp.utilities.exceptions import HTTP_STATUS_ERRORS, TIMEOUT_ERRORS
 from fastmcp.utilities.logging import get_logger
@@ -237,6 +236,27 @@ def _tool_identity(tool: Tool) -> str | None:
         return None
     identity = fastmcp_meta.get(TOOL_HASH_META_KEY)
     return identity if isinstance(identity, str) else None
+
+
+def _calling_instance(
+    by_identity: dict[str, list[str]], called_name: str
+) -> tuple[int, int] | None:
+    """Locate which copy of an app the call came from.
+
+    Composing one app more than once leaves several tools claiming a single
+    identity, and only the caller's own copy is a correct target. The copies
+    are the same app, so each contributes the same identities in the same
+    registration order, and aggregation preserves that order — the k-th tool
+    claiming any identity belongs to the k-th copy.
+
+    So the position of ``called_name`` among the tools sharing its identity
+    *is* the copy the call came from. Returns that position and how many
+    copies there are, or None when the entry tool cannot be placed.
+    """
+    for names in by_identity.values():
+        if called_name in names:
+            return names.index(called_name), len(names)
+    return None
 
 
 @asynccontextmanager
@@ -728,43 +748,19 @@ class FastMCP(
             if identity is not None:
                 by_identity.setdefault(identity, []).append(tool.name)
 
-        branch = await self._branch_names(called_name)
+        instance = _calling_instance(by_identity, called_name)
 
         def resolve(identity: str) -> str | None:
             candidates = by_identity.get(identity, [])
             if len(candidates) == 1:
                 return candidates[0]
-            if branch is not None:
-                candidates = [name for name in candidates if name in branch]
-                if len(candidates) == 1:
-                    return candidates[0]
-            return None
+            if instance is None:
+                return None
+            index, count = instance
+            return candidates[index] if len(candidates) == count else None
 
         rewrite_payload_tool_names(payload, resolve)
         return result
-
-    async def _branch_names(self, called_name: str) -> set[str] | None:
-        """Names yielded by the provider subtree that served ``called_name``.
-
-        Composing one app twice leaves two tools claiming a single identity,
-        and only the caller's own branch is a correct target. Providers are
-        already namespace-wrapped, so a provider's listing is exactly the set
-        of names its subtree contributes — membership answers which branch a
-        call came from. Returns None when no single provider claims the name,
-        leaving the reference for the identity-addressed path to resolve
-        rather than guessing.
-        """
-        listings = await gather(
-            (provider.list_tools() for provider in self.providers),
-            return_exceptions=True,
-        )
-        matches = [
-            {tool.name for tool in listing}
-            for listing in listings
-            if not isinstance(listing, BaseException)
-            and any(tool.name == called_name for tool in listing)
-        ]
-        return matches[0] if len(matches) == 1 else None
 
     # -------------------------------------------------------------------------
     # Provider interface overrides - inherited from AggregateProvider

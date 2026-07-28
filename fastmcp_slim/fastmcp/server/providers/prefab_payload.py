@@ -89,26 +89,26 @@ def payload_has_identities(payload: Any) -> bool:
 
 
 def annotate_payload_identities(payload: dict[str, Any]) -> dict[str, Any]:
-    """Record the identity behind each tool reference, at serialization time.
+    """Record the identity-addressed form of each reference, at serialization.
 
-    References start out as ``<hash>_<local_name>``, so the identity is read
-    straight off the name. Once a later layer rewrites the name, this map is
-    the only remaining way to know what the reference points at.
+    References start out as ``<hash>_<local_name>``, so the map begins as an
+    identity map to itself. Once a later layer rewrites a name, this is the
+    only remaining route back: it carries both what the reference points at
+    and the address any server can fall back to.
     """
     if not isinstance(payload, dict):
         return payload
 
-    names: dict[str, str] = dict(_read_map(payload))
+    addresses: dict[str, str] = dict(_read_map(payload))
     for action in _walk_tool_calls(payload):
         tool_name = action["tool"]
-        if tool_name in names:
+        if tool_name in addresses:
             continue
-        parsed = parse_hashed_backend_name(tool_name)
-        if parsed is not None:
-            names[tool_name] = parsed[0]
+        if parse_hashed_backend_name(tool_name) is not None:
+            addresses[tool_name] = tool_name
 
-    if names:
-        _write_map(payload, names)
+    if addresses:
+        _write_map(payload, addresses)
     return payload
 
 
@@ -118,34 +118,41 @@ def rewrite_payload_tool_names(
 ) -> Any:
     """Re-address a payload's tool references to this server's own names.
 
-    Mutates in place and returns the payload. A reference whose identity this
-    server cannot resolve is left untouched, so a server that does not know a
-    tool degrades to the behavior it had before rather than corrupting the
-    reference.
+    Mutates in place and returns the payload.
+
+    A reference this server cannot resolve is restored to its
+    identity-addressed form rather than left as-is. Leaving it would strand
+    whatever name an inner server chose — a name that is correct there and
+    meaningless here — and, unlike the identity form, a stranded name has no
+    route back. Restoring keeps the reference resolvable by the dispatcher,
+    or by any server further out with a better view.
     """
     if not isinstance(payload, dict):
         return payload
 
-    names = _read_map(payload)
-    if not names:
+    addresses = _read_map(payload)
+    if not addresses:
         return payload
 
-    resolved: dict[str, str] = {}
-    for current_name, identity in names.items():
-        new_name = resolve(identity)
-        if new_name is not None and new_name != current_name:
-            resolved[current_name] = new_name
+    rebound: dict[str, str] = {}
+    for current_name, address in addresses.items():
+        parsed = parse_hashed_backend_name(address)
+        new_name = resolve(parsed[0]) if parsed is not None else None
+        if new_name is None:
+            new_name = address
+        if new_name != current_name:
+            rebound[current_name] = new_name
 
-    if not resolved:
+    if not rebound:
         return payload
 
     for action in _walk_tool_calls(payload):
-        new_name = resolved.get(action["tool"])
+        new_name = rebound.get(action["tool"])
         if new_name is not None:
             action["tool"] = new_name
 
     _write_map(
         payload,
-        {resolved.get(name, name): identity for name, identity in names.items()},
+        {rebound.get(name, name): address for name, address in addresses.items()},
     )
     return payload
