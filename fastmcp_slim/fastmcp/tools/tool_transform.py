@@ -242,35 +242,46 @@ class ArgTransformConfig(FastMCPBaseModel):
         return ArgTransform(**self.model_dump(exclude_unset=True))  # pyright: ignore[reportAny]
 
 
+#: Meta namespaces the framework owns. An override replaces the caller-facing
+#: meta wholesale, but these carry a component's app membership, identity, and
+#: visibility — what intermediaries use to recognize a tool they are
+#: forwarding. Both are needed together: an identity that survives a rename
+#: while its ``ui.visibility`` marker does not leaves a tool that can be named
+#: but no longer answers to its identity.
+_FRAMEWORK_META_NAMESPACES = ("fastmcp", "ui")
+
+
 def _apply_meta_override(
     source_meta: dict[str, Any] | None,
     override: dict[str, Any] | None | NotSetT,
 ) -> dict[str, Any] | None:
-    """Apply a transform's ``meta=`` override, preserving FastMCP's namespace.
+    """Apply a transform's ``meta=`` override, preserving framework namespaces.
 
-    An override replaces the caller-facing meta wholesale, which is what
-    users expect. The ``fastmcp`` namespace is carried across regardless:
-    it holds framework-owned data such as a component's app membership and
-    identity hash, which intermediaries rely on to recognize a tool they
-    are forwarding. A transform that renames a tool must not silently
-    destroy its identity.
+    An override replaces the caller-facing meta wholesale, which is what users
+    expect. Framework-owned namespaces are carried across regardless, since a
+    transform that renames a tool must not silently unwire it — values the
+    override supplies for those namespaces still win key by key.
     """
     if isinstance(override, NotSetT):
         return source_meta
+
+    source = source_meta or {}
+    preserved = {
+        namespace: dict(source[namespace])
+        for namespace in _FRAMEWORK_META_NAMESPACES
+        if isinstance(source.get(namespace), dict) and source[namespace]
+    }
+
     if override is None:
-        source_fastmcp = (source_meta or {}).get("fastmcp")
-        if isinstance(source_fastmcp, dict) and source_fastmcp:
-            return {"fastmcp": dict(source_fastmcp)}
-        return None
+        return preserved or None
 
     merged = dict(override)
-    source_fastmcp = (source_meta or {}).get("fastmcp")
-    if isinstance(source_fastmcp, dict):
-        override_fastmcp = override.get("fastmcp")
-        merged["fastmcp"] = (
-            {**source_fastmcp, **override_fastmcp}
-            if isinstance(override_fastmcp, dict)
-            else dict(source_fastmcp)
+    for namespace, source_values in preserved.items():
+        override_values = override.get(namespace)
+        merged[namespace] = (
+            {**source_values, **override_values}
+            if isinstance(override_values, dict)
+            else source_values
         )
     return merged
 

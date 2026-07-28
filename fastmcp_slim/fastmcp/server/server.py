@@ -697,12 +697,17 @@ class FastMCP(
             rewrite_tool_meta_for_wire(t) if _is_prefab_tool(t) else t for t in tools
         ]
 
-    async def _rebind_prefab_tool_names(self, result: ToolResult) -> ToolResult:
+    async def _rebind_prefab_tool_names(self, result: Any) -> Any:
         """Re-address a Prefab payload's tool references to this server's names.
 
-        Runs on the way out of every ``tools/call``. Servers unwind
-        innermost-first, so the outermost server rewrites last and its names —
-        the only ones a client can actually invoke — are what ship.
+        Runs on the way out of every ``tools/call``, above the middleware
+        chain so a payload is re-addressed however it was produced. Servers
+        unwind innermost-first, so the outermost server rewrites last and its
+        names — the only ones a client can actually invoke — are what ship.
+
+        A call does not always answer with a tool result: submitting a task
+        answers with the task's metadata. Anything that is not a tool result
+        passes through untouched.
 
         An identity claimed by more than one tool is not bound. That happens
         when one app is composed into a server twice, which leaves no fact
@@ -714,6 +719,9 @@ class FastMCP(
             payload_has_identities,
             rewrite_payload_tool_names,
         )
+
+        if not isinstance(result, ToolResult):
+            return result
 
         payload = result.structured_content
         if not payload_has_identities(payload):
@@ -1410,7 +1418,7 @@ class FastMCP(
                 # the whole thing (so it observes every call), and the
                 # interceptors sit between it and the tool body (so each is the
                 # last gate before execution).
-                return await self._dispatch_component_middleware(
+                dispatched = await self._dispatch_component_middleware(
                     context=mw_context,
                     call_next=self._compose_tool_call_interceptors(
                         lambda context: self.call_tool(
@@ -1421,6 +1429,10 @@ class FastMCP(
                         )
                     ),
                 )
+                # Above the chain, so a Prefab payload is re-addressed however
+                # it was produced — middleware can answer a call itself, and
+                # such a result never reaches the core path below.
+                return await self._rebind_prefab_tool_names(dispatched)
 
             # Core logic: find and execute tool
             with server_span(
@@ -1460,8 +1472,7 @@ class FastMCP(
                     raise NotFoundError(f"Unknown tool: {name!r}")
                 span.set_attributes(tool.get_span_attributes())
                 try:
-                    result = await tool._run(arguments or {})
-                    return await self._rebind_prefab_tool_names(result)
+                    return await tool._run(arguments or {})
                 except ValidationError as e:
                     # Argument-validation failure (a bad call). FunctionTool
                     # converts pydantic's call-validation error into fastmcp's

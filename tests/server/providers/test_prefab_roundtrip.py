@@ -17,7 +17,9 @@ from fastmcp.server.middleware.tool_injection import ToolInjectionMiddleware
 from fastmcp.server.providers.addressing import hash_tool, hashed_backend_name
 from fastmcp.server.providers.proxy import ProxyClient, ProxyProvider
 from fastmcp.server.transforms.search import RegexSearchTransform
+from fastmcp.server.transforms.tool_transform import ToolTransform
 from fastmcp.tools.base import Tool
+from fastmcp.tools.tool_transform import ToolTransformConfig
 
 prefab_ui = pytest.importorskip("prefab_ui")
 from prefab_ui.actions.mcp import CallTool  # noqa: E402
@@ -526,6 +528,66 @@ class TestLateBoundToolNames:
 
         clicked = await server.call_tool(ref, {"name": "alice"})
         assert clicked.content[0].text == "[APP] saved alice"  # type: ignore[union-attr]  # ty:ignore[unresolved-attribute]
+
+    async def test_middleware_produced_results_are_rebound(self):
+        """Middleware can answer a call itself, and such a result never
+        reaches the core dispatch path — so rebinding belongs above the
+        chain, not inside it.
+        """
+        app = FastMCPApp("contacts")
+
+        @app.tool()
+        def save(name: str) -> str:
+            return f"saved {name}"
+
+        @app.ui()
+        def form() -> Column:
+            return Column(
+                children=[Button(label="Save", on_click=CallTool(tool="save"))]
+            )
+
+        server = FastMCP("Platform")
+        server.add_provider(app)
+
+        entry = await server.get_tool("form")
+        assert entry is not None
+        server.add_middleware(
+            ToolInjectionMiddleware([entry.model_copy(update={"name": "injected"})])
+        )
+
+        result = await server.call_tool("injected", {})
+        (ref,) = _tool_refs(result.structured_content)
+        assert ref == "save"
+
+        clicked = await server.call_tool(ref, {"name": "alice"})
+        assert clicked.content[0].text == "saved alice"  # type: ignore[union-attr]  # ty:ignore[unresolved-attribute]
+
+    async def test_a_transform_cannot_unwire_an_app_tool(self):
+        """A meta override that keeps the identity but drops app visibility
+        leaves a tool that can be named yet no longer answers to its
+        identity — which is the only address a collapsed catalog has.
+        """
+        backend = FastMCP("Backend")
+        backend.add_provider(self._app(marker="be"))
+        backend.add_transform(
+            ToolTransform({"save": ToolTransformConfig(meta={"team": "crm"})})
+        )
+
+        transformed = next(t for t in await backend.list_tools() if t.name == "save")
+        assert transformed.meta is not None
+        assert transformed.meta["ui"]["visibility"] == ["app"]
+        assert transformed.meta["team"] == "crm"
+
+        gateway = FastMCP("Gateway")
+        gateway.add_provider(ProxyProvider(lambda: ProxyClient(backend)))
+        gateway.add_transform(RegexSearchTransform())
+
+        result = await gateway.call_tool("form", {})
+        (ref,) = _tool_refs(result.structured_content)
+        assert ref == hashed_backend_name("contacts", "save")
+
+        clicked = await gateway.call_tool(ref, {"name": "alice"})
+        assert clicked.content[0].text == "[be] saved alice"  # type: ignore[union-attr]  # ty:ignore[unresolved-attribute]
 
     async def test_unresolvable_identity_is_restored(self):
         """An inner server binds to a name that means nothing further out, so
