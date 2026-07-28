@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from fastmcp import Client, FastMCP
 from fastmcp.tools.base import Tool, ToolResult
+from tests.conftest import user_meta
 
 
 class TestToolResultCasting:
@@ -39,7 +40,7 @@ class TestToolResultCasting:
         assert result.content[0].type == "text"
         assert result.content[0].text == "test data"
         assert result.structured_content is None
-        assert result.meta is None
+        assert user_meta(result.meta) is None
 
     async def test_neither_unstructured_or_structured_content(self, client):
         from fastmcp.exceptions import ToolError
@@ -56,7 +57,7 @@ class TestToolResultCasting:
         assert result.content[0].type == "text"
         assert result.content[0].text == "test data"
         assert result.structured_content == {"data_type": "test"}
-        assert result.meta is None
+        assert user_meta(result.meta) is None
 
     async def test_structured_unstructured_and_meta_content(self, client):
         result = await client.call_tool(
@@ -71,7 +72,7 @@ class TestToolResultCasting:
         assert result.content[0].type == "text"
         assert result.content[0].text == "test data"
         assert result.structured_content == {"data_type": "test"}
-        assert result.meta == {"some": "metadata"}
+        assert user_meta(result.meta) == {"some": "metadata"}
 
 
 class TestToolResultIsError:
@@ -153,7 +154,12 @@ class TestToolResultIsError:
         async with Client(mcp) as client:
             result = await client.call_tool_mcp("failing", {})
 
-        assert result.model_dump(by_alias=True) == raw_result.model_dump(by_alias=True)
+        received = result.model_dump(by_alias=True)
+        # The SDK stamps `serverInfo` into every 2026-era result's `_meta`
+        # (spec #3002). Strip it so the assertion covers the protocol fields
+        # the tool itself set, which is what FastMCP is responsible for.
+        received["_meta"] = user_meta(received["_meta"])
+        assert received == raw_result.model_dump(by_alias=True)
 
 
 class TestUnionReturnTypes:
