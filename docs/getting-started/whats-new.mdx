@@ -13,7 +13,7 @@ FastMCP 4 is in **beta**. Pin an exact version and expect sharp edges. See [Inst
 
 ## Built on the MCP Python SDK v2
 
-The defining change in FastMCP 4 is the one you mostly can't see. The MCP Python SDK v2 rewrote the protocol layer end to end: it split the protocol types into a standalone `mcp_types` package, renamed every wire field from camelCase to snake_case, replaced the server's request-handling model, and made server-side middleware and multi-era serving first-class. FastMCP absorbs nearly all of it — your reads stay working through a compatibility bridge, and the handful of changes left in your code are mechanical.
+The defining change in FastMCP 4 is the one you mostly can't see. The MCP Python SDK v2 rewrote the protocol layer end to end: it moved the protocol types into a standalone `mcp_types` package that stays importable as `mcp.types`, renamed every model field from camelCase to snake_case in Python, replaced the server's request-handling model, and made server-side middleware and multi-era serving first-class. FastMCP absorbs nearly all of it — your reads stay working through a compatibility bridge, and the handful of changes left in your code are mechanical.
 
 The major version is the signal. Even where your surface is unchanged, the behavior underneath is substantially different, and bumping to 4.0 is how we tell you that plainly rather than slipping a new engine in under a patch release.
 
@@ -49,7 +49,7 @@ When a client offers autocomplete for a prompt argument or a resource-template p
 
 ```python
 from fastmcp import FastMCP
-from mcp_types import PromptReference
+from mcp.types import PromptReference
 
 mcp = FastMCP("Docs")
 

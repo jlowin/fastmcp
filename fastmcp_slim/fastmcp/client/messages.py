@@ -2,57 +2,32 @@ from typing import TypeAlias
 
 import mcp_types
 from mcp.client.session import MessageHandlerFnT
-from mcp.shared.session import RequestResponder
 
-Message: TypeAlias = (
-    RequestResponder[mcp_types.ServerRequest, mcp_types.ClientResult]
-    | mcp_types.ServerNotification
-    | Exception
-)
+Message: TypeAlias = mcp_types.ServerNotification | Exception
 
 MessageHandlerT: TypeAlias = MessageHandlerFnT
 
 
 class MessageHandler:
     """
-    This class is used to handle MCP messages sent to the client. It is used to handle all messages,
-    requests, notifications, and exceptions. Users can override any of the hooks
+    This class is used to handle MCP messages sent to the client: notifications
+    and transport-level exceptions. Users can override any of the hooks.
+
+    Server-initiated *requests* (ping, sampling, roots) never reach this
+    handler: the stable MCP SDK v2's `message_handler` contract only delivers
+    `ServerNotification | Exception`, so a request has no wire path here.
+    Those are answered through the `Client`'s dedicated callbacks instead —
+    `sampling_handler=`, `roots=`, and `elicitation_handler=`.
     """
 
-    async def __call__(
-        self,
-        message: RequestResponder[mcp_types.ServerRequest, mcp_types.ClientResult]
-        | mcp_types.ServerNotification
-        | Exception,
-    ) -> None:
+    async def __call__(self, message: mcp_types.ServerNotification | Exception) -> None:
         return await self.dispatch(message)
 
     async def dispatch(self, message: Message) -> None:
         # handle all messages
         await self.on_message(message)
 
-        # SDK v2 delivers server-to-client requests wrapped in a
-        # RequestResponder (with the request unwrapped on `.request`) and
-        # notifications unwrapped (the monolith notification model itself, no
-        # `.root` wrapper). `ServerNotification`/`ServerRequest` are UnionTypes,
-        # so they can't appear in class match patterns — branch on the concrete
-        # models directly.
-        if isinstance(message, RequestResponder):
-            # handle all requests
-            # ty doesn't narrow the generic RequestResponder cleanly here.
-            await self.on_request(message)  # type: ignore[arg-type]  # ty:ignore[invalid-argument-type]
-
-            # handle specific requests
-            request = message.request
-            match request:
-                case mcp_types.PingRequest():
-                    await self.on_ping(request)
-                case mcp_types.ListRootsRequest():
-                    await self.on_list_roots(request)
-                case mcp_types.CreateMessageRequest():
-                    await self.on_create_message(request)
-
-        elif isinstance(message, Exception):
+        if isinstance(message, Exception):
             await self.on_exception(message)
 
         else:
@@ -77,20 +52,6 @@ class MessageHandler:
                     await self.on_resource_updated(message)
 
     async def on_message(self, message: Message) -> None:
-        pass
-
-    async def on_request(
-        self, message: RequestResponder[mcp_types.ServerRequest, mcp_types.ClientResult]
-    ) -> None:
-        pass
-
-    async def on_ping(self, message: mcp_types.PingRequest) -> None:
-        pass
-
-    async def on_list_roots(self, message: mcp_types.ListRootsRequest) -> None:
-        pass
-
-    async def on_create_message(self, message: mcp_types.CreateMessageRequest) -> None:
         pass
 
     async def on_notification(self, message: mcp_types.ServerNotification) -> None:

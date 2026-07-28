@@ -47,7 +47,7 @@ For fine-grained targeting, subclass `MessageHandler` to use specific hooks:
 ```python
 from fastmcp import Client
 from fastmcp.client.messages import MessageHandler
-import mcp_types
+import mcp.types as mcp_types
 
 class MyMessageHandler(MessageHandler):
     async def on_tool_list_changed(
@@ -78,7 +78,7 @@ client = Client(
 
 ```python
 from fastmcp.client.messages import MessageHandler
-import mcp_types
+import mcp.types as mcp_types
 
 class MyMessageHandler(MessageHandler):
     async def on_message(self, message) -> None:
@@ -141,7 +141,7 @@ A practical example of maintaining a tool cache that refreshes when tools change
 ```python
 from fastmcp import Client
 from fastmcp.client.messages import MessageHandler
-import mcp_types
+import mcp.types as mcp_types
 
 class ToolCacheHandler(MessageHandler):
     def __init__(self):

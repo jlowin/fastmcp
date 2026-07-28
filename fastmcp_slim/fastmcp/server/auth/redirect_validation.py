@@ -368,7 +368,7 @@ def matches_allowed_pattern(uri: str, pattern: str) -> bool:
 
 def is_redirect_uri_allowed_for_application_type(
     redirect_uri: str | AnyUrl,
-    application_type: str,
+    application_type: str | None,
 ) -> bool:
     """Check a redirect URI against RFC 7591 / SEP-837 `application_type` rules.
 
@@ -399,7 +399,9 @@ def is_redirect_uri_allowed_for_application_type(
 
     The MCP SDK defaults `application_type` to `"native"` because MCP clients
     typically register loopback redirect URIs, so omitting the field preserves
-    the behavior clients relied on before this check existed.
+    the behavior clients relied on before this check existed. `None` — which a
+    registered-client record carries when the field was never set — is treated
+    the same way.
     """
     uri_str = str(redirect_uri)
 

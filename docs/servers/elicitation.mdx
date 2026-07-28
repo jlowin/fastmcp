@@ -634,7 +634,7 @@ The following tool books a flight across three rounds: it asks for a destination
 
 ```python
 from fastmcp import FastMCP, Context
-from mcp_types import InputRequiredResult, ElicitRequest, ElicitRequestFormParams
+from mcp.types import InputRequiredResult, ElicitRequest, ElicitRequestFormParams
 
 mcp = FastMCP("Booking Server")
 
@@ -771,7 +771,7 @@ This prompt gathers the context it needs before rendering:
 
 ```python
 from fastmcp import FastMCP, Context
-from mcp_types import InputRequiredResult, ElicitRequest, ElicitRequestFormParams
+from mcp.types import InputRequiredResult, ElicitRequest, ElicitRequestFormParams
 
 mcp = FastMCP("Reporting Server")
 

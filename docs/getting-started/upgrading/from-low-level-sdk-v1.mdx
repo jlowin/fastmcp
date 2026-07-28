@@ -14,7 +14,6 @@ The core idea: instead of telling the SDK what your tools look like and then sep
 MCP SDK v2 is a substantial, deliberate modernization of the protocol layer. Protocol types moved into a standalone `mcp_types` package, wire fields moved from camelCase to snake_case, and the low-level `Server` was rebuilt so handlers are passed to the constructor as `on_*` callables taking `(ctx, params)` rather than registered with decorators. A v1 server meets that change the moment its environment resolves `mcp` to v2:
 
 ```
-ModuleNotFoundError: No module named 'mcp.types'
 AttributeError: 'Server' object has no attribute 'list_tools'
 ```
 
@@ -66,7 +65,7 @@ TYPES THAT DISAPPEAR FROM YOUR CODE
 - `types.TextContent` wrappers around return values — return plain Python values instead
 - `types.ImageContent`, `types.EmbeddedResource`
 - `types.PromptMessage`, `types.GetPromptResult`
-- Note that `mcp.types` no longer exists at all in the SDK v2 that FastMCP 4 builds on; any type that genuinely survives the rewrite comes from `mcp_types` now.
+- Note that in the SDK v2 that FastMCP 4 builds on, `mcp.types` aliases the standalone `mcp_types` package; the import path still works, but the fields are snake_case now.
 
 CONTEXT AND SIDE CHANNELS
 - `server.request_context`
@@ -92,7 +91,7 @@ uv add "fastmcp==4.0.0b1"
 
 An exact version pin installs even though it's a prerelease — neither installer needs `--pre` or `--prerelease allow` for a version this specific, only for an open-ended range. For a reproducible lockfile that also pins the prerelease protocol dependencies, see [Install the v4 Prerelease](/getting-started/upgrading/from-fastmcp-3#install-the-v4-prerelease).
 
-FastMCP depends on the `mcp` package, so the SDK stays installed. Note that FastMCP 4 builds on SDK v2, where `mcp.types` no longer exists — protocol types live in the standalone `mcp_types` package now. Most of your `mcp.types` imports disappear entirely in the rewrite below, since FastMCP derives the protocol types from your function signatures. For the few you still need, import them from `mcp_types`.
+FastMCP depends on the `mcp` package, so the SDK stays installed. FastMCP 4 builds on SDK v2, where the protocol types live in a standalone `mcp_types` package that stays importable as `mcp.types`. Most of your `mcp.types` imports disappear entirely in the rewrite below, since FastMCP derives the protocol types from your function signatures.
 
 ## Server and Transport
 

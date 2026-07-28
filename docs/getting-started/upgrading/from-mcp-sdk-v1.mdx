@@ -61,7 +61,7 @@ uv add "fastmcp==4.0.0b1"
 
 An exact version pin installs even though it's a prerelease — neither installer needs `--pre` or `--prerelease allow` for a version this specific, only for an open-ended range. For a reproducible lockfile that also pins the prerelease protocol dependencies, see [Install the v4 Prerelease](/getting-started/upgrading/from-fastmcp-3#install-the-v4-prerelease).
 
-FastMCP depends on the `mcp` package, so the SDK stays installed and importable. What changes is which parts of it you reach for. FastMCP 4 builds on SDK v2, where `mcp.server.fastmcp` and `mcp.types` are both gone — anything you imported from those two modules needs a new home, and the sections below cover both. Update your import, run your server, and if your tools work, you're done.
+FastMCP depends on the `mcp` package, so the SDK stays installed and importable. What changes is which parts of it you reach for. FastMCP 4 builds on SDK v2, where `mcp.server.fastmcp` is gone — anything you imported from it needs a new home, and the sections below cover that. `mcp.types` still resolves (it aliases the standalone `mcp_types` package), though its fields are snake_case now. Update your import, run your server, and if your tools work, you're done.
 
 <Prompt description="Copy this prompt into any LLM along with your server code to get automated upgrade guidance.">
 You are upgrading an MCP server from FastMCP 1.0 (bundled in v1 of the `mcp` package) to standalone FastMCP 4.
@@ -98,9 +98,9 @@ PROMPT RETURN VALUES
 - prompt functions returning raw dicts with "role"/"content" keys — FastMCP 1.0 coerced these silently, standalone FastMCP does not
 
 OTHER mcp.* IMPORTS
-- anything from `mcp.types` — the module does not exist in the SDK v2 that FastMCP 4 builds on; protocol types moved to `mcp_types` with camelCase fields renamed to snake_case
+- anything from `mcp.types` — the import path still works in the SDK v2 that FastMCP 4 builds on, but the fields were renamed from camelCase to snake_case
 - `from mcp.server.stdio import stdio_server` and any transport boilerplate around it
-- `mcp.types.TextContent` / `ImageContent` used to wrap tool return values — FastMCP has friendlier equivalents, so prefer those over a mechanical `mcp_types` swap
+- `mcp.types.TextContent` / `ImageContent` used to wrap tool return values — FastMCP has friendlier equivalents, so prefer those over keeping the raw protocol types
 
 DECORATOR RETURN VALUES
 - any code reading `.name`, `.description`, or other component attributes off a `@mcp.tool` / `@mcp.resource` / `@mcp.prompt` decorated function. Decorators return the original function now.
@@ -215,7 +215,7 @@ def debug(error: str) -> list[Message]:
 
 ### Other `mcp.*` Imports
 
-FastMCP 4 builds on MCP SDK v2, where the `mcp.types` module no longer exists. Protocol types moved to a standalone `mcp_types` package, and the field names were renamed from camelCase to snake_case (`inputSchema` → `input_schema`, `mimeType` → `mime_type`, and so on). Update `from mcp.types import X` to `from mcp_types import X`. For everything else SDK v2 changed, see [Upgrading from FastMCP 3](/getting-started/upgrading/from-fastmcp-3), which covers the same protocol rebuild from the FastMCP side.
+FastMCP 4 builds on MCP SDK v2, which moved the protocol types into a standalone `mcp_types` package and re-exports it as `mcp.types` — so `from mcp.types import X` keeps working. The field names did change, from camelCase to snake_case (`inputSchema` → `input_schema`, `mimeType` → `mime_type`, and so on). For everything else SDK v2 changed, see [Upgrading from FastMCP 3](/getting-started/upgrading/from-fastmcp-3), which covers the same protocol rebuild from the FastMCP side.
 
 Where FastMCP provides its own API for the same thing, it's worth switching over rather than importing the protocol type:
 

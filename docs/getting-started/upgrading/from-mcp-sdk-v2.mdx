@@ -228,6 +228,9 @@ if __name__ == "__main__":
 | `token_verifier=`, `auth_server_provider=`, `auth=AuthSettings(...)` | a single `auth=` provider |
 | `cache_hints={...}` | `cache_ttl=`, `cache_scope=` |
 | `extensions=[...]` | `mcp.add_extension(...)` |
+| `middleware=[ServerMiddleware, ...]` | `middleware=[Middleware, ...]` — same keyword, different class |
+
+`middleware=` is the row most likely to be mistaken for a rename. Both constructors take a `middleware=` sequence, but an `MCPServer` wants the SDK's `ServerMiddleware` — one hook wrapping every raw JSON-RPC message — while FastMCP wants its own `Middleware`, which adds typed per-operation hooks (`on_call_tool`, `on_list_tools`, and the rest) on top of the same message-level pass. Keeping the keyword and swapping the base class is the migration; see [Middleware](/servers/middleware).
 
 Authentication is the largest of these, and it consolidates rather than moves. `MCPServer` exposes the SDK's raw auth plumbing — a token verifier, an authorization-server provider, and an `AuthSettings` object, configured separately. FastMCP takes one `auth=` provider that carries the whole configuration, and ships providers for the common cases: `JWTVerifier` for validating tokens you already issue, `RemoteAuthProvider` for delegating to an external authorization server, `OAuthProxy` for wrapping a provider that lacks Dynamic Client Registration, and named providers for GitHub, Google, Auth0, Keycloak, WorkOS, and others. See [Authentication](/servers/auth/authentication).
 

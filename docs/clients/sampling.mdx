@@ -20,7 +20,7 @@ The handler receives the conversation the server wants completed, the parameters
 ```python
 from fastmcp import Client
 from fastmcp.client.sampling import SamplingMessage, SamplingParams, RequestContext
-from mcp_types import TextContent
+from mcp.types import TextContent
 
 
 async def sampling_handler(
@@ -173,7 +173,7 @@ Registering any `sampling_handler` advertises full sampling support, tools inclu
 
 ```python
 from fastmcp import Client
-from mcp_types import SamplingCapability
+from mcp.types import SamplingCapability
 
 
 async def text_only_handler(messages, params, context) -> str:
