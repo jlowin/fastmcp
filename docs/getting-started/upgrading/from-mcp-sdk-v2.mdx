@@ -65,7 +65,8 @@ CONSTRUCTOR ARGUMENTS THAT DO NOT CARRY OVER
 These raise TypeError, most naming their replacement. `name`, `version`, `instructions`, `icons`, `website_url`, `lifespan`, `tools`, `resource_security`, and `request_state_security` carry over unchanged.
 
 CONTEXT
-- `ctx.mcp_server`, `ctx.headers`
+- `ctx.mcp_server` → `ctx.fastmcp`
+- `ctx.headers` → `get_http_headers()` from `fastmcp.server.dependencies` (a function, not a Context property — the attribute does not exist on FastMCP's Context and would raise AttributeError)
 - `ctx.notify_tools_changed()` and its siblings — send the notification directly with `ctx.send_notification(ToolListChangedNotification())` from `mcp_types`. FastMCP emits it for you when components change visibility through its own `ctx.enable_components` / `ctx.disable_components`.
 - everything else on Context (logging, progress, elicit, read_resource, request_id, input_responses, request_state) carries over unchanged
 
@@ -106,6 +107,7 @@ Most of the work is renaming. This table covers the surfaces a typical `MCPServe
 | `server.streamable_http_app()` | `mcp.http_app()` |
 | `server.sse_app()` | `mcp.http_app(transport="sse")` |
 | `ctx.mcp_server` | `ctx.fastmcp` |
+| `ctx.headers` | `get_http_headers()` from `fastmcp.server.dependencies` |
 | `from mcp_types import X` | unchanged |
 
 Two of these are worth a sentence each. The decorators lose their parentheses: `MCPServer` required `@server.tool()` and raised a `TypeError` telling you so if you wrote `@server.tool`, while FastMCP accepts both forms, so `@mcp.tool` is the idiomatic spelling and `@mcp.tool()` keeps working if you'd rather not touch every line. And the streamable HTTP transport is named `"http"` in FastMCP rather than `"streamable-http"` — the transport is the same, and `mcp.run()` still defaults to stdio.
@@ -194,7 +196,7 @@ if __name__ == "__main__":
 
 `FastMCP()` describes your server's identity and behavior; how it gets deployed is decided when you serve it. Several `MCPServer` constructor arguments move accordingly, and each raises a `TypeError` naming its replacement rather than being silently ignored.
 
-`name`, `version`, `instructions`, `icons`, `website_url`, `lifespan`, `tools`, `resource_security`, and `request_state_security` all mean what they meant before. The rest map like this:
+`name`, `version`, `instructions`, `icons`, `website_url`, `lifespan`, `resource_security`, and `request_state_security` all mean what they meant before. The rest map like this:
 
 | `MCPServer(...)` | FastMCP |
 |---|---|
@@ -203,9 +205,24 @@ if __name__ == "__main__":
 | `warn_on_duplicate_tools`, `_resources`, `_prompts` | a single `on_duplicate=` |
 | `dependencies=[...]` | a [`fastmcp.json`](/deployment/server-configuration) configuration file |
 | `title=`, `description=` | `instructions=` |
+| `tools=[Tool, ...]` | `tools=[callable, ...]`, or FastMCP's own `Tool` |
 | `token_verifier=`, `auth_server_provider=`, `auth=AuthSettings(...)` | a single `auth=` provider |
 | `cache_hints={...}` | `cache_ttl=`, `cache_scope=` |
 | `extensions=[...]` | `mcp.add_extension(...)` |
+
+The `tools=` row is easy to miss, because the keyword survives while its contents do not. `MCPServer(tools=[...])` takes the SDK's own `Tool` objects; `FastMCP(tools=[...])` takes plain callables or FastMCP's `Tool`, and raises `TypeError` on an SDK tool. Pass the underlying functions instead — FastMCP rebuilds the schema from each signature, which is the same derivation `Tool.from_function` was doing for you:
+
+```python
+from fastmcp import FastMCP
+
+
+def greet(name: str) -> str:
+    """Greet someone by name"""
+    return f"Hello, {name}!"
+
+
+mcp = FastMCP("demo", tools=[greet])
+```
 
 Authentication is the largest of these, and it consolidates rather than moves. `MCPServer` exposes the SDK's raw auth plumbing — a token verifier, an authorization-server provider, and an `AuthSettings` object, configured separately. FastMCP takes one `auth=` provider that carries the whole configuration, and ships providers for the common cases: `JWTVerifier` for validating tokens you already issue, `RemoteAuthProvider` for delegating to an external authorization server, `OAuthProxy` for wrapping a provider that lacks Dynamic Client Registration, and named providers for GitHub, Google, Auth0, Keycloak, WorkOS, and others. See [Authentication](/servers/auth/authentication).
 

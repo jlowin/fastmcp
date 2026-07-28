@@ -328,7 +328,9 @@ Without the registration, a `task=True` tool raises at startup rather than the f
 ```
 RuntimeError: Task-enabled tools (slow_computation) require the tasks extension,
 but no extension with identifier 'io.modelcontextprotocol/tasks' is registered.
-``` `TaskConfig` moved from `fastmcp.server.tasks` to `fastmcp.utilities.tasks`, and the `CurrentDocket` and `CurrentWorker` dependencies moved to `fastmcp_tasks.dependencies`.
+```
+
+`TaskConfig` moved from `fastmcp.server.tasks` to `fastmcp.utilities.tasks`, and the `CurrentDocket` and `CurrentWorker` dependencies moved to `fastmcp_tasks.dependencies`.
 
 `task=` is now a tool-only keyword. FastMCP 3 accepted it on resource, resource-template, and prompt decorators as well; passing it to `@mcp.resource` or `@mcp.prompt` now raises `TypeError`, and there is no replacement — the extension tasks tool calls only.
 
