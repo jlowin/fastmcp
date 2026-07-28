@@ -211,7 +211,6 @@ REMOVED_MODULES = [
     "fastmcp.experimental.utilities.openapi",  # -> fastmcp.utilities.openapi
     "fastmcp.server.apps",  # -> fastmcp.apps
     "fastmcp.server.app",  # -> fastmcp.apps / fastmcp
-    "mcp.types",  # -> mcp_types
     # The pre-rename component modules. `tool.py`/`resource.py`/`prompt.py` are
     # now `base.py`; import the types from the package itself (`from
     # fastmcp.tools import Tool`) rather than naming the private module.
@@ -243,6 +242,20 @@ class TestRemovedSurfacesFailLoudly:
     def test_removed_module_raises_module_not_found(self, module_path):
         with pytest.raises(ModuleNotFoundError):
             importlib.import_module(module_path)
+
+    def test_mcp_types_import_path_restored_by_stable_sdk(self):
+        # The MCP Python SDK beta (2.0.0b2, what v4 was built against) dropped
+        # `mcp.types` entirely, so `from mcp.types import X` was documented as a
+        # hard break requiring a switch to `from mcp_types import X`. The stable
+        # SDK release (2.0.0) reintroduced `mcp.types` as a deliberate mirror of
+        # `mcp_types` — same objects, same snake_case fields, not a v1 API
+        # restoration — specifically so old import paths keep working. Both
+        # spellings resolve to the identical class.
+        import mcp.types
+        import mcp_types
+
+        assert mcp.types.Tool is mcp_types.Tool
+        assert set(mcp.types.__all__) == set(mcp_types.__all__)
 
     @pytest.mark.parametrize(
         "module_path, name",

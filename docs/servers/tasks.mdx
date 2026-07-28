@@ -225,7 +225,7 @@ A tool can ask the client a question partway through — the same [guard pattern
 ```python
 from fastmcp import Context, FastMCP
 from fastmcp_tasks import TasksExtension
-import mcp_types
+import mcp.types as mcp_types
 
 mcp = FastMCP("MyServer")
 mcp.add_extension(TasksExtension())

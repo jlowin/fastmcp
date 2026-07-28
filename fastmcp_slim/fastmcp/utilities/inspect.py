@@ -391,10 +391,12 @@ async def inspect_fastmcp_v1(mcp: SDKServer) -> FastMCPInfo:
 
         # SDK v2's MCPServer (FastMCP 1.x) exposes name/instructions/version
         # directly; the v1 `_mcp_server` low-level wrapper attribute is gone.
+        # It defaults `version` to an empty string rather than None, so report
+        # an unset version as absent instead of blank.
         return FastMCPInfo(
             name=mcp.name,
             instructions=mcp.instructions,
-            version=mcp.version,
+            version=mcp.version or None,
             website_url=server_website_url,
             icons=server_icons,
             fastmcp_version=fastmcp.__version__,  # Version generating this manifest

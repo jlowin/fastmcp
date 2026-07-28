@@ -983,9 +983,18 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
         # builds this object, so prefer the value the HTTP route recovered from
         # the raw request body. Fall back to the object's own field for direct
         # (non-HTTP) callers. Write it back so the DCR response echoes the type.
+        #
+        # The SDK splits the registration *request* model from the registered
+        # *client record*: `OAuthClientMetadata.application_type` defaults to
+        # "native", while `OAuthClientInformationFull.application_type` is
+        # `str | None` and defaults to None. Normalize the unset case back to
+        # "native" so a client that omits the field gets the RFC 7591 default
+        # recorded explicitly, on both the HTTP and direct-call paths.
         pending_application_type = _pending_application_type.get()
         if pending_application_type is not None:
             client_info.application_type = pending_application_type
+        elif client_info.application_type is None:
+            client_info.application_type = "native"
         application_type = client_info.application_type
 
         if client_info.redirect_uris:
@@ -1161,7 +1170,7 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
         # Store transaction data for IdP callback processing
         if client.client_id is None:
             raise AuthorizeError(
-                error="invalid_client",  # type: ignore[arg-type]  # "invalid_client" is valid OAuth error but not in Literal type  # ty:ignore[invalid-argument-type]
+                error="invalid_client",  # type: ignore[arg-type]  # "invalid_client" is valid OAuth error but not in Literal type
                 error_description="Client ID is required",
             )
         # Clients may omit `scope` entirely, in which case OAuth lets the
@@ -1254,7 +1263,7 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
         # Create authorization code object with PKCE challenge
         if client.client_id is None:
             raise AuthorizeError(
-                error="invalid_client",  # type: ignore[arg-type]  # "invalid_client" is valid OAuth error but not in Literal type  # ty:ignore[invalid-argument-type]
+                error="invalid_client",  # type: ignore[arg-type]  # "invalid_client" is valid OAuth error but not in Literal type
                 error_description="Client ID is required",
             )
         return AuthorizationCode(

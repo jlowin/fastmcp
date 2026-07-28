@@ -892,7 +892,15 @@ class Context:
         """
         # v2: ServerNotification is a union of concrete notification models;
         # ServerSession.send_notification takes an instance directly (no wrapper).
-        await self.session.send_notification(notification)
+        #
+        # Relate the notification to the in-flight request so it rides that
+        # request's own stream. A sessionless (2026-07-28) connection has no
+        # standing server→client channel, so an unrelated notification is
+        # dropped; the request's stream is the only way out. Session-based eras
+        # deliver it either way.
+        await self.session.send_notification(
+            notification, related_request_id=self.request_id
+        )
 
     async def close_sse_stream(self) -> None:
         """Close the current response stream to trigger client reconnection.

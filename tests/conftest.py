@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from mcp_types import SERVER_INFO_META_KEY
 from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
@@ -21,6 +22,21 @@ from tests.utilities.httpx2_mock import httpx_mock as httpx_mock
 # See: https://github.com/python/cpython/issues/116773
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
+
+def user_meta(meta: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Strip the SDK's `serverInfo` stamp from a result's `_meta`.
+
+    Every 2026-era result carries `io.modelcontextprotocol/serverInfo` (spec
+    #3002), stamped by the SDK runner rather than by the component that
+    produced the result. Tests asserting on the meta a tool or resource set
+    itself use this to ignore the stamp, and get `None` back when the stamp was
+    the only entry.
+    """
+    if meta is None:
+        return None
+    remaining = {k: v for k, v in meta.items() if k != SERVER_INFO_META_KEY}
+    return remaining or None
 
 
 def make_server_request_context(
