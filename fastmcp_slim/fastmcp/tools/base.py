@@ -52,6 +52,16 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
+def _default_title(name: str) -> str:
+    """Derive a display title from a tool name.
+
+    The MCP spec says clients should fall back to `name` for display when
+    `title` is absent, but some clients (e.g. ChatGPT) instead drop the tool
+    entirely. Always emitting a title avoids depending on that fallback.
+    """
+    return name.replace("_", " ").replace("-", " ").title()
+
+
 def resolve_serialize_by_alias(value: Any) -> bool:
     """Resolve the effective ``by_alias`` setting for serializing *value*.
 
@@ -269,6 +279,8 @@ class Tool(FastMCPComponent):
             title = self.title
         elif self.annotations and self.annotations.title:
             title = self.annotations.title
+        else:
+            title = _default_title(self.name)
 
         mcp_tool = MCPTool(
             name=overrides.get("name", self.name),

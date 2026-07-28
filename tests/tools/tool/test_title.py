@@ -30,7 +30,13 @@ class TestToolTitle:
         )
 
     def test_tool_without_title(self):
-        """Test that tools without titles use name as display name."""
+        """Test that tools without an explicit title derive one from the name.
+
+        Some MCP clients (e.g. ChatGPT) drop tools with no `title` rather
+        than falling back to `name` as the spec allows, so FastMCP always
+        emits a derived title on the wire instead of relying on that
+        fallback.
+        """
 
         def multiply(a: int, b: int) -> int:
             return a * b
@@ -40,10 +46,9 @@ class TestToolTitle:
         assert tool.name == "multiply"
         assert tool.title is None
 
-        # Test MCP conversion doesn't include title when None
         mcp_tool = tool.to_mcp_tool()
         assert mcp_tool.name == "multiply"
-        assert not hasattr(mcp_tool, "title") or mcp_tool.title is None
+        assert mcp_tool.title == "Multiply"
 
     def test_tool_title_priority(self):
         """Test that explicit title takes priority over annotations.title."""
