@@ -183,6 +183,11 @@ class CatalogTransform(Transform):
         host filtering the spec relies on never applies to it — this is the
         only place the declaration can be enforced.
 
+        Visibility is checked after deduplication, on the version a bare name
+        actually reaches. Checking first would let a model-visible older
+        version advertise a name whose highest version is app-only, and the
+        call would run the version nobody was shown.
+
         Args:
             ctx: The current request context.
             run_middleware: Whether to run middleware on the inner call.
@@ -194,8 +199,8 @@ class CatalogTransform(Transform):
             tools = await ctx.fastmcp.list_tools(run_middleware=run_middleware)
         finally:
             self._bypass.reset(token)
-        visible = [tool for tool in tools if is_model_visible(tool)]
-        return dedupe_with_versions(visible, lambda t: t.name)
+        selected = dedupe_with_versions(tools, lambda t: t.name)
+        return [tool for tool in selected if is_model_visible(tool)]
 
     async def get_resource_catalog(
         self, ctx: Context, *, run_middleware: bool = True

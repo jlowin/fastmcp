@@ -21,6 +21,7 @@ from fastmcp.exceptions import ToolError
 from fastmcp.experimental.transforms.code_mode import CodeMode
 from fastmcp.server.providers.addressing import hashed_backend_name
 from fastmcp.server.transforms.search import BM25SearchTransform, RegexSearchTransform
+from fastmcp.tools.base import Tool
 
 
 def build_server_without_transform() -> FastMCP:
@@ -132,3 +133,36 @@ async def test_the_apps_own_ui_still_reaches_its_backend(transform_cls):
         hashed_backend_name("contacts", "save_contact"), {"name": "ada"}
     )
     assert result.content[0].text == "saved ada"  # type: ignore[union-attr]  # ty:ignore[unresolved-attribute]
+
+
+async def test_visibility_is_checked_on_the_version_a_name_reaches():
+    """A bare name selects the highest version, so that is the one whose
+    declaration governs. Checking before deduplication would advertise a
+    model-visible older version whose name runs an app-only newer one.
+    """
+
+    def versioned(version: str, visibility: list[str], marker: str) -> Tool:
+        def same() -> str:
+            return f"ran {marker}"
+
+        return Tool.from_function(
+            same, name="same", version=version, meta={"ui": {"visibility": visibility}}
+        )
+
+    app = FastMCPApp("contacts")
+    app.add_tool(versioned("1.0.0", ["app", "model"], "v1"))
+    app.add_tool(versioned("2.0.0", ["app"], "v2"))
+
+    server = FastMCP("Platform")
+    server.add_provider(app)
+    server.add_transform(RegexSearchTransform())
+
+    async with Client(server) as client:
+        found = await client.call_tool("search_tools", {"pattern": "same"})
+        blob = json.dumps(found.structured_content or "") + "".join(
+            block.text for block in found.content if hasattr(block, "text")
+        )
+        assert "same" not in blob
+
+        with pytest.raises(ToolError, match="same"):
+            await client.call_tool("call_tool", {"name": "same", "arguments": {}})
