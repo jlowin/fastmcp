@@ -71,7 +71,7 @@ When modifying MCP functionality, changes typically need to be applied across al
 - **Resolve a review thread when you fix it; reply when you're declining it.** A fix explains itself through the commit, so resolving is enough — and it leaves unresolved threads meaning unfinished business, which is the signal worth having. A decline needs a one-line reason in a reply, because resolving collapses the thread and a hidden objection is worse than a visible one. Doing both is noise. Get thread ids from the GraphQL `reviewThreads` field, then resolve:
 
   ```bash
-  gh api graphql -f query='query($n:Int!){repository(owner:"PrefectHQ",name:"fastmcp"){pullRequest(number:$n){reviewThreads(first:50){nodes{id isResolved path}}}}}' -F n=4682
+  gh api graphql -f query='query($n:Int!){repository(owner:"PrefectHQ",name:"fastmcp"){pullRequest(number:$n){reviewThreads(first:50){nodes{id isResolved path}}}}}' -F n=<pr-number>
   gh api graphql -f query='mutation($id:ID!){resolveReviewThread(input:{threadId:$id}){thread{isResolved}}}' -F id=PRRT_...
   ```
 
