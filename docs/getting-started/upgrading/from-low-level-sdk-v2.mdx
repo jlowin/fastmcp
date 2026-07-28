@@ -52,7 +52,7 @@ CONTEXT AND SIDE CHANNELS
 - `ctx.session.send_log_message(...)` — `ctx.info()` / `ctx.debug()` / `ctx.warning()` / `ctx.error()` on a `fastmcp.Context` parameter
 - `ctx.session.report_progress(...)` — `ctx.report_progress()`
 - `ctx.params`, `ctx.request_id`, `ctx.meta`, `ctx.protocol_version`
-- Direct `ctx.session` use for anything else — flag it, since FastMCP does not hand you the raw session
+- Direct `ctx.session` use for anything else — `Context.session` exists in FastMCP too and returns the same raw SDK session, so this still works; prefer a `Context` method where one exists, and note the remaining uses as SDK-coupled
 
 ERRORS AND AUTH
 - `raise ValueError(f"Unknown tool: ...")` dispatch fallbacks — these become unnecessary
@@ -457,7 +457,7 @@ async def process_data(ctx: Context) -> str:
 
 The `Context` parameter is injected by type annotation and never appears in the tool's schema, so clients see `process_data` as taking no arguments. Beyond logging and progress, it carries resource reads, [session state](/servers/sessions), elicitation, and component visibility — see [Context](/servers/context) for the full surface.
 
-One thing to check as you migrate: FastMCP does not hand you the raw `ServerSession`. If a handler reaches into `ctx.session` for something with no `Context` equivalent, that code needs a rethink rather than a translation.
+One thing to check as you migrate: `ctx.session` still exists on a FastMCP `Context` as an escape hatch, and it hands back the same raw SDK session your handlers use today. That makes it a working translation for anything with no `Context` equivalent — but it's also the one part of your server that stays coupled to SDK internals, so reach for the `Context` method first and keep the escape hatch for what genuinely has no equivalent.
 
 ## Complete Example
 

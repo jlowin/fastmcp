@@ -66,7 +66,7 @@ These raise TypeError, most naming their replacement. `name`, `version`, `instru
 
 CONTEXT
 - `ctx.mcp_server`, `ctx.headers`
-- `ctx.notify_tools_changed()` and its siblings — FastMCP sends these automatically
+- `ctx.notify_tools_changed()` and its siblings — send the notification directly with `ctx.send_notification(ToolListChangedNotification())` from `mcp_types`. FastMCP emits it for you when components change visibility through its own `ctx.enable_components` / `ctx.disable_components`.
 - everything else on Context (logging, progress, elicit, read_resource, request_id, input_responses, request_state) carries over unchanged
 
 RESOLVERS — the one part that is not a rename, so check for it first
