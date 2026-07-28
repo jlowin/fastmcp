@@ -105,6 +105,24 @@ class StdioTransport(ClientTransport):
         # Serialized so concurrent callers can't each decide to replace the
         # session and race to spawn competing subprocesses.
         async with self._connect_lock:
+            # The connection task and the session's streams belong to the event
+            # loop that created them. A session reused from another loop never
+            # sees its responses, so the initialize handshake hangs forever.
+            # Rebuild on this loop instead; refuse when another client is still
+            # using the old connection, since tearing it down would break them.
+            if self._connect_task is not None and (
+                self._connect_task.get_loop() is not asyncio.get_running_loop()
+            ):
+                if self._active_sessions:
+                    raise RuntimeError(
+                        "This stdio transport has a live session bound to a "
+                        "different event loop and another client is still using "
+                        "it. Sharing one transport across event loops with "
+                        "overlapping sessions is not supported; give each loop "
+                        "its own transport."
+                    )
+                await self.disconnect()
+
             # A kept-alive session was built for one client's options; handing it
             # to a client that wants different ones would silently give it the
             # first client's behavior. Rebuild it when it's idle; refuse when
@@ -170,13 +188,26 @@ class StdioTransport(ClientTransport):
         if self._connect_task is None:
             return
 
+        connect_task = self._connect_task
+        owning_loop = connect_task.get_loop()
+
+        # The task can only be signalled and awaited from the loop that owns
+        # it. From any other loop, hand the stop signal over and drop our
+        # references; that loop tears the subprocess down on its own. If it is
+        # already gone there is nothing left to signal.
+        if owning_loop is not asyncio.get_running_loop():
+            stop_event = self._stop_event
+            self._reset()
+            with contextlib.suppress(RuntimeError):
+                owning_loop.call_soon_threadsafe(stop_event.set)
+            return
+
         # signal the connection task to stop
         self._stop_event.set()
 
         # Wait without propagating the connection task's cancellation into
         # this caller. Cancellation of this wait therefore still belongs to
         # the caller and must propagate normally.
-        connect_task = self._connect_task
         await asyncio.wait({connect_task})
         try:
             _ = connect_task.result()
@@ -188,7 +219,10 @@ class StdioTransport(ClientTransport):
                 exc_info=True,
             )
 
-        # reset variables and events for potential future reconnects
+        self._reset()
+
+    def _reset(self) -> None:
+        """Clear connection state and events so a future connect starts fresh."""
         self._connect_task = None
         self._session = None
         self._session_options = None
