@@ -280,7 +280,7 @@ class Tool(FastMCPComponent):
         elif self.annotations and self.annotations.title:
             title = self.annotations.title
         else:
-            title = _default_title(self.name)
+            title = _default_title(overrides.get("name", self.name))
 
         mcp_tool = MCPTool(
             name=overrides.get("name", self.name),
