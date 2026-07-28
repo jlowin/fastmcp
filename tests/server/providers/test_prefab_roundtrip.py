@@ -12,8 +12,10 @@ import pytest
 
 from fastmcp import FastMCP, FastMCPApp
 from fastmcp.exceptions import ToolError
+from fastmcp.experimental.transforms.code_mode import CodeMode
 from fastmcp.server.providers.addressing import hash_tool, hashed_backend_name
 from fastmcp.server.providers.proxy import ProxyClient, ProxyProvider
+from fastmcp.server.transforms.search import RegexSearchTransform
 
 prefab_ui = pytest.importorskip("prefab_ui")
 from prefab_ui.actions.mcp import CallTool  # noqa: E402
@@ -330,6 +332,39 @@ class TestLateBoundToolNames:
 
             clicked = await top.call_tool(ref, {"name": "alice"})
             assert clicked.content[0].text == f"[{marker}] saved alice"  # type: ignore[union-attr]  # ty:ignore[unresolved-attribute]
+
+    @pytest.mark.parametrize(
+        "transform_factory,expected_listing",
+        [
+            (
+                lambda: RegexSearchTransform(),
+                ["search_tools", "call_tool"],
+            ),
+            (
+                lambda: CodeMode(),
+                ["search", "get_schema", "execute"],
+            ),
+        ],
+        ids=["tool-search", "code-mode"],
+    )
+    async def test_survives_a_collapsed_catalog(
+        self, transform_factory, expected_listing
+    ):
+        """Tool search and code mode replace tools/list wholesale, so there is
+        no better name to bind to. The reference stays identity-addressed and
+        the hashed path still resolves it."""
+        server = FastMCP("Platform")
+        server.add_provider(self._app(marker="cat"))
+        server.add_transform(transform_factory())
+
+        assert [t.name for t in await server.list_tools()] == expected_listing
+
+        result = await server.call_tool("form", {})
+        (ref,) = _tool_refs(result.structured_content)
+        assert ref == hashed_backend_name("contacts", "save")
+
+        clicked = await server.call_tool(ref, {"name": "alice"})
+        assert clicked.content[0].text == "[cat] saved alice"  # type: ignore[union-attr]  # ty:ignore[unresolved-attribute]
 
     async def test_unresolvable_identity_is_left_alone(self):
         """A reference this server cannot resolve keeps its identity-addressed
