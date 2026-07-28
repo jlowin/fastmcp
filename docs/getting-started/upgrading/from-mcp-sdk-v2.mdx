@@ -62,7 +62,8 @@ CONSTRUCTOR ARGUMENTS THAT DO NOT CARRY OVER
 - `token_verifier=`, `auth_server_provider=`, `auth=AuthSettings(...)` — FastMCP consolidates all three into one `auth=` provider
 - `cache_hints=`
 - `extensions=`
-These raise TypeError, most naming their replacement. `name`, `version`, `instructions`, `icons`, `website_url`, `lifespan`, `tools`, `resource_security`, and `request_state_security` carry over unchanged.
+- `tools=[...]` — the keyword survives but its contents do not: FastMCP takes plain callables (or its own `Tool`) and raises TypeError on an SDK `Tool`. Pass the underlying functions.
+These raise TypeError, most naming their replacement. `name`, `version`, `instructions`, `icons`, `website_url`, `lifespan`, `resource_security`, and `request_state_security` carry over unchanged.
 
 CONTEXT
 - `ctx.mcp_server` → `ctx.fastmcp`
