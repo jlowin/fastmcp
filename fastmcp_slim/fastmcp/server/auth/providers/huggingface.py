@@ -209,6 +209,9 @@ class HuggingFaceProvider(OAuthProxy):
             client_secret: Hugging Face OAuth app client secret. Optional for
                 public PKCE apps; when omitted, ``jwt_signing_key`` is required.
             base_url: Public URL where OAuth endpoints will be accessible.
+            issuer_url: Issuer URL for OAuth metadata (defaults to base_url). Use
+                root-level URL to avoid 404s during discovery when mounting under
+                a path.
             required_scopes: Required Hugging Face scopes. Defaults to
                 ``["openid", "profile"]``.
             valid_scopes: Scopes clients may request. Defaults to required scopes.

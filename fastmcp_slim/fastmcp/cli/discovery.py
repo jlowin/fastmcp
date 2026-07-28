@@ -120,7 +120,7 @@ def _parse_mcp_servers(
 def _parse_mcp_config(path: Path, source: str) -> list[DiscoveredServer]:
     """Parse an mcpServers-style JSON file into discovered servers."""
     try:
-        text = path.read_text()
+        text = path.read_text(encoding="utf-8")
     except OSError as exc:
         logger.debug("Could not read %s: %s", path, exc)
         return []
@@ -158,7 +158,7 @@ def _scan_claude_code(start_dir: Path) -> list[DiscoveredServer]:
     """Scan ``~/.claude.json`` for global and project-scoped MCP servers."""
     path = Path.home() / ".claude.json"
     try:
-        text = path.read_text()
+        text = path.read_text(encoding="utf-8")
     except OSError:
         return []
 
@@ -269,7 +269,7 @@ def _scan_goose() -> list[DiscoveredServer]:
 
     path = config_dir / "config.yaml"
     try:
-        text = path.read_text()
+        text = path.read_text(encoding="utf-8")
     except OSError:
         return []
 

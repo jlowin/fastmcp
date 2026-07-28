@@ -25,9 +25,9 @@ from typing import (
 import mcp_types
 from mcp_types import ToolAnnotations
 
-from fastmcp.server.auth.authorization import AuthCheck
 from fastmcp.tools.base import Tool
 from fastmcp.tools.function_tool import FunctionTool
+from fastmcp.utilities.authorization import AuthCheck
 from fastmcp.utilities.tasks import TaskConfig
 from fastmcp.utilities.types import AnyFunction, NotSet, NotSetT
 

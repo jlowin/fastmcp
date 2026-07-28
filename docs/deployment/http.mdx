@@ -151,6 +151,8 @@ Use `host_origin_protection="auto"` to protect localhost-bound direct servers wh
 
 ### Gateway Routing Headers
 
+<VersionBadge version="4.0.0" />
+
 A gateway, load balancer, or reverse proxy in front of your MCP server often needs to route a request before it reads the JSON-RPC body — the body may be an SSE stream, or the gateway may simply want to avoid parsing it. On a connection that negotiates the modern `2026-07-28` protocol, Streamable HTTP clients built on the MCP Python SDK (including FastMCP's own client) attach routing information to each request as HTTP headers so an intermediary can dispatch on headers alone:
 
 - `Mcp-Method` carries the JSON-RPC method (for example `tools/call`) on every request.
@@ -544,7 +546,7 @@ base_url="http://localhost:8000/api"  # Includes mount prefix
 mcp_path="/mcp"  # Internal MCP path, NOT the mount prefix
 ```
 
-**`issuer_url`** (optional) controls the authorization server identity for OAuth discovery. Defaults to `base_url`.
+**`issuer_url`** (optional) controls the authorization server identity for OAuth discovery. Defaults to `base_url`. It sets the `issuer` advertised in the authorization server metadata and the `iss` on issued tokens, while the endpoints in that metadata continue to point at `base_url`.
 
 ```python
 # Usually not needed - just set base_url and it works

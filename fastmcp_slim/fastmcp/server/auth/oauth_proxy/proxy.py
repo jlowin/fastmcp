@@ -688,14 +688,17 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
                 allowed_redirect_uri_patterns=self._allowed_client_redirect_uris,
             )
 
-        # Identity assertion (SEP-990 ID-JAG): the audience the ID-JAG must be
-        # bound to is this authorization server's own issuer URL (base_url).
+        # Identity assertion (SEP-990 ID-JAG): per RFC 7523 §3 the `aud` must
+        # identify this authorization server, and an authorization server is
+        # identified by its issuer — the same value published as `issuer` in
+        # the authorization server metadata, which is `issuer_url` (defaulting
+        # to `base_url`).
         self._identity_assertion: IdentityAssertion | None = identity_assertion
         self._identity_assertion_validator: IdentityAssertionValidator | None = None
         if identity_assertion is not None:
             self._identity_assertion_validator = IdentityAssertionValidator(
                 config=identity_assertion,
-                audience=str(self.base_url),
+                audience=str(self.issuer_url),
             )
         # ID-JAG access tokens are self-contained (no upstream token or JTI
         # mapping to delete), so revocation tracks their jtis here until the
@@ -758,9 +761,11 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
         super().set_mcp_path(mcp_path)
 
         # Create JWT issuer with correct audience based on actual MCP path
-        # This ensures tokens are bound to the specific resource URL
+        # This ensures tokens are bound to the specific resource URL. The `iss`
+        # claim is the authorization server's issuer identifier (`issuer_url`),
+        # which matches the `issuer` advertised in the metadata document.
         self._jwt_issuer = JWTIssuer(
-            issuer=str(self.base_url),
+            issuer=str(self.issuer_url),
             audience=str(self._resource_url),
             signing_key=self._jwt_signing_key,
         )
@@ -780,6 +785,19 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
                 "before token operations."
             )
         return self._jwt_issuer
+
+    @property
+    def token_endpoint_url(self) -> str:
+        """The token endpoint URL, as advertised in the authorization server metadata.
+
+        A CIMD `private_key_jwt` assertion is bound to this URL as its `aud`, so
+        it must match the advertised `token_endpoint` byte-for-byte. The SDK's
+        `build_metadata` builds that URL by stripping any trailing slash from
+        `base_url` first, so this does too: pydantic renders a bare-authority
+        `base_url` with a trailing slash, which would otherwise expect an `aud`
+        of `https://example.com//token`.
+        """
+        return f"{str(self.base_url).rstrip('/')}/token"
 
     # -------------------------------------------------------------------------
     # Upstream OAuth Client
@@ -1146,6 +1164,14 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
                 error="invalid_client",  # type: ignore[arg-type]  # "invalid_client" is valid OAuth error but not in Literal type  # ty:ignore[invalid-argument-type]
                 error_description="Client ID is required",
             )
+        # Clients may omit `scope` entirely, in which case OAuth lets the
+        # authorization server apply its configured default. Resolve that default
+        # once, here, so the transaction records the scopes actually being
+        # authorized. Every later consumer — the consent screen, the issued
+        # authorization code, token exchange, and refresh — reads this one value
+        # instead of deciding for itself whether to substitute required_scopes.
+        effective_scopes = params.scopes or self.required_scopes or []
+
         transaction = OAuthTransaction(
             txn_id=txn_id,
             client_id=client.client_id,
@@ -1153,7 +1179,7 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
             client_state=params.state or "",
             code_challenge=params.code_challenge,
             code_challenge_method=getattr(params, "code_challenge_method", "S256"),
-            scopes=params.scopes or [],
+            scopes=effective_scopes,
             created_at=time.time(),
             resource=getattr(params, "resource", None),
             proxy_code_verifier=proxy_code_verifier,
@@ -2380,6 +2406,7 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
                 authorize_handler = AuthorizationHandler(
                     provider=self,
                     base_url=self.base_url,  # ty: ignore[invalid-argument-type]
+                    issuer_url=self.issuer_url,
                     server_name=None,  # Could be extended to pass server metadata
                     server_icon_url=None,
                 )
@@ -2400,7 +2427,7 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
                 # Replace the token endpoint so it can (a) authenticate CIMD
                 # private_key_jwt clients and (b) accept the SEP-990 jwt-bearer
                 # grant when identity assertion is enabled.
-                token_endpoint_url = f"{self.base_url}/token"
+                token_endpoint_url = self.token_endpoint_url
                 if self._cimd_manager is not None:
                     authenticator: ClientAuthenticator = (
                         PrivateKeyJWTClientAuthenticator(
@@ -2468,6 +2495,14 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
                     revocation_options,
                     supports_identity_assertion=self._identity_assertion is not None,
                 )
+                # `build_metadata` derives both the `issuer` field and every
+                # endpoint URL from a single argument. Endpoints must stay on
+                # `base_url` (that is where the routes are actually mounted),
+                # while the issuer identity is `issuer_url`. RFC 8414 §3.3
+                # requires `issuer` to match the URL the client used for
+                # discovery, which is the `issuer_url` advertised in the
+                # protected resource metadata.
+                metadata.issuer = self.issuer_url  # ty: ignore[invalid-assignment]
                 # RFC 9207: every authorization response we issue carries an
                 # `iss` matching this issuer byte-for-byte, so this route must
                 # always be overridden to advertise support — not just when
@@ -2585,7 +2620,7 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
                         url=build_client_redirect(
                             client_redirect_uri,
                             error_params,
-                            iss=str(self.base_url),
+                            iss=str(self.issuer_url),
                         ),
                         status_code=302,
                     )
@@ -2753,7 +2788,7 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
             }
 
             client_callback_url = build_client_redirect(
-                client_redirect_uri, callback_params, iss=str(self.base_url)
+                client_redirect_uri, callback_params, iss=str(self.issuer_url)
             )
 
             logger.debug(f"Forwarding to client callback for transaction {txn_id}")

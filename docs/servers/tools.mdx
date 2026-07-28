@@ -722,7 +722,7 @@ Schema generation works for most common types including basic types, collections
 For complete control over tool responses, return a `ToolResult` object. This gives you explicit control over all aspects of the tool's output: traditional content, structured data, and metadata.
 
 ```python
-from fastmcp.tools.tool import ToolResult
+from fastmcp.tools import ToolResult
 from mcp_types import TextContent
 
 @mcp.tool
@@ -788,7 +788,7 @@ When you need custom serialization (like YAML, Markdown tables, or specialized f
 ```python
 import yaml
 from fastmcp import FastMCP
-from fastmcp.tools.tool import ToolResult
+from fastmcp.tools import ToolResult
 
 mcp = FastMCP("MyServer")
 

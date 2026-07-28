@@ -58,6 +58,75 @@ def read_write_operation() -> str:
     return "Read/write action completed"
 ```
 
+### require_roles
+
+<VersionBadge version="4.0.0" />
+
+Scopes are standardized, so `require_scopes` works the same everywhere. Roles and groups are not part of OIDC, so every identity provider puts them under a different claim. `require_roles` handles the comparison and takes an `extract` callable that tells it where to look.
+
+```python
+from fastmcp import FastMCP
+from fastmcp.server.auth import require_roles
+
+def keycloak_roles(claims: dict) -> list[str]:
+    return claims["realm_access"]["roles"]
+
+mcp = FastMCP("Role Server")
+
+@mcp.tool(auth=require_roles("admin", extract=keycloak_roles))
+def admin_operation() -> str:
+    """Requires the 'admin' role."""
+    return "Admin action completed"
+
+@mcp.tool(auth=require_roles("admin", "auditor", extract=keycloak_roles))
+def audited_admin_operation() -> str:
+    """Requires both the 'admin' AND 'auditor' roles."""
+    return "Audited admin action"
+```
+
+Multiple roles are required together, matching `require_scopes`. A token whose claims lack the path entirely is denied rather than raising, so the extractor can index directly.
+
+Keeping the claim path at the call site means any provider works, including ones with unusual shapes. Common locations:
+
+| Provider | Extractor |
+| --- | --- |
+| Keycloak | `lambda c: c["realm_access"]["roles"]` |
+| Microsoft Entra | `lambda c: c["roles"]` |
+| AWS Cognito | `lambda c: c["cognito:groups"]` |
+| Auth0 | `lambda c: c["permissions"]` |
+
+Verify the claim against your own tenant before relying on it. Auth0's namespaced custom claims are configured per tenant, and Entra emits `roles` or `groups` depending on the app manifest.
+
+<Note>
+`require_roles` cannot signal a scope shortfall, because OAuth has no way to request a role. A role denial surfaces as a plain `AuthorizationError` rather than one of the `insufficient_scope` challenges described in [Signaling Scope Shortfalls](#signaling-scope-shortfalls), and it suppresses any scope shortfall raised alongside it — a caller blocked by their role should not be told to go obtain a scope that would not help them. Combining `require_roles` with `require_scopes` is otherwise fine: whenever the role check passes, a scope shortfall is reported as usual.
+</Note>
+
+### Checking Other Claims
+
+`require_roles` is a convenience for the common case. `AccessToken.claims` holds every claim from the token, so gating on anything else needs no special API — just an auth check that reads it.
+
+```python
+from fastmcp import FastMCP
+from fastmcp.server.auth import AuthCheck, AuthContext
+
+mcp = FastMCP("Claim Server")
+
+def require_tenant(tenant_id: str) -> AuthCheck:
+    """Require the token to come from a specific tenant."""
+    def check(ctx: AuthContext) -> bool:
+        if ctx.token is None:
+            return False
+        return ctx.token.claims.get("tid") == tenant_id
+    return check
+
+@mcp.tool(auth=require_tenant("acme"))
+def tenant_operation() -> str:
+    """Only callable by tokens issued for the acme tenant."""
+    return "Tenant action completed"
+```
+
+The same caveat applies: a check like this is opaque, so it suppresses scope disclosure for its siblings.
+
 ### restrict_tag
 
 Tag-based restrictions apply scope requirements conditionally. If a component has the specified tag, the token must have the required scopes. Components without the tag are unaffected.
@@ -107,7 +176,7 @@ Any callable that accepts `AuthContext` and returns `bool` can serve as an auth 
 
 ```python
 from fastmcp import FastMCP
-from fastmcp.server.auth import AuthContext
+from fastmcp.server.auth import AuthCheck, AuthContext
 
 mcp = FastMCP("Custom Auth Server")
 
@@ -117,7 +186,7 @@ def require_premium_user(ctx: AuthContext) -> bool:
         return False
     return ctx.token.claims.get("premium", False) is True
 
-def require_access_level(minimum_level: int):
+def require_access_level(minimum_level: int) -> AuthCheck:
     """Factory function for level-based authorization."""
     def check(ctx: AuthContext) -> bool:
         if ctx.token is None:
@@ -299,6 +368,8 @@ def read_record(id: str) -> str:
 
 ### Signaling Scope Shortfalls
 
+<VersionBadge version="4.0.0" />
+
 A denial is more useful when it says what would fix it. When `AuthMiddleware` blocks a call because the token is missing scopes — rather than because some other policy rejected it — it raises `InsufficientScopeError`, which carries the specific scopes the caller needs in its `required_scopes` attribute. An agent that reads the error knows exactly which scopes to re-authorize for, instead of retrying blindly against an opaque refusal.
 
 `InsufficientScopeError` subclasses `AuthorizationError`, so existing handlers that catch `AuthorizationError` keep catching it and nothing about your error handling has to change to adopt this.
@@ -417,6 +488,7 @@ from fastmcp.server.auth import (
     AuthContext,       # Context with .token, .component
     AuthCheck,         # Type alias: sync or async Callable[[AuthContext], bool]
     require_scopes,    # Built-in: requires specific scopes
+    require_roles,     # Built-in: requires roles read from token claims
     restrict_tag,      # Built-in: tag-based scope requirements
     run_auth_checks,   # Utility: run checks with AND logic
 )

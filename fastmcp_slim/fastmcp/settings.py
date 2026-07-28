@@ -20,6 +20,8 @@ ENV_FILE = os.getenv("FASTMCP_ENV_FILE", ".env")
 
 LOG_LEVEL = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
 
+TELEMETRY_MODE = Literal["native", "propagation_only", "off"]
+
 MCP_LOG_LEVEL = Literal[
     "debug", "info", "notice", "warning", "error", "critical", "alert", "emergency"
 ]
@@ -104,24 +106,6 @@ class Settings(BaseSettings):
         ),
     ] = True
 
-    enable_telemetry: Annotated[
-        bool,
-        Field(
-            description=inspect.cleandoc(
-                """
-                Whether FastMCP's native OpenTelemetry instrumentation is active.
-                Enabled by default: FastMCP uses only the OpenTelemetry API, so
-                span creation is a no-op with negligible overhead unless an
-                OpenTelemetry SDK and exporter are configured. Set to False to
-                turn instrumentation off entirely, in which case FastMCP's span
-                helpers become a transparent pass-through: no FastMCP spans are
-                created even when an SDK is configured, and the surrounding OTel
-                trace context is left untouched.
-                """
-            )
-        ),
-    ] = True
-
     deprecation_warnings: Annotated[
         bool,
         Field(
@@ -166,6 +150,31 @@ class Settings(BaseSettings):
             ),
         ),
     ] = True
+
+    telemetry_mode: Annotated[
+        TELEMETRY_MODE,
+        Field(
+            description=inspect.cleandoc(
+                """
+                Controls FastMCP's native OpenTelemetry instrumentation.
+
+                - `native` (default): FastMCP creates MCP spans and propagates
+                  trace context through request `_meta`. FastMCP uses only the
+                  OpenTelemetry API, so span creation is a no-op with negligible
+                  overhead unless an SDK and exporter are configured.
+                - `propagation_only`: FastMCP still injects and extracts trace
+                  context, and still parents downstream spans from the incoming
+                  `_meta` context, but creates none of its own MCP spans. Use
+                  this when another instrumentation layer owns the MCP span
+                  hierarchy and FastMCP's spans would duplicate it.
+                - `off`: FastMCP's span helpers become a transparent
+                  pass-through. No spans are created even when an SDK is
+                  configured, and the surrounding OTel context is left
+                  untouched — no trace context is extracted or attached.
+                """
+            ),
+        ),
+    ] = "native"
 
     client_init_timeout: Annotated[
         float | None,

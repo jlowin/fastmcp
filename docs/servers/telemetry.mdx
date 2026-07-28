@@ -6,6 +6,8 @@ icon: chart-line
 tag: NEW
 ---
 
+import { VersionBadge } from "/snippets/version-badge.mdx"
+
 FastMCP includes native OpenTelemetry instrumentation for observability. Traces are automatically generated for tool, prompt, resource, resource template, and task management operations, providing visibility into server behavior, request handling, and provider delegation chains.
 
 ## How It Works
@@ -19,9 +21,21 @@ FastMCP uses the OpenTelemetry API for instrumentation. This means:
 
 Because FastMCP only depends on the OpenTelemetry API, span creation is a no-op until you configure an SDK and exporter — so being on by default costs nothing until you opt into collection.
 
-### Turning Telemetry Off
+### Telemetry Modes
 
-To disable FastMCP's instrumentation entirely, set `FASTMCP_ENABLE_TELEMETRY=false` (or `fastmcp.settings.enable_telemetry = False`). When disabled, FastMCP creates no spans even if an SDK is configured.
+<VersionBadge version="4.0.0" />
+
+`FASTMCP_TELEMETRY_MODE` (or `fastmcp.settings.telemetry_mode`) controls how much of the instrumentation is active:
+
+| Mode | FastMCP spans | Trace context |
+|---|---|---|
+| `native` (default) | Emitted | Propagated |
+| `propagation_only` | Suppressed | Propagated |
+| `off` | Suppressed | Untouched |
+
+Use `off` to disable FastMCP's instrumentation entirely. No spans are created even if an SDK is configured, and FastMCP leaves the surrounding OpenTelemetry context exactly as it found it.
+
+Use `propagation_only` when another instrumentation layer already owns the MCP span hierarchy — see [Interoperability](#interoperability) below.
 
 ## Enabling Telemetry
 
@@ -143,6 +157,37 @@ trace.set_tracer_provider(provider)
 ```
 
 The name check must happen before `ParentBased` delegates. If the name-based sampler is nested inside `ParentBased`, it is not consulted for child spans whose parent was already sampled.
+
+## Interoperability
+
+<VersionBadge version="4.0.0" />
+
+FastMCP assumes it owns the MCP span hierarchy. When something else already owns it — an MCP-aware OpenTelemetry instrumentation library, or a service mesh that understands the protocol — FastMCP's spans duplicate what that layer already emits, and the same request shows up twice in your traces.
+
+Setting `propagation_only` resolves the duplication in FastMCP's favor of the other layer:
+
+```bash
+export FASTMCP_TELEMETRY_MODE=propagation_only
+```
+
+The distinction from `off` matters here. Both emit no FastMCP spans, but `off` is fully transparent, while `propagation_only` still extracts the trace context arriving in `_meta` and attaches it for the duration of the request. Spans created downstream — by your tool handlers, or by the instrumentation layer that owns the hierarchy — are parented to the calling trace rather than starting a new one. Outbound requests still carry `traceparent` and `tracestate` in `_meta`.
+
+### Suppressing spans for a single block
+
+Library authors embedding FastMCP inside their own instrumented stack often want to own the hierarchy for one specific operation rather than process-wide. `suppress_fastmcp_telemetry()` applies `propagation_only` semantics to a block:
+
+```python
+from fastmcp import Client
+from fastmcp.telemetry import suppress_fastmcp_telemetry
+
+async def search(client: Client, query: str):
+    with suppress_fastmcp_telemetry():
+        return await client.call_tool("search", {"query": query})
+```
+
+This is narrower than OpenTelemetry's global instrumentation suppression: only FastMCP's spans are skipped, so nested instrumentation for HTTP clients, databases, and everything else keeps emitting normally.
+
+The context manager has no effect when `telemetry_mode` is already `off`. A request to skip FastMCP's spans cannot re-enable the context propagation that `off` deliberately omits.
 
 ## Programmatic Configuration
 

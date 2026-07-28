@@ -187,9 +187,9 @@ async def confirm_purchase(ctx: Context) -> str:
 
 These arguments only apply when FastMCP is adding the wrapper. For structured responses (`BaseModel`, dataclass, `TypedDict`), set the metadata on the individual fields via `Field(title=..., description=...)` — passing `response_title` or `response_description` alongside a model type raises `TypeError`.
 
-### Empty Responses
+### Confirmations
 
-Passing `None` as the response type creates an empty-object schema and returns an accepted result with `data == {}`. This form is deprecated because some clients render empty forms poorly; prefer an explicit response type such as `bool` for confirmations.
+`response_type` is required. When all you want is a yes/no answer, ask for a `bool` rather than an empty schema — an empty schema gives the client nothing to render, and some clients show an empty, non-functional form.
 
 ```python
 @mcp.tool
