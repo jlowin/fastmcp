@@ -242,6 +242,50 @@ class ArgTransformConfig(FastMCPBaseModel):
         return ArgTransform(**self.model_dump(exclude_unset=True))  # pyright: ignore[reportAny]
 
 
+#: Meta namespaces the framework owns. An override replaces the caller-facing
+#: meta wholesale, but these carry a component's app membership, identity, and
+#: visibility — what intermediaries use to recognize a tool they are
+#: forwarding. Both are needed together: an identity that survives a rename
+#: while its ``ui.visibility`` marker does not leaves a tool that can be named
+#: but no longer answers to its identity.
+_FRAMEWORK_META_NAMESPACES = ("fastmcp", "ui")
+
+
+def _apply_meta_override(
+    source_meta: dict[str, Any] | None,
+    override: dict[str, Any] | None | NotSetT,
+) -> dict[str, Any] | None:
+    """Apply a transform's ``meta=`` override, preserving framework namespaces.
+
+    An override replaces the caller-facing meta wholesale, which is what users
+    expect. Framework-owned namespaces are carried across regardless, since a
+    transform that renames a tool must not silently unwire it — values the
+    override supplies for those namespaces still win key by key.
+    """
+    if isinstance(override, NotSetT):
+        return source_meta
+
+    source = source_meta or {}
+    preserved = {
+        namespace: dict(source[namespace])
+        for namespace in _FRAMEWORK_META_NAMESPACES
+        if isinstance(source.get(namespace), dict) and source[namespace]
+    }
+
+    if override is None:
+        return preserved or None
+
+    merged = dict(override)
+    for namespace, source_values in preserved.items():
+        override_values = override.get(namespace)
+        merged[namespace] = (
+            {**source_values, **override_values}
+            if isinstance(override_values, dict)
+            else source_values
+        )
+    return merged
+
+
 class TransformedTool(Tool):
     """A tool that is transformed from another tool.
 
@@ -590,7 +634,7 @@ class TransformedTool(Tool):
             description if not isinstance(description, NotSetT) else tool.description
         )
         final_title = title if not isinstance(title, NotSetT) else tool.title
-        final_meta = meta if not isinstance(meta, NotSetT) else tool.meta
+        final_meta = _apply_meta_override(tool.meta, meta)
         final_annotations = (
             annotations if not isinstance(annotations, NotSetT) else tool.annotations
         )

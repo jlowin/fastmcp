@@ -39,7 +39,7 @@ from fastmcp.client.sampling import create_sampling_callback
 from fastmcp.client.telemetry import client_span
 from fastmcp.client.transports import ClientTransportT
 from fastmcp.client.transports.base import TransportOptions
-from fastmcp.exceptions import ResourceError
+from fastmcp.exceptions import ResourceError, ToolError
 from fastmcp.mcp_config import MCPConfig
 from fastmcp.prompts import Message, Prompt, PromptResult
 from fastmcp.prompts.base import InputRequiredPromptResult, PromptArgument
@@ -855,6 +855,54 @@ class ProxyProvider(Provider):
         if not matching:
             return None
         return max(matching, key=version_sort_key)
+
+    async def get_tool_by_hash(self, tool_hash: str, tool_name: str) -> Tool | None:
+        """Resolve an identity against the remote listing.
+
+        The base implementation looks the tool up by its registered name,
+        which assumes the name survived to here. Across a proxy it need not:
+        a backend that mounts its app under a namespace advertises
+        ``crm_save``, and nothing named ``save`` was ever listed. Matching on
+        the identity carried in meta is what the identity is for.
+
+        A remote that mounts one app twice sends back two tools claiming one
+        identity, exactly as a local composition would. That is refused here
+        on the same terms ``AggregateProvider`` refuses it, so a duplicated
+        app is caught wherever it is composed rather than only nearby.
+        """
+        from fastmcp.server.providers.addressing import TOOL_HASH_META_KEY
+
+        cache = self._tools_cache
+        if cache is None or not cache.is_fresh(self._cache_ttl):
+            await self._list_tools()
+            cache = self._tools_cache
+        assert cache is not None
+
+        matches: list[Tool] = []
+        for tool in cache.items:
+            meta = tool.meta or {}
+            fastmcp_meta = meta.get("fastmcp")
+            ui_meta = meta.get("ui")
+            visibility = (
+                ui_meta.get("visibility", []) if isinstance(ui_meta, dict) else []
+            )
+            if (
+                isinstance(fastmcp_meta, dict)
+                and fastmcp_meta.get(TOOL_HASH_META_KEY) == tool_hash
+                and "app" in visibility
+            ):
+                matches.append(tool)
+
+        if not matches:
+            return None
+        distinct = {tool.name for tool in matches}
+        if len(distinct) > 1:
+            raise ToolError(
+                f"Ambiguous app tool {tool_name!r}: {len(distinct)} components share "
+                f"the identity {tool_hash!r}. The same app is composed more than "
+                f"once, so this call cannot be routed to a single tool."
+            )
+        return max(matches, key=version_sort_key)
 
     # -------------------------------------------------------------------------
     # Resource methods

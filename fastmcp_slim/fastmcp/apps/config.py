@@ -11,6 +11,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from fastmcp.utilities.components import FastMCPComponent
 from fastmcp.utilities.mime import UI_MIME_TYPE as UI_MIME_TYPE
 from fastmcp.utilities.mime import resolve_ui_mime_type as resolve_ui_mime_type
 
@@ -182,3 +183,31 @@ def app_config_to_meta_dict(app: AppConfig | dict[str, Any]) -> dict[str, Any]:
     if isinstance(app, AppConfig):
         return app.model_dump(by_alias=True, exclude_none=True)
     return app
+
+
+def is_model_visible(component: FastMCPComponent) -> bool:
+    """Whether a component may be shown to, or invoked by, the model.
+
+    Visibility is a declaration, and the MCP Apps spec puts the filtering on
+    the host — so ``tools/list`` carries app-only tools and the host keeps
+    them from the model. That division only works where a host stands between
+    the server and the model.
+
+    It does not hold for surfaces a server drives itself. A search result or
+    a code-mode catalog reaches the model as ordinary tool output, and a
+    call-tool proxy invokes on a name the model supplies; nothing downstream
+    can filter either. Those surfaces have to apply the declaration here.
+
+    A component with no ``visibility`` is visible: the field marks the
+    exception, and the spec's default is both audiences.
+    """
+    meta = component.meta
+    if not meta:
+        return True
+    ui_meta = meta.get("ui")
+    if not isinstance(ui_meta, dict):
+        return True
+    visibility = ui_meta.get("visibility")
+    if not isinstance(visibility, list):
+        return True
+    return "model" in visibility

@@ -66,9 +66,9 @@ Ask for more by annotating more parameters. What happens then is worth knowing: 
 
 A fixed string is the right question only when it is always the right question. Usually it stops being one as soon as you know something: once the traveller has said Paris, the useful thing to ask is not "which airport?" but "CDG or ORY?".
 
-Pass a function instead of a string and the question gets built at the moment it is asked, out of values that are already known. The function's parameters are filled by name — from the tool's own arguments, from other elicited parameters, or both.
+Pass a function instead of a string and you get a **resolver** — something that runs when the parameter needs filling and decides what to do about it. A resolver returns `T | Elicit[T]`: an `Elicit` is a question to put to the user, and a plain value is the answer already known, in which case nobody is asked at all.
 
-That name-matching does double duty. It supplies the values, and it establishes the order: a question that quotes an answer nobody has given yet cannot be written, so it waits for the round that produces it, while every question independent of it still goes out immediately.
+Its parameters are filled by name — from the tool's own arguments, from other elicited parameters, or both. That name-matching does double duty. It supplies the values, and it establishes the order: a question that quotes an answer nobody has given yet cannot be written, so it waits for the round that produces it, while every question independent of it still goes out immediately.
 
 ```python
 from typing import Annotated
@@ -79,8 +79,8 @@ from fastmcp.elicitation import Elicit
 mcp = FastMCP("Booking Server")
 
 
-def which_airport(destination: str) -> str:
-    return f"Which airport in {destination} — CDG or ORY?"
+def which_airport(destination: str) -> Elicit[str]:
+    return Elicit(f"Which airport in {destination} — CDG or ORY?", elicit_type=str)
 
 
 @mcp.tool
@@ -91,7 +91,49 @@ async def book_flight(
     return f"Booked into {airport}"
 ```
 
-So this tool takes two rounds, and neither the round count nor the ordering appears anywhere in the code. Get the wiring wrong — name a value the tool does not have, or write two questions that each wait on the other — and FastMCP rejects the tool when it is registered, at import time, rather than on the first call in production.
+So this tool takes two rounds, and neither the round count nor the ordering appears anywhere in the code. Get the wiring wrong — name a value the tool does not have, write two questions that each wait on the other, or declare a resolver that elicits a type its parameter cannot hold — and FastMCP rejects the tool when it is registered, at import time, rather than on the first call in production.
+
+### Questions worth skipping
+
+Returning a value rather than an `Elicit` is how a resolver declines to ask. Most of the time you are asking because you genuinely do not know, but plenty of questions have an answer sitting somewhere already — on the user's profile, in an argument the model supplied, in a table with one row:
+
+```python
+from typing import Annotated
+
+from pydantic import BaseModel
+
+from fastmcp import FastMCP
+from fastmcp.dependencies import Depends
+from fastmcp.elicitation import Elicit
+
+mcp = FastMCP("Booking Server")
+
+
+class Profile(BaseModel):
+    home_airport: str | None = None
+
+
+def current_profile() -> Profile:
+    return Profile(home_airport="LHR")
+
+
+def which_airport(destination: str, profile: Profile = Depends(current_profile)) -> str | Elicit[str]:
+    if profile.home_airport:
+        return profile.home_airport
+    return Elicit(f"Which airport in {destination}?", elicit_type=str)
+
+
+@mcp.tool
+async def book_flight(
+    destination: str,
+    airport: Annotated[str, Elicit(which_airport)],
+) -> str:
+    return f"Booked {destination} from {airport}"
+```
+
+A returning traveller is never asked and never pays a round trip; a new one gets the question. The tool body is identical either way, and so is the annotation — only the resolver knows the difference.
+
+State the type with `elicit_type` when you build an `Elicit` inside a resolver. The parameter's annotation is two functions away at that point, and repeating it locally is worth more than the brevity of leaving it out. When a resolver also declares it — `-> str | Elicit[str]` — FastMCP checks the two agree at registration.
 
 Because a question can quote a tool argument, it can also quote something the model supplied — which is exactly what you want for `f"Which airport in {destination}?"`, and a good reason to treat the wording as untrusted display text rather than as an instruction to the user.
 
@@ -106,8 +148,8 @@ from fastmcp.elicitation import Elicit
 mcp = FastMCP("Booking Server")
 
 
-def confirm(destination: str, date: str) -> str:
-    return f"Book a flight to {destination} on {date}?"
+def confirm(destination: str, date: str) -> Elicit[bool]:
+    return Elicit(f"Book a flight to {destination} on {date}?", elicit_type=bool)
 
 
 @mcp.tool
@@ -178,9 +220,9 @@ def search_flights(destination: str, date: str) -> list[str]:
     return [f"AF{number} to {destination} on {date}" for number in (100, 200)]
 
 
-def which_flight(destination: str, date: str) -> str:
+def which_flight(destination: str, date: str) -> Elicit[str]:
     options = search_flights(destination, date)
-    return f"Which flight? {', '.join(options)}"
+    return Elicit(f"Which flight? {', '.join(options)}", elicit_type=str)
 
 
 @mcp.tool
@@ -710,7 +752,7 @@ connection negotiated '2025-11-25'. Use ctx.elicit() for server-initiated input
 on handshake-era connections.
 ```
 
-To support both eras from one tool, [declare the parameter](#declared-parameters) and let FastMCP pick the mechanism. Driving the exchange by hand means writing both paths and branching on `ctx.protocol_version`: return an `InputRequiredResult` on modern connections and fall back to [`ctx.elicit()`](#requesting-input-on-handshake-connections) on handshake-era ones.
+To support both eras from one tool, [declare the parameter](#declared-parameters) and let FastMCP pick the mechanism. Driving the exchange by hand means writing both paths and branching on `ctx.request_context.protocol_version`: return an `InputRequiredResult` on modern connections and fall back to [`ctx.elicit()`](#requesting-input-on-handshake-connections) on handshake-era ones.
 
 ### Prompts and resources
 
