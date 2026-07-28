@@ -73,7 +73,7 @@ Rewriting a name in place would destroy the identity for the next layer up, so t
 
 The result is that a renderer receives names that exist in the listing the host is looking at. Under three layers of namespacing the button calls `c_b_a_save`; behind a gateway it calls whatever the gateway lists. No intermediary has to understand a FastMCP-specific convention.
 
-A reference this server cannot resolve is left alone rather than corrupted, so a server that does not recognize a tool degrades to the identity-addressed form instead of emitting a broken name.
+A reference this server cannot resolve is left alone rather than corrupted. This is what keeps apps working behind [tool search](/servers/transforms/tool-search) and code mode, which replace `tools/list` with a handful of synthetic tools: there is no better name to bind to, so the reference stays identity-addressed and the fallback below carries it.
 
 ### The hashed lookup fallback
 

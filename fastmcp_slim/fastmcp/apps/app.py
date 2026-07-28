@@ -54,16 +54,20 @@ F = TypeVar("F", bound=Callable[..., Any])
 
 
 def _make_resolver(app_name: str | None = None) -> Any:
-    """Create a CallTool resolver that prefixes tool names with a hash.
+    """Create a CallTool resolver that addresses peer tools by identity.
 
-    Structurally identical to the old ``___`` resolver — ``app_name`` is
-    the FastMCPApp's name, known at serialization time from the tool's
-    ``meta["fastmcp"]["app"]`` tag. The only change is the wire format:
-    ``<hash>_<local_name>`` instead of ``<app_name>___<local_name>``.
+    ``app_name`` is the FastMCPApp's name, known at serialization time from
+    the tool's ``meta["fastmcp"]["app"]`` tag. Serialization happens deep
+    inside whatever composition the server has, so nothing here can know
+    what these tools will be *called* by the time the payload reaches a
+    host. References therefore start out identity-addressed, as
+    ``<hash>_<local_name>``.
 
-    The dispatcher recognizes the hashed form and routes it via
-    ``get_tool_by_hash`` which walks the provider tree recursively —
-    same pattern as ``get_app_tool``.
+    Each FastMCP server rewrites those references on the way out to the
+    name it lists that tool under, so what a renderer finally receives is
+    an ordinary tool name (see ``server.providers.prefab_payload``). A
+    reference no server could resolve keeps this form, which the dispatcher
+    still routes via ``get_tool_by_hash``.
     """
     from fastmcp.server.providers.addressing import (
         hashed_backend_name,
