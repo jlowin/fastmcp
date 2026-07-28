@@ -5,7 +5,7 @@ description: What changes when you upgrade to FastMCP 4, which builds on the MCP
 icon: up
 ---
 
-FastMCP 4 builds on the MCP Python SDK v2, and that is the source of every change in this guide. The SDK v2 makes two sweeping changes to the protocol layer: it splits the protocol types out of `mcp.types` into a standalone `mcp_types` package, and it renames every protocol field from camelCase to snake_case (`inputSchema` → `input_schema`, `mimeType` → `mime_type`, `isError` → `is_error`, and so on).
+FastMCP 4 builds on the MCP Python SDK v2, and that is the source of every change in this guide. The SDK v2 makes two sweeping changes to the protocol layer: it moves the protocol types into a standalone `mcp_types` package (still importable as `mcp.types`), and it renames every protocol field from camelCase to snake_case (`inputSchema` → `input_schema`, `mimeType` → `mime_type`, `isError` → `is_error`, and so on).
 
 FastMCP 4 absorbs almost all of this for you. Field access is bridged so your existing reads keep working, and the imports you were taught have a stable home in FastMCP itself. The sections below describe what FastMCP handles for you, the small number of changes you must make in your own code, and the deprecation timeline for the compatibility shims.
 
@@ -61,13 +61,15 @@ fastmcp.settings.mcp_camelcase_compat = False
 
 See [Settings](/more/settings) for the full reference.
 
-### Protocol types moved to `mcp_types`
+### Protocol types keep their import path
 
-The `mcp.types` module no longer exists. Every protocol type — `TextContent`, `ImageContent`, `Tool`, `ErrorData`, `Icon`, `PromptMessage`, `SamplingMessage`, `ToolAnnotations`, notification and request wrapper types like `ToolListChangedNotification`, and everything else — now lives in the standalone `mcp_types` package. Update your imports to point there:
+Every protocol type — `TextContent`, `ImageContent`, `Tool`, `ErrorData`, `Icon`, `PromptMessage`, `SamplingMessage`, `ToolAnnotations`, notification and request wrapper types like `ToolListChangedNotification`, and everything else — now lives in a standalone `mcp_types` package. The SDK re-exports that package as `mcp.types`, so existing imports keep working and stay the preferred spelling:
 
 ```python
-from mcp_types import TextContent, Tool, ToolAnnotations
+from mcp.types import TextContent, Tool, ToolAnnotations
 ```
+
+Both names resolve to the same objects, so `from mcp_types import X` is equally valid — useful if you depend on the types without the rest of the SDK. What did change is the fields on those types: they are snake_case now (`input_schema`, not `inputSchema`), which the [compatibility bridge](#legacy-camelcase-field-access-keeps-working) covers for the objects FastMCP hands you.
 
 `fastmcp.types` still exists, but holds only types FastMCP defines itself (currently just `Textarea`, used to render a multiline textarea in form-based UIs) — it does not re-export protocol types.
 
@@ -94,15 +96,7 @@ A few client behaviors that touch the SDK are preserved so you don't have to cha
 
 ## What you must change
 
-Everything above, FastMCP handled for you. What remains lives in your own code, where FastMCP can't reach it — your imports, how you construct errors, the custom HTTP clients you hand to a transport, and any place you reach past FastMCP's surfaces into the raw SDK objects. Each surfaces as a clear failure at import or call time, and each is a mechanical fix.
-
-**Your own `mcp.types` imports.** FastMCP can re-export types, but it can't rewrite imports in your code. Any `from mcp.types import X` or `import mcp.types` in your server or client fails at import time with:
-
-```
-ModuleNotFoundError: No module named 'mcp.types'
-```
-
-The raw message gives no hint toward the fix, so if you see it after upgrading, this is why. Switch to `from mcp_types import X`.
+Everything above, FastMCP handled for you. What remains lives in your own code, where FastMCP can't reach it — how you construct errors, the custom HTTP clients you hand to a transport, and any place you reach past FastMCP's surfaces into the raw SDK objects. Each surfaces as a clear failure at import or call time, and each is a mechanical fix.
 
 **`McpError` construction.** The v1 pattern of wrapping an `ErrorData` and passing it positionally fails under SDK v2 with:
 
@@ -290,7 +284,7 @@ The client side is unaffected. `sampling_handler=` and `roots=` mean what they a
 Most servers upgrade untouched. Work down this list to find the ones that don't:
 
 1. **Bump your environment.** Raise any pin below `pydantic>=2.12`; upgrade FastAPI if your resolver complains about Starlette `<1.0.1`.
-2. **Fix imports that moved out.** Replace `from mcp.types import X` with `from mcp_types import X`, and update any import from the [removed modules](#moved-imports) (`fastmcp.server.proxy`, `fastmcp.server.openapi`, `fastmcp.server.apps`, the `fastmcp.tools.tool` / `resources.resource` / `prompts.prompt` component shims).
+2. **Fix imports that moved out.** `from mcp.types import X` still works, but update any import from the [removed modules](#moved-imports) (`fastmcp.server.proxy`, `fastmcp.server.openapi`, `fastmcp.server.apps`, the `fastmcp.tools.tool` / `resources.resource` / `prompts.prompt` component shims).
 3. **Update removed server APIs.** Swap `as_proxy` → `create_proxy`, `import_server` → `mount`, `mount(prefix=)` → `mount(namespace=)`, and the [other removed methods and keywords](#removed-server-methods-and-mount-keywords).
 4. **Replace `ctx.sample` and `ctx.list_roots`.** Both are gone from `Context`, as are `FastMCP(sampling_handler=...)` and `sampling_handler_behavior=`. Call an LLM directly from your server for generation; ask for roots through the guard pattern, or take file paths as tool arguments. A server whose purpose is to use the caller's model should stay on FastMCP 3.x rather than migrate.
 5. **Update removed tool parameters.** Replace tool `serializer=` (return a `ToolResult`), `exclude_args=` (use `Depends()`), and `StreamableHttpTransport(sse_read_timeout=)`.

@@ -51,7 +51,7 @@ Also: if prompts return raw dicts like `{"role": "user", "content": "..."}`, the
 The MCP SDK's FastMCP 1.0 silently coerced dicts; standalone FastMCP requires typed returns.
 
 STEP 4 — OTHER MCP IMPORTS (only if importing from mcp.* directly):
-FastMCP now builds on MCP SDK v2, which removed the `mcp.types` module — protocol types live in the standalone `mcp_types` package. Update any `from mcp.types import X` to `from mcp_types import X`. Prefer FastMCP's own APIs where equivalents exist:
+FastMCP now builds on MCP SDK v2, which moved the protocol types into a standalone `mcp_types` package and re-exports it as `mcp.types`, so `from mcp.types import X` keeps working. Prefer FastMCP's own APIs where equivalents exist:
 - mcp_types.TextContent for tool returns → just return plain Python values (str, int, dict, etc.)
 - mcp_types.ImageContent → fastmcp.utilities.types.Image
 - from mcp.server.stdio import stdio_server → not needed, mcp.run() handles transport
@@ -113,7 +113,7 @@ def debug(error: str) -> list[Message]:
 
 ### Other `mcp.*` Imports
 
-FastMCP now builds on MCP SDK v2. The `mcp.types` module no longer exists — protocol types moved to a standalone `mcp_types` package, and the field names were renamed from camelCase to snake_case (`inputSchema` → `input_schema`, `mimeType` → `mime_type`, and so on). Update `from mcp.types import X` to `from mcp_types import X`. For the full picture, see [Upgrading from FastMCP 3](/getting-started/upgrading/from-fastmcp-3).
+FastMCP now builds on MCP SDK v2. The protocol types moved to a standalone `mcp_types` package, which the SDK re-exports as `mcp.types` — so `from mcp.types import X` keeps working. The field names did change, from camelCase to snake_case (`inputSchema` → `input_schema`, `mimeType` → `mime_type`, and so on). For the full picture, see [Upgrading from FastMCP 3](/getting-started/upgrading/from-fastmcp-3).
 
 Where FastMCP provides its own API for the same thing, it's worth switching over:
 
