@@ -548,6 +548,127 @@ class TestConditionalResolvers:
                 return airport
 
 
+def accepted(**values) -> mcp_types.InputResponses:
+    """The `input_responses` map for one leg: an accepted answer per key."""
+    return {
+        key: mcp_types.ElicitResult(action="accept", content={"value": value})
+        for key, value in values.items()
+    }
+
+
+def questions(result) -> dict[str, str]:
+    """The message shown for each key on one leg of a call."""
+    leg = result.input_required
+    assert leg is not None, "expected an ask, got a terminal result"
+    assert leg.input_requests is not None
+    asked: dict[str, str] = {}
+    for key, request in leg.input_requests.items():
+        assert isinstance(request, mcp_types.ElicitRequest)
+        assert request.params is not None
+        asked[key] = request.params.message
+    return asked
+
+
+def carried(result) -> str | None:
+    """The opaque state to hand back on the next leg."""
+    assert result.input_required is not None
+    return result.input_required.request_state
+
+
+class TestDrivingLegsByHand:
+    """`allow_input_required=True` hands back each leg instead of resolving it,
+    so a test can assert on the wire shape a client would actually receive."""
+
+    async def test_each_leg_is_visible(self):
+        mcp = FastMCP("x")
+
+        def which_airport(destination: str) -> Elicit[str]:
+            return Elicit(f"Which airport in {destination}?", response_type=str)
+
+        @mcp.tool
+        async def book(
+            destination: Annotated[str, Elicit("Where would you like to fly?")],
+            airport: Annotated[str, Elicit(which_airport)],
+        ) -> str:
+            return f"Booked {destination}/{airport}"
+
+        # No elicitation_handler — nothing drives the exchange but this test.
+        async with Client(mcp) as client:
+            first = await client.call_tool("book", allow_input_required=True)
+            assert questions(first) == {"destination": "Where would you like to fly?"}
+
+            second = await client.call_tool(
+                "book",
+                input_responses=accepted(destination="Paris"),
+                request_state=carried(first),
+                allow_input_required=True,
+            )
+            # Only the airport — the destination is not asked again.
+            assert questions(second) == {"airport": "Which airport in Paris?"}
+
+            final = await client.call_tool(
+                "book",
+                input_responses=accepted(airport="CDG"),
+                request_state=carried(second),
+                allow_input_required=True,
+            )
+
+        assert final.input_required is None
+        assert final.data == "Booked Paris/CDG"
+
+    async def test_independent_questions_arrive_in_one_leg(self):
+        mcp = FastMCP("x")
+
+        @mcp.tool
+        async def book(
+            destination: Annotated[str, Elicit("Where to?")],
+            date: Annotated[str, Elicit("When?")],
+        ) -> str:
+            return f"{destination} on {date}"
+
+        async with Client(mcp) as client:
+            first = await client.call_tool("book", allow_input_required=True)
+            assert questions(first) == {
+                "destination": "Where to?",
+                "date": "When?",
+            }
+
+            final = await client.call_tool(
+                "book",
+                input_responses=accepted(destination="Paris", date="2026-08-01"),
+                request_state=carried(first),
+                allow_input_required=True,
+            )
+
+        assert final.data == "Paris on 2026-08-01"
+
+    async def test_a_resolver_that_knows_asks_nothing(self):
+        mcp = FastMCP("x")
+
+        def which_airport(destination: str) -> str | Elicit[str]:
+            return (
+                "LHR"
+                if destination == "London"
+                else Elicit("Which?", response_type=str)
+            )
+
+        @mcp.tool
+        async def book(
+            destination: str,
+            airport: Annotated[str, Elicit(which_airport)],
+        ) -> str:
+            return f"{destination}/{airport}"
+
+        async with Client(mcp) as client:
+            result = await client.call_tool(
+                "book", {"destination": "London"}, allow_input_required=True
+            )
+
+        # Terminal on the first leg — there was never anything to ask.
+        assert result.input_required is None
+        assert result.data == "London/LHR"
+
+
 class TestAskedOnce:
     """An answer already given satisfies its question on later rounds."""
 
