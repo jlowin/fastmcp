@@ -43,10 +43,19 @@ import hashlib
 import inspect
 import json
 import typing
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from types import UnionType
-from typing import TYPE_CHECKING, Annotated, Any, Literal, get_args, get_origin
+from typing import (
+    TYPE_CHECKING,
+    Annotated,
+    Any,
+    Generic,
+    Literal,
+    TypeVar,
+    get_args,
+    get_origin,
+)
 
 import mcp_types
 from pydantic import BaseModel, ValidationError
@@ -74,28 +83,55 @@ __all__ = [
 
 logger = get_logger(__name__)
 
+T = TypeVar("T")
+
 #: Bumped when the shape of the `request_state` payload changes. A payload from
 #: another version is treated as "no progress yet" — during a rolling upgrade an
 #: in-flight call re-asks rather than misreading an older layout.
 _STATE_VERSION = 1
 
 
-class Elicit:
-    """Marker for `Annotated[T, Elicit(...)]`: fill this parameter by asking the client.
+class Elicit(Generic[T]):
+    """A request for the user to supply a value.
 
-    The annotated type is the schema for the answer, so scalars, `Literal`s,
-    enums, and models all work exactly as they do with `ctx.elicit()`.
+    Used in two positions, meaning the same thing in both.
+
+    As parameter metadata it says the parameter is filled by asking rather than
+    by the model, and the annotated type is the schema for the answer — scalars,
+    `Literal`s, enums, dataclasses, and models all behave as they do with
+    `ctx.elicit()`:
+
+    ```python
+    destination: Annotated[str, Elicit("Where would you like to fly?")]
+    ```
+
+    Returned from a resolver it is the question that resolver decided to ask.
+    A resolver returns `T | Elicit[T]`, so returning a value instead skips the
+    question entirely:
+
+    ```python
+    def which_airport(destination: str, profile: Profile = Depends(get_profile)) -> Airport | Elicit[Airport]:
+        if profile.home_airport:
+            return profile.home_airport
+        return Elicit(f"Which airport in {destination}?", elicit_type=Airport)
+
+
+    airport: Annotated[Airport, Elicit(which_airport)]
+    ```
 
     A parameter with a default is optional: declining or cancelling leaves the
     default in place and the call proceeds. A parameter without one is required,
     and declining it fails the call.
 
     Args:
-        message: The question to show the user. Pass a callable (sync or
-            async) to build the question from values that are already known — its
-            parameters are filled by name from the tool's own arguments or from
-            other elicited parameters, which also orders the asks. A callable may
-            declare its own `Depends(...)` parameters, which resolve normally.
+        question: The text to show the user, or a resolver that decides. A
+            resolver's parameters are filled by name from the call's own
+            arguments and from other elicited parameters, which is also what
+            orders the asks; it may declare its own `Depends(...)` parameters,
+            and it may be sync or async.
+        elicit_type: The type to ask for. State it when constructing an `Elicit`
+            inside a resolver, where the parameter's annotation is not in view.
+            Omitted, the parameter's own annotation is used.
         title: Optional label for the wrapped `value` field, for the scalar and
             shorthand forms. Same scope rules as `ctx.elicit()`.
         description: Optional description for the wrapped `value` field.
@@ -103,12 +139,14 @@ class Elicit:
 
     def __init__(
         self,
-        message: str | Callable[..., str | Awaitable[str]],
+        question: str | Callable[..., Any],
         *,
+        elicit_type: Any = None,
         title: str | None = None,
         description: str | None = None,
     ) -> None:
-        self.message = message
+        self.question = question
+        self.elicit_type = elicit_type
         self.title = title
         self.description = description
 
@@ -144,42 +182,73 @@ class ElicitParam:
     #: elicited parameters, or both. Empty for a plain string question.
     depends_on: tuple[str, ...]
 
-    async def render(self, values: Mapping[str, Any]) -> str:
-        """Build the question text from already-known values.
+    async def resolve(self, values: Mapping[str, Any]) -> Any:
+        """Decide what this parameter needs: a value, or a question to ask.
 
-        A question callable may also declare its own `Depends(...)` parameters,
-        which resolve the ordinary way — that is how a question and the tool body
-        share one piece of derived data.
+        Returns an `Elicit` when the user has to be asked, and anything else as
+        the resolved value. A literal-question marker always returns itself; a
+        resolver decides, and may skip the ask by returning a value.
+
+        A resolver may also declare its own `Depends(...)` parameters, which
+        resolve the ordinary way.
         """
-        if isinstance(self.marker.message, str):
-            return self.marker.message
+        if isinstance(self.marker.question, str):
+            return self.marker
         bound = {name: values[name] for name in self.depends_on}
-        async with resolved_dependencies(self.marker.message, bound) as injected:
+        async with resolved_dependencies(self.marker.question, bound) as injected:
             for param_name, value in injected.items():
                 # The DI engine reports a dependency it could not build as a
                 # sentinel rather than raising, which would otherwise reach the
-                # question as a nonsense value. The common cause is a dependency
+                # resolver as a nonsense value. The common cause is a dependency
                 # that wants one of the call's arguments by name, which the
                 # engine cannot supply.
                 if isinstance(value, FailedDependency):
                     raise ToolError(
-                        f"The question for {self.name!r} depends on {param_name!r}, "
+                        f"The resolver for {self.name!r} depends on {param_name!r}, "
                         "which could not be resolved"
                     ) from value.error
-            rendered = self.marker.message(**bound, **injected)
-            return rendered if isinstance(rendered, str) else await rendered
+            outcome = self.marker.question(**bound, **injected)
+            return await outcome if inspect.isawaitable(outcome) else outcome
 
-    def config(self) -> ElicitConfig:
-        """Schema and response handling for this parameter's answer."""
+    def elicit_type(self, request: Elicit[Any]) -> Any:
+        """The type one question asks for.
+
+        Taken from the `Elicit` when it states one — a resolver naming
+        `elicit_type` where the parameter's annotation is out of view — and from
+        the parameter's own annotation otherwise.
+        """
+        if request.elicit_type is not None:
+            return request.elicit_type
+        return self.response_type
+
+    def config(self, request: Elicit[Any]) -> ElicitConfig:
+        """Schema and response handling for one question's answer."""
         return parse_elicit_response_type(
-            self.response_type,
-            response_title=self.marker.title,
-            response_description=self.marker.description,
+            self.elicit_type(request),
+            response_title=request.title,
+            response_description=request.description,
         )
+
+
+def _unwrap_optional(annotation: Any) -> Any:
+    """Strip a `None` arm wrapped around an `Annotated`.
+
+    Python 3.10's `get_type_hints` still applies implicit-Optional, so a
+    parameter defaulting to `None` comes back as `Optional[Annotated[...]]`
+    rather than the `Annotated[...]` that 3.11+ reports. Both spellings mean the
+    same optional parameter, so both resolve to the inner annotation.
+    """
+    if get_origin(annotation) not in (typing.Union, UnionType):
+        return annotation
+    arms = [arm for arm in get_args(annotation) if arm is not type(None)]
+    if len(arms) == 1 and get_origin(arms[0]) is Annotated:
+        return arms[0]
+    return annotation
 
 
 def _elicit_marker(annotation: Any) -> Elicit | None:
     """The `Elicit` marker in an `Annotated[...]`, if there is one."""
+    annotation = _unwrap_optional(annotation)
     if get_origin(annotation) is not Annotated:
         return None
     return next((m for m in get_args(annotation)[1:] if isinstance(m, Elicit)), None)
@@ -200,7 +269,7 @@ def _response_type(annotation: Any) -> Any:
     `None` is what a decline leaves behind. Any other metadata in the
     `Annotated` is preserved so `Field(...)` constraints still shape the schema.
     """
-    type_arg = get_args(annotation)[0]
+    type_arg = get_args(_unwrap_optional(annotation))[0]
     if get_origin(type_arg) in (typing.Union, UnionType):
         arms = [a for a in get_args(type_arg) if a is not type(None)]
         if len(arms) == 1:
@@ -262,6 +331,7 @@ def find_elicit_parameters(fn: Callable[..., Any]) -> dict[str, ElicitParam]:
 
     available = set(signature.parameters)
     for spec in found.values():
+        _check_declared_type(spec, _fn_name(fn))
         for dependency in spec.depends_on:
             if dependency not in available:
                 raise TypeError(
@@ -273,25 +343,73 @@ def find_elicit_parameters(fn: Callable[..., Any]) -> dict[str, ElicitParam]:
     return _in_resolution_order(found, _fn_name(fn))
 
 
+def _declared_elicit_type(fn: Callable[..., Any]) -> Any | None:
+    """The `T` a resolver declares in an `Elicit[T]` return arm, if it declares one.
+
+    A resolver annotated `-> Airport | Elicit[Airport]` states the type it asks
+    for at its own definition, which is the type the parameter must accept.
+    Returns `None` when the resolver says nothing usable — an unannotated
+    resolver, or a bare `Elicit` with no parameter.
+    """
+    try:
+        hints = typing.get_type_hints(fn, include_extras=True)
+    except (NameError, TypeError):
+        return None
+    returns = hints.get("return")
+    if returns is None:
+        return None
+    arms = (
+        get_args(returns)
+        if get_origin(returns) in (typing.Union, UnionType)
+        else (returns,)
+    )
+    for arm in arms:
+        if get_origin(arm) is Elicit:
+            args = get_args(arm)
+            return args[0] if args else None
+    return None
+
+
+def _check_declared_type(spec: ElicitParam, fn_name: str) -> None:
+    """Reject a resolver whose declared `Elicit[T]` contradicts its parameter.
+
+    Both are visible at registration, so a disagreement is caught at import
+    rather than surfacing as a validation failure on the answer.
+
+    Raises:
+        TypeError: If the two types disagree.
+    """
+    if isinstance(spec.marker.question, str):
+        return
+    declared = _declared_elicit_type(spec.marker.question)
+    if declared is None or declared == spec.response_type:
+        return
+    raise TypeError(
+        f"The resolver for parameter {spec.name!r} of {fn_name!r} declares it "
+        f"elicits {declared!r}, but the parameter is annotated "
+        f"{spec.response_type!r}. Make the two agree."
+    )
+
+
 def _question_parameters(
     marker: Elicit, name: str, fn: Callable[..., Any]
 ) -> tuple[str, ...]:
-    """Names a callable question needs filled by name; empty for a literal string.
+    """Names a resolver needs filled by name; empty for a literal question.
 
-    A question's own `Depends(...)` parameters are left out: those are resolved
-    by the DI engine when the question is rendered, not matched against the
-    call's arguments.
+    A resolver's own `Depends(...)` parameters are left out: those are resolved
+    by the DI engine when the resolver runs, not matched against the call's
+    arguments.
     """
-    if isinstance(marker.message, str):
+    if isinstance(marker.question, str):
         return ()
     try:
-        question_signature = inspect.signature(marker.message)
+        question_signature = inspect.signature(marker.question)
     except (TypeError, ValueError) as e:
         raise TypeError(
             f"The question for parameter {name!r} of {_fn_name(fn)!r} is a callable "
             "whose signature could not be read"
         ) from e
-    injected = get_dependency_parameters(marker.message)
+    injected = get_dependency_parameters(marker.question)
     return tuple(p for p in question_signature.parameters if p not in injected)
 
 
@@ -449,12 +567,16 @@ async def _resolve_in_process(
     """Handshake-era path: ask over the back-channel while the call is open."""
     resolved: dict[str, Any] = {}
     for spec in specs.values():
-        message = await spec.render({**arguments, **resolved})
+        request = await spec.resolve({**arguments, **resolved})
+        if not isinstance(request, Elicit):
+            # The resolver already knew the answer, so nobody is asked.
+            resolved[spec.name] = request
+            continue
         outcome = await context.elicit(
-            message,
-            response_type=spec.response_type,
-            response_title=spec.marker.title,
-            response_description=spec.marker.description,
+            _question_text(request, spec),
+            response_type=spec.elicit_type(request),
+            response_title=request.title,
+            response_description=request.description,
         )
         if outcome.action == "accept":
             resolved[spec.name] = outcome.data
@@ -467,6 +589,21 @@ async def _resolve_in_process(
                 "optional."
             )
     return resolved
+
+
+def _question_text(request: Elicit[Any], spec: ElicitParam) -> str:
+    """The text an `Elicit` shows the user.
+
+    Raises:
+        ToolError: If a resolver built an `Elicit` around another callable, which
+            has no meaning — a resolver has already decided what to ask.
+    """
+    if isinstance(request.question, str):
+        return request.question
+    raise ToolError(
+        f"The resolver for {spec.name!r} returned an Elicit wrapping a callable; "
+        "return Elicit(<the question text>) instead"
+    )
 
 
 async def _resolve_across_rounds(
@@ -495,9 +632,15 @@ async def _resolve_across_rounds(
             waiting.add(spec.name)
             continue
 
-        message = await spec.render({**arguments, **resolved})
-        config = spec.config()
-        request = _build_request(message, config)
+        decision = await spec.resolve({**arguments, **resolved})
+        if not isinstance(decision, Elicit):
+            # The resolver already knew the answer, so nothing is asked and
+            # nothing is carried forward — it decides again next round.
+            resolved[spec.name] = decision
+            continue
+
+        config = spec.config(decision)
+        request = _build_request(_question_text(decision, spec), config)
         question = _digest(request)
 
         answer = _recall(state, spec.name, question)

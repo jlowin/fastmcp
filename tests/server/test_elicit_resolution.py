@@ -182,8 +182,8 @@ class TestModernProtocol:
         recorder = RecordAsks()
         mcp.add_middleware(recorder)
 
-        def which_airport(destination: str) -> str:
-            return f"Which airport in {destination}?"
+        def which_airport(destination: str) -> Elicit[str]:
+            return Elicit(f"Which airport in {destination}?", elicit_type=str)
 
         @mcp.tool
         async def book(
@@ -203,8 +203,8 @@ class TestModernProtocol:
         asked: list[str] = []
         mcp = FastMCP("x")
 
-        def which_airport(destination: str) -> str:
-            return f"Which airport in {destination}?"
+        def which_airport(destination: str) -> Elicit[str]:
+            return Elicit(f"Which airport in {destination}?", elicit_type=str)
 
         @mcp.tool
         async def book(
@@ -226,8 +226,8 @@ class TestModernProtocol:
         asked: list[str] = []
         mcp = FastMCP("x")
 
-        def which_airport(destination: str) -> str:
-            return f"Which airport in {destination}?"
+        def which_airport(destination: str) -> Elicit[str]:
+            return Elicit(f"Which airport in {destination}?", elicit_type=str)
 
         @mcp.tool
         async def book(
@@ -247,8 +247,8 @@ class TestModernProtocol:
         """An answer from round one is still there after round two asks again."""
         mcp = FastMCP("x")
 
-        def follow_up(first: str) -> str:
-            return f"After {first}, then?"
+        def follow_up(first: str) -> Elicit[str]:
+            return Elicit(f"After {first}, then?", elicit_type=str)
 
         @mcp.tool
         async def chain(
@@ -327,8 +327,8 @@ class TestHandshakeProtocol:
         asked: list[str] = []
         mcp = FastMCP("x")
 
-        def which_airport(destination: str) -> str:
-            return f"Which airport in {destination}?"
+        def which_airport(destination: str) -> Elicit[str]:
+            return Elicit(f"Which airport in {destination}?", elicit_type=str)
 
         @mcp.tool
         async def book(
@@ -423,6 +423,131 @@ class TestInterop:
         assert result.data == "x:Paris!"
 
 
+class Airport(BaseModel):
+    code: str
+
+
+class TestConditionalResolvers:
+    """A resolver returns `T | Elicit[T]` — a value means nobody is asked."""
+
+    async def test_returning_a_value_asks_nothing(self):
+        mcp = FastMCP("x")
+        recorder = RecordAsks()
+        mcp.add_middleware(recorder)
+
+        def which_airport(destination: str) -> str | Elicit[str]:
+            if destination == "London":
+                return "LHR"  # only one option — no question
+            return Elicit(f"Which airport in {destination}?", elicit_type=str)
+
+        @mcp.tool
+        async def book(
+            destination: str,
+            airport: Annotated[str, Elicit(which_airport)],
+        ) -> str:
+            return f"{destination}/{airport}"
+
+        async def never(message, response_type, params, ctx):
+            raise AssertionError(f"should not have asked: {message}")
+
+        async with Client(mcp, mode="auto", elicitation_handler=never) as client:
+            result = await client.call_tool("book", {"destination": "London"})
+
+        assert result.data == "London/LHR"
+        assert recorder.asks == 0
+
+    async def test_the_same_resolver_still_asks_when_it_must(self):
+        mcp = FastMCP("x")
+
+        def which_airport(destination: str) -> str | Elicit[str]:
+            if destination == "London":
+                return "LHR"
+            return Elicit(f"Which airport in {destination}?", elicit_type=str)
+
+        @mcp.tool
+        async def book(
+            destination: str,
+            airport: Annotated[str, Elicit(which_airport)],
+        ) -> str:
+            return f"{destination}/{airport}"
+
+        handler = accept_by_message({"Which airport": "CDG"})
+        async with Client(mcp, mode="auto", elicitation_handler=handler) as client:
+            result = await client.call_tool("book", {"destination": "Paris"})
+
+        assert result.data == "Paris/CDG"
+
+    async def test_resolver_beats_a_stale_answer_on_a_later_round(self):
+        """The resolver re-runs every round, so a value it computes on round two
+        wins over whatever the client echoed back."""
+        mcp = FastMCP("x")
+        known: list[str] = []
+
+        def which_airport(destination: str) -> str | Elicit[str]:
+            if known:
+                return known[0]  # learned between rounds
+            return Elicit(f"Which airport in {destination}?", elicit_type=str)
+
+        @mcp.tool
+        async def book(
+            destination: str,
+            date: Annotated[str, Elicit("When?")],
+            airport: Annotated[str, Elicit(which_airport)],
+        ) -> str:
+            return f"{destination}/{airport}/{date}"
+
+        async def handler(message, response_type, params, ctx):
+            if "Which airport" in message:
+                known.append("LHR")  # the profile gains one mid-conversation
+                return ElicitResult(action="accept", content=response_type(value="CDG"))
+            return ElicitResult(
+                action="accept", content=response_type(value="2026-08-01")
+            )
+
+        async with Client(mcp, mode="auto", elicitation_handler=handler) as client:
+            result = await client.call_tool("book", {"destination": "Paris"})
+
+        # The client answered "CDG", but by the next round the resolver knew "LHR".
+        assert result.data == "Paris/LHR/2026-08-01"
+
+    async def test_explicit_elicit_type_wins_over_the_annotation(self):
+        mcp = FastMCP("x")
+
+        def pick(destination: str) -> Airport | Elicit[Airport]:
+            return Elicit(f"Which airport in {destination}?", elicit_type=Airport)
+
+        @mcp.tool
+        async def book(
+            destination: str,
+            airport: Annotated[Airport, Elicit(pick)],
+        ) -> str:
+            return airport.code
+
+        async with Client(
+            mcp, mode="auto", elicitation_handler=accept(code="CDG")
+        ) as client:
+            result = await client.call_tool("book", {"destination": "Paris"})
+
+        assert result.data == "CDG"
+
+    def test_declared_type_must_match_the_parameter(self):
+        """Both types are visible at registration, so a disagreement is caught
+        at import rather than as a validation failure on the answer."""
+        mcp = FastMCP("x")
+
+        def pick(destination: str) -> Airport | Elicit[Airport]:
+            return Elicit("Which airport?", elicit_type=Airport)
+
+        with pytest.raises(TypeError, match="declares it elicits"):
+
+            @mcp.tool
+            async def book(
+                destination: str,
+                airport: Annotated[str, Elicit(pick)],
+            ) -> str:
+                return airport
+
+
 class TestOrdering:
     """Where and when a question is asked both fall out of the annotations."""
 
@@ -455,8 +580,10 @@ class TestOrdering:
         recorder = RecordAsks()
         mcp.add_middleware(recorder)
 
-        def confirm(destination: str, date: str) -> str:
-            return f"Book a flight to {destination} on {date}?"
+        def confirm(destination: str, date: str) -> Elicit[bool]:
+            return Elicit(
+                f"Book a flight to {destination} on {date}?", elicit_type=bool
+            )
 
         @mcp.tool
         async def book(
@@ -497,8 +624,8 @@ class TestQuestionDependencies:
         def house_prefix() -> str:
             return "[ACME]"
 
-        def styled(prefix: str = Depends(house_prefix)) -> str:
-            return f"{prefix} Window or aisle?"
+        def styled(prefix: str = Depends(house_prefix)) -> Elicit[str]:
+            return Elicit(f"{prefix} Window or aisle?")
 
         @mcp.tool
         async def seat(choice: Annotated[str, Elicit(styled)]) -> str:
@@ -515,8 +642,8 @@ class TestQuestionDependencies:
     async def test_async_question(self):
         mcp = FastMCP("x")
 
-        async def ask_later(destination: str) -> str:
-            return f"Which airport in {destination}?"
+        async def ask_later(destination: str) -> Elicit[str]:
+            return Elicit(f"Which airport in {destination}?")
 
         @mcp.tool
         async def book(
@@ -539,8 +666,8 @@ class TestQuestionDependencies:
         def needs_a_tool_argument(destination: str) -> str:
             return destination
 
-        def styled(place: str = Depends(needs_a_tool_argument)) -> str:
-            return f"Where in {place}?"
+        def styled(place: str = Depends(needs_a_tool_argument)) -> Elicit[str]:
+            return Elicit(f"Where in {place}?")
 
         @mcp.tool
         async def book(
@@ -636,8 +763,8 @@ class TestRegistrationErrors:
     def test_question_asks_for_an_unknown_name(self):
         mcp = FastMCP("x")
 
-        def question(nonexistent: str) -> str:
-            return nonexistent
+        def question(nonexistent: str) -> Elicit[str]:
+            return Elicit(nonexistent)
 
         with pytest.raises(TypeError, match="not a parameter of the function"):
 
@@ -650,11 +777,11 @@ class TestRegistrationErrors:
     def test_cyclic_questions(self):
         mcp = FastMCP("x")
 
-        def needs_b(b: str) -> str:
-            return b
+        def needs_b(b: str) -> Elicit[str]:
+            return Elicit(b)
 
-        def needs_a(a: str) -> str:
-            return a
+        def needs_a(a: str) -> Elicit[str]:
+            return Elicit(a)
 
         with pytest.raises(TypeError, match="form a cycle"):
 
@@ -679,13 +806,40 @@ class TestRegistrationErrors:
             ) -> str | mcp_types.InputRequiredResult:
                 return destination
 
-    def test_marker_buried_in_a_union(self):
+    def test_marker_buried_out_of_reach(self):
+        """A marker somewhere the framework cannot honour it fails loudly."""
         mcp = FastMCP("x")
 
         with pytest.raises(TypeError, match="wraps Elicit"):
 
             @mcp.tool
             async def book(
-                destination: Annotated[str, Elicit("Where?")] | None = None,
+                destinations: list[Annotated[str, Elicit("Where?")]],
             ) -> str:
-                return destination or ""
+                return ",".join(destinations)
+
+    @pytest.mark.parametrize(
+        "annotation",
+        [
+            Annotated[str | None, Elicit("Window or aisle?")],
+            Annotated[str, Elicit("Window or aisle?")] | None,
+        ],
+        ids=["none-inside", "none-outside"],
+    )
+    async def test_optional_spellings_are_equivalent(self, annotation):
+        """Python 3.10 applies implicit-Optional to a `= None` parameter, so the
+        two spellings are indistinguishable there and must behave alike."""
+        mcp = FastMCP("x")
+
+        @mcp.tool
+        async def book(seat: annotation = None) -> str:
+            return seat or "no preference"
+
+        tool = await mcp.get_tool("book")
+        assert tool is not None
+        assert tool.parameters.get("properties", {}) == {}
+
+        async with Client(mcp, mode="auto", elicitation_handler=refuse()) as client:
+            result = await client.call_tool("book", {})
+
+        assert result.data == "no preference"
