@@ -58,7 +58,7 @@ Take the paths you need as ordinary tool arguments. The agent already knows whic
 
 Because logging is a *notification* and sampling was a *request*. A notification is fire-and-forget: your server emits it down the response stream the caller already opened, and nothing has to be held open on the server's behalf. A request needs an answer to come back the other way, which requires a live connection the server can reach into.
 
-The modern protocol kept every server notification — `notifications/message`, `notifications/progress`, and the list-changed family — and removed the server-to-client request direction entirely. So `ctx.info()`, `ctx.debug()`, and `ctx.report_progress()` reach the client mid-call on every era, while sampling and roots have no era-agnostic form and were dropped. [Sampling](/servers/sampling#requests-and-notifications) works through the distinction in full.
+The modern protocol kept every server notification — `notifications/message`, `notifications/progress`, and the list-changed family — and removed the server-to-client request direction entirely. So `ctx.info()`, `ctx.debug()`, and `ctx.report_progress()` reach the client mid-call on every era, while sampling and roots have no era-agnostic form and were dropped. [Sampling](/servers/sampling#the-removed-methods) works through the distinction in full.
 
 You may see an `MCPDeprecationWarning` from the SDK about the logging capability being deprecated as of `2026-07-28`. It refers to the capability declaration, not to the notification, and delivery is unaffected.
 
