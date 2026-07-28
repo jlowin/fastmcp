@@ -214,9 +214,11 @@ class Provider:
         """Look up an app-visible tool by its deterministic hash.
 
         Same recursive-walk semantics as ``get_app_tool`` but matches on
-        ``meta["fastmcp"]["_tool_hash"]`` instead of the app name tag.
+        ``meta["fastmcp"]["tool_hash"]`` instead of the app name tag.
         Used by the dispatcher when receiving hashed backend-tool calls.
         """
+        from fastmcp.server.providers.addressing import TOOL_HASH_META_KEY
+
         tool = await self._get_tool(tool_name)
         if tool is not None:
             meta = tool.meta or {}
@@ -227,7 +229,7 @@ class Provider:
             )
             if (
                 isinstance(fastmcp_meta, dict)
-                and fastmcp_meta.get("_tool_hash") == tool_hash
+                and fastmcp_meta.get(TOOL_HASH_META_KEY) == tool_hash
                 and "app" in visibility
             ):
                 return tool
