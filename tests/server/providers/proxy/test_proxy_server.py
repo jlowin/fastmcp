@@ -35,6 +35,7 @@ from fastmcp.tools.tool_transform import (
 )
 from fastmcp.utilities.http import find_available_port
 from fastmcp.utilities.tests import run_server_async
+from tests.conftest import user_meta
 
 USERS = [
     {"id": "1", "name": "Alice", "active": True},
@@ -888,7 +889,12 @@ class TestPrompts:
             result = await client.get_prompt("welcome", {"name": "Alice"})
         async with Client(proxy_server) as client:
             proxy_result = await client.get_prompt("welcome", {"name": "Alice"})
-        assert proxy_result == result
+        # Each server stamps its own `serverInfo` into `_meta` (spec #3002), so
+        # the proxy's stamp naturally differs from the origin's. Compare the
+        # relayed payload.
+        assert proxy_result.model_copy(
+            update={"meta": user_meta(proxy_result.meta)}
+        ) == result.model_copy(update={"meta": user_meta(result.meta)})
 
     async def test_render_prompt_calls_prompt(self, proxy_server):
         async with Client(proxy_server) as client:
@@ -942,8 +948,11 @@ class TestPrompts:
         async with Client(proxy_server) as client:
             proxy_result = await client.get_prompt("image_prompt")
 
-        # The proxy result should match the original exactly
-        assert proxy_result == result
+        # The proxy relays the original payload; only the per-server
+        # `serverInfo` `_meta` stamp differs.
+        assert proxy_result.model_copy(
+            update={"meta": user_meta(proxy_result.meta)}
+        ) == result.model_copy(update={"meta": user_meta(result.meta)})
         # Verify the image content is preserved as ImageContent, not JSON text
         assert isinstance(proxy_result.messages[1].content, mcp_types.ImageContent)
         assert proxy_result.messages[1].content.data == "iVBORw0KGgoAAAANSUhEUg=="

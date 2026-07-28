@@ -31,7 +31,7 @@ from mcp_types import (
 from mcp_types.version import MODERN_PROTOCOL_VERSIONS
 from pydantic.networks import AnyUrl
 
-from fastmcp.client.client import Client, SDKServer
+from fastmcp.client.client import Client, SDKServer, _connection_failure
 from fastmcp.client.elicitation import ElicitResult, create_elicitation_callback
 from fastmcp.client.logging import LogMessage, create_log_callback
 from fastmcp.client.roots import RootsList, create_roots_callback
@@ -116,9 +116,17 @@ _PROXY_TRANSPORT_ERRORS: tuple[type[Exception], ...] = (
 
 
 def _proxy_upstream_error(error: Exception) -> MCPError:
+    """Report an unreachable backend the same way however the failure arrived.
+
+    Depending on where the dead connection is noticed, the proxy sees either
+    FastMCP's own `RuntimeError("Client failed to connect: ...")` or the raw
+    transport error underneath it. Both describe one thing — the proxy could
+    not reach its upstream — so both are presented identically rather than
+    leaking the race into the message the front client reads.
+    """
     return MCPError(
         code=mcp_types.INTERNAL_ERROR,
-        message=str(error),
+        message=str(_connection_failure(error)),
     )
 
 
@@ -1263,10 +1271,20 @@ class FastMCPProxy(FastMCP):
             try:
                 async with client:
                     result.instructions = client.session.instructions
-            except MCPError:
-                raise
-            except _PROXY_TRANSPORT_ERRORS as error:
-                raise _proxy_upstream_error(error) from error
+            except (MCPError, *_PROXY_TRANSPORT_ERRORS) as error:
+                # Instructions are optional metadata, so an unreachable backend
+                # must not fail negotiation itself. Failing here would surface
+                # as a confusing protocol error: the client's auto-negotiation
+                # reads any `server/discover` error as "not a modern server"
+                # and retries with the initialize handshake, which this
+                # modern-serving proxy then rejects — hiding the real cause.
+                # Answer without upstream instructions instead and let the
+                # backend failure surface on the first real operation, where
+                # the proxy reports it as an upstream connection error.
+                logger.debug(
+                    "Could not read upstream instructions for server/discover: %r",
+                    error,
+                )
             return result
 
         self._mcp_server.add_request_handler(

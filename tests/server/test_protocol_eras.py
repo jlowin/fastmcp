@@ -172,6 +172,7 @@ async def test_legacy_uses_initialize_handshake(dual_era_server):
     """
     async with SDKClient(_server(dual_era_server), mode="legacy") as client:
         assert client.protocol_version == "2025-11-25"
+        assert client.server_info is not None
         assert client.server_info.name == "dual-era"
 
 
@@ -182,14 +183,16 @@ async def test_auto_negotiates_modern_via_discover(dual_era_server):
     async with SDKClient(_server(dual_era_server), mode="auto") as client:
         assert client.protocol_version == "2026-07-28"
         # server/discover carries identity, unlike the synthesized pin below.
+        assert client.server_info is not None
         assert client.server_info.name == "dual-era"
         assert client.server_capabilities is not None
 
 
 async def test_pinned_modern_adopts_without_probe(dual_era_server):
     """Pinning `mode='2026-07-28'` adopts the version directly. With no
-    `prior_discover`, the SDK synthesizes a minimal DiscoverResult, so
-    server_info is empty even though the protocol version is modern.
+    `prior_discover`, the SDK synthesizes a minimal DiscoverResult that carries
+    no identity, so server_info is absent even though the protocol version is
+    modern.
 
     Characterization of the SDK's synthesize-discover path (mcp.client.client
     `_synthesize_discover`): a pin without prior_discover trades identity for
@@ -197,7 +200,7 @@ async def test_pinned_modern_adopts_without_probe(dual_era_server):
     """
     async with SDKClient(_server(dual_era_server), mode="2026-07-28") as client:
         assert client.protocol_version == "2026-07-28"
-        assert client.server_info.name == ""
+        assert client.server_info is None
 
 
 # ---------------------------------------------------------------------------

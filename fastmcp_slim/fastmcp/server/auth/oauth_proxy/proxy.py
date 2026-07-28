@@ -1170,7 +1170,7 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
         # Store transaction data for IdP callback processing
         if client.client_id is None:
             raise AuthorizeError(
-                error="invalid_client",  # type: ignore[arg-type]  # "invalid_client" is valid OAuth error but not in Literal type  # ty:ignore[invalid-argument-type]
+                error="invalid_client",  # type: ignore[arg-type]  # "invalid_client" is valid OAuth error but not in Literal type
                 error_description="Client ID is required",
             )
         # Clients may omit `scope` entirely, in which case OAuth lets the
@@ -1263,7 +1263,7 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
         # Create authorization code object with PKCE challenge
         if client.client_id is None:
             raise AuthorizeError(
-                error="invalid_client",  # type: ignore[arg-type]  # "invalid_client" is valid OAuth error but not in Literal type  # ty:ignore[invalid-argument-type]
+                error="invalid_client",  # type: ignore[arg-type]  # "invalid_client" is valid OAuth error but not in Literal type
                 error_description="Client ID is required",
             )
         return AuthorizationCode(
