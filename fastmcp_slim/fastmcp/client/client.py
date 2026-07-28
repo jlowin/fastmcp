@@ -232,6 +232,22 @@ class ClientSessionState:
     initialize_result: mcp_types.InitializeResult | None = None
 
 
+def _connection_failure(exception: BaseException) -> BaseException:
+    """Present a dead session the same way wherever it is noticed.
+
+    A failed session surfaces from two places: `_connect`, when the connection
+    never comes up, and `_await_with_session_monitoring`, when the session task
+    dies while a request is in flight. Which one wins is a matter of timing, so
+    both report the failure identically — otherwise the same dead backend
+    reaches callers as either a `RuntimeError` naming the connection or the raw
+    transport error, depending on the race. Types callers reasonably branch on
+    are passed through untouched.
+    """
+    if isinstance(exception, httpx2.HTTPStatusError | MCPError):
+        return exception
+    return RuntimeError(f"Client failed to connect: {exception}")
+
+
 @dataclass
 class CallToolResult:
     """Parsed result from a tool call."""
@@ -530,6 +546,14 @@ class Client(
             "sampling_callback": None,
             "list_roots_callback": None,
             "logging_callback": create_log_callback(log_handler),
+            # Log delivery is opt-in per request on the modern protocol: the
+            # session stamps this level into each request's `_meta`, and a
+            # server sends nothing without it. FastMCP's contract is that a
+            # client receives everything unless it narrows the level itself, so
+            # request the most permissive level and let the server's own
+            # `client_log_level` (and legacy `set_logging_level`) do the
+            # filtering. Inert on the handshake eras, which have no such opt-in.
+            "log_level": "debug",
             "message_handler": effective_message_handler,
             "read_timeout_seconds": read_timeout_seconds,
             "client_info": client_info,
@@ -982,18 +1006,23 @@ class Client(
 
                     raise
 
-                if self._session_state.session_task.done():
-                    exception = self._session_state.session_task.exception()
+                session_task = self._session_state.session_task
+                if not session_task.done() and self._session_state.session is None:
+                    # `_session_runner` sets `ready_event` from its `finally`,
+                    # so a failed connect can wake the wait above before the
+                    # task is marked done. No session means the connect failed,
+                    # so let the task settle and report the failure here rather
+                    # than letting the raw transport error escape on the next
+                    # request.
+                    await asyncio.wait([session_task], timeout=3)
+
+                if session_task.done():
+                    exception = session_task.exception()
                     if exception is None:
                         raise RuntimeError(
                             "Session task completed without exception but connection failed"
                         )
-                    # Preserve specific exception types that clients may want to handle
-                    if isinstance(exception, httpx2.HTTPStatusError | MCPError):
-                        raise exception
-                    raise RuntimeError(
-                        f"Client failed to connect: {exception}"
-                    ) from exception
+                    raise _connection_failure(exception) from exception
 
             self._session_state.nesting_counter += 1
 

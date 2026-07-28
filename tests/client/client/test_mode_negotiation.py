@@ -244,12 +244,11 @@ class TestNonConformantModernPeer:
 class TestPinnedMode:
     async def test_pinned_modern_adopts_without_probe(self, fastmcp_server):
         """Pinning the modern version adopts it directly; a synthesized
-        DiscoverResult leaves server_info empty."""
+        DiscoverResult carries no identity, so server_info is absent."""
         async with Client(fastmcp_server, mode=LATEST_MODERN_VERSION) as client:
             assert client.protocol_version == LATEST_MODERN_VERSION
             assert client.initialize_result is None
-            assert client.server_info is not None
-            assert client.server_info.name == ""
+            assert client.server_info is None
             assert client.instructions is None
 
     async def test_pinned_modern_call_tool(self, fastmcp_server):

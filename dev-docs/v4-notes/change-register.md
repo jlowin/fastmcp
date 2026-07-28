@@ -6,7 +6,7 @@ This is the complete register of user-facing changes from the MCP Python SDK v2 
 
 Each entry is tagged **Absorbed** (public surface unchanged), **Bridged** (shim keeps old code working, usually warning), **Breaking** (user code must change), or **Deprecated** (works, warns, slated for removal). See the [overview](index.md) for what each disposition means.
 
-**Empirical validation (WS2 upgrade reality-check).** The register's compatibility claims are verified, not predicted. Running unchanged 3.x-era code against this branch, all 11 upgrade scenarios pass or warn — the only failures are the two predicted breaks, user `mcp.types` imports and positional `McpError(ErrorData(...))` construction. Cross-version wire interop between a 3.4.3 peer and this branch is bidirectionally clean across 9 operations (3.4.3 client ↔ v4 server and v4 client ↔ 3.4.3 server over HTTP). All 29 `_ALIASES` bridge entries warn correctly with actionable messages.
+**Empirical validation (WS2 upgrade reality-check).** The register's compatibility claims are verified, not predicted. Running unchanged 3.x-era code against this branch, all 11 upgrade scenarios pass or warn — the only failures were the two predicted breaks, user `mcp.types` imports and positional `McpError(ErrorData(...))` construction — and the first of those went away when the stable SDK restored `mcp.types` (below). Cross-version wire interop between a 3.4.3 peer and this branch is bidirectionally clean across 9 operations (3.4.3 client ↔ v4 server and v4 client ↔ 3.4.3 server over HTTP). All 29 `_ALIASES` bridge entries warn correctly with actionable messages.
 
 ## Environment
 
@@ -18,13 +18,30 @@ The SDK v2 raises FastMCP's dependency floors. Projects pinning an older pydanti
 
 ## Types and imports
 
-The SDK v2 split protocol types into a standalone `mcp_types` package and renamed every field from camelCase to snake_case. This is the single largest source of user-facing change, and FastMCP absorbs nearly all of it.
+The SDK v2 moved protocol types into a standalone `mcp_types` package — still importable as `mcp.types` — and renamed every model field from camelCase to snake_case in Python. The wire format is unchanged: the models keep their camelCase aliases and the SDK serializes with `by_alias=True`, so this renames the attributes code reads, not the JSON on the connection. This is the single largest source of user-facing change, and FastMCP absorbs nearly all of it.
 
 ### `mcp.types` split into `mcp_types` — Breaking (by omission)
+
+<Note>
+Superseded by the stable SDK — see "`mcp.types` restored as a permanent alias" below. The betas this section was written against had no `mcp.types`; `2.0.0` brought it back, so the break never reached a release.
+</Note>
 
 The `mcp.types` module no longer exists. Any `from mcp.types import X` or `import mcp.types` in user code raises `ImportError`. This is the one import change users cannot avoid.
 
 *Verify:* `fastmcp_slim/fastmcp/types.py`, and grep the diff for the doc migration `from mcp.types import` → `from fastmcp.types import` (30 sites).
+
+### `mcp.types` restored as a permanent alias — Absorbed (stable-SDK change)
+
+The SDK betas removed `mcp.types` outright, which made user imports the one unavoidable break in the migration. SDK `2.0.0` reintroduced it as a permanent alias for `mcp_types`: a wildcard mirror where every name is the *same object* (`mcp.types.Tool is mcp_types.Tool`), with matching `__all__` and the same snake_case fields. It is not a v1 restoration — only the import path came back. So `from mcp.types import X` keeps working, and the break is gone.
+
+This leaves the two spellings pointing at one package, and FastMCP uses each in a different place on purpose:
+
+- **User-facing docs and examples use `mcp.types`.** Anyone installing `fastmcp` gets the full SDK (`fastmcp` → `fastmcp-slim[client,server]` → `[mcp]` → `mcp`), so the aliased path always resolves and is the spelling the SDK prefers. It also means a user's own dependency list needs only `mcp`, without naming `mcp-types` to satisfy a linter.
+- **FastMCP's own source uses `mcp_types`.** `mcp.types` is a submodule of `mcp`, so importing it requires the whole SDK. `mcp-types` is a *core* `fastmcp-slim` dependency while `mcp` sits behind the `[mcp]` extra, and a bare `fastmcp-slim` install must import without the SDK present — a guarantee `test_bare_slim_import_needs_only_mcp_types` pins. Reaching for `mcp.types` in core modules (`exceptions.py`, `_compat.py`, `tools/`, `resources/`) would pull the full SDK into the slim floor and break it.
+
+The rule of thumb: import `mcp_types` in library code, write `mcp.types` in anything a user copies. Both resolve to the same objects, so neither choice constrains the other.
+
+*Verify:* `.venv/.../mcp/types/__init__.py` (the wildcard mirror), `fastmcp_slim/pyproject.toml` (`mcp-types` core vs `mcp` in the `[mcp]` extra), `tests/client/test_slim_package_boundaries.py::test_bare_slim_import_needs_only_mcp_types`, and `tests/test_upgrade_from_v3.py::TestRemovedSurfacesFailLoudly::test_mcp_types_import_path_restored_by_stable_sdk`.
 
 ### `fastmcp.types` is the stable home — Bridged
 

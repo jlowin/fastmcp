@@ -100,9 +100,10 @@ uv pip install fastmcp
 For full installation instructions, including verification and upgrading, see the [**Installation Guide**](https://gofastmcp.com/getting-started/installation).
 
 **Upgrading?** We have guides for:
-- [Upgrading from FastMCP v2](https://gofastmcp.com/getting-started/upgrading/from-fastmcp-2)
-- [Upgrading from the MCP Python SDK](https://gofastmcp.com/getting-started/upgrading/from-mcp-sdk)
-- [Upgrading from the low-level SDK](https://gofastmcp.com/getting-started/upgrading/from-low-level-sdk)
+- [Upgrading from FastMCP 3](https://gofastmcp.com/getting-started/upgrading/from-fastmcp-3)
+- [Upgrading from FastMCP 2](https://gofastmcp.com/getting-started/upgrading/from-fastmcp-2)
+- [Upgrading from MCP SDK v1](https://gofastmcp.com/getting-started/upgrading/from-mcp-sdk-v1) or [v2](https://gofastmcp.com/getting-started/upgrading/from-mcp-sdk-v2)
+- [Upgrading from the low-level SDK v1](https://gofastmcp.com/getting-started/upgrading/from-low-level-sdk-v1) or [v2](https://gofastmcp.com/getting-started/upgrading/from-low-level-sdk-v2)
 
 ## 📚 Documentation
 

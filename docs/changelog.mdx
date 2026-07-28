@@ -64,11 +64,15 @@ FastMCP 4 rebuilds the framework on the MCP Python SDK v2, and this beta is the 
 * Add `valid_scopes` parameter to OIDC proxy valid scopes by [@Educg550](https://github.com/Educg550) in [#4660](https://github.com/PrefectHQ/fastmcp/pull/4660)
 * feat: Add telemetry interop mode for FastMCP by [@strawgate](https://github.com/strawgate) in [#4046](https://github.com/PrefectHQ/fastmcp/pull/4046)
 * Note that review comment threads should get an acknowledgement by [@jlowin](https://github.com/jlowin) in [#4678](https://github.com/PrefectHQ/fastmcp/pull/4678)
+* Soften the review-comment reply guidance by [@jlowin](https://github.com/jlowin) in [#4683](https://github.com/PrefectHQ/fastmcp/pull/4683)
+* Resolve review threads on fix, reply on decline by [@jlowin](https://github.com/jlowin) in [#4685](https://github.com/PrefectHQ/fastmcp/pull/4685)
+* Move to the stable MCP Python SDK 2.0.0 by [@jlowin](https://github.com/jlowin) in [#4655](https://github.com/PrefectHQ/fastmcp/pull/4655)
 ### Security 🔒
 * Drive the FastMCP lifespan through the SDK session manager by [@jlowin](https://github.com/jlowin) in [#4446](https://github.com/PrefectHQ/fastmcp/pull/4446)
 * Route skill file access through SDK path-security primitives by [@jlowin](https://github.com/jlowin) in [#4449](https://github.com/PrefectHQ/fastmcp/pull/4449)
 * Screen templated resource parameters for path traversal by default by [@jlowin](https://github.com/jlowin) in [#4482](https://github.com/PrefectHQ/fastmcp/pull/4482)
 * [codex] Add OAuthProxy RFC 9207 issuer responses by [@jlowin](https://github.com/jlowin) in [#4438](https://github.com/PrefectHQ/fastmcp/pull/4438)
+* Apply app visibility where no host can by [@jlowin](https://github.com/jlowin) in [#4692](https://github.com/PrefectHQ/fastmcp/pull/4692)
 ### Fixes 🐞
 * Capture SharedContext for task-enabled Docket servers by [@jlowin](https://github.com/jlowin) in [#4443](https://github.com/PrefectHQ/fastmcp/pull/4443)
 * Fix stale mcp.types imports in examples by [@jlowin](https://github.com/jlowin) in [#4452](https://github.com/PrefectHQ/fastmcp/pull/4452)
@@ -119,6 +123,7 @@ FastMCP 4 rebuilds the framework on the MCP Python SDK v2, and this beta is the 
 * Fix OpenAPI allOf reference fields by [@hxaxd](https://github.com/hxaxd) in [#4653](https://github.com/PrefectHQ/fastmcp/pull/4653)
 * Flatten OpenAPI discriminator subtypes into request bodies by [@jlowin](https://github.com/jlowin) in [#4677](https://github.com/PrefectHQ/fastmcp/pull/4677)
 * Let maintenance releases publish without fastmcp-tasks by [@jlowin](https://github.com/jlowin) in [#4676](https://github.com/PrefectHQ/fastmcp/pull/4676)
+* Read CLI-scanned MCP config files as UTF-8 explicitly by [@jlowin](https://github.com/jlowin) in [#4690](https://github.com/PrefectHQ/fastmcp/pull/4690)
 * Late-bind app tool names so UIs survive composition by [@jlowin](https://github.com/jlowin) in [#4682](https://github.com/PrefectHQ/fastmcp/pull/4682)
 ### Docs 📚
 * Docs: forward-port v3.4.4 changelog entries by [@jlowin](https://github.com/jlowin) in [#4476](https://github.com/PrefectHQ/fastmcp/pull/4476)
@@ -144,6 +149,7 @@ FastMCP 4 rebuilds the framework on the MCP Python SDK v2, and this beta is the 
 * Fix FAQ: sampling/roots/elicitation legacy-mode advice, SessionProvider registration by [@jlowin](https://github.com/jlowin) in [#4672](https://github.com/PrefectHQ/fastmcp/pull/4672)
 * Audit v4 docs: fix missing version badges, fill whats-new gaps by [@jlowin](https://github.com/jlowin) in [#4668](https://github.com/PrefectHQ/fastmcp/pull/4668)
 * Docs: add v3.4.5 changelog entries to main by [@jlowin](https://github.com/jlowin) in [#4674](https://github.com/PrefectHQ/fastmcp/pull/4674)
+* Split the SDK upgrade guides by SDK version by [@jlowin](https://github.com/jlowin) in [#4684](https://github.com/PrefectHQ/fastmcp/pull/4684)
 ### Dependencies 📦
 * chore(deps): bump mcp from 1.26.0 to 1.27.2 in /examples/testing_demo in the uv group across 1 directory by [@dependabot](https://github.com/apps/dependabot) in [#4514](https://github.com/PrefectHQ/fastmcp/pull/4514)
 * chore(deps): bump actions/setup-node from 6 to 7 by [@dependabot](https://github.com/apps/dependabot) in [#4546](https://github.com/PrefectHQ/fastmcp/pull/4546)

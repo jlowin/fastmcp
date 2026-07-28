@@ -358,10 +358,12 @@
                     "group": "Upgrading",
                     "icon": "up",
                     "pages": [
-                      "getting-started/upgrading/from-fastmcp-2",
                       "getting-started/upgrading/from-fastmcp-3",
-                      "getting-started/upgrading/from-mcp-sdk",
-                      "getting-started/upgrading/from-low-level-sdk"
+                      "getting-started/upgrading/from-fastmcp-2",
+                      "getting-started/upgrading/from-mcp-sdk-v1",
+                      "getting-started/upgrading/from-mcp-sdk-v2",
+                      "getting-started/upgrading/from-low-level-sdk-v1",
+                      "getting-started/upgrading/from-low-level-sdk-v2"
                     ]
                   },
                   {
@@ -509,12 +511,20 @@
       "source": "/development/upgrade-guide"
     },
     {
-      "destination": "/getting-started/upgrading/from-mcp-sdk",
+      "destination": "/getting-started/upgrading/from-mcp-sdk-v1",
       "source": "/getting-started/upgrading-from-sdk"
     },
     {
-      "destination": "/getting-started/upgrading/from-low-level-sdk",
+      "destination": "/getting-started/upgrading/from-mcp-sdk-v1",
+      "source": "/getting-started/upgrading/from-mcp-sdk"
+    },
+    {
+      "destination": "/getting-started/upgrading/from-low-level-sdk-v1",
       "source": "/getting-started/low-level-sdk"
+    },
+    {
+      "destination": "/getting-started/upgrading/from-low-level-sdk-v1",
+      "source": "/getting-started/upgrading/from-low-level-sdk"
     },
     {
       "destination": "/getting-started/upgrading/from-fastmcp-3",

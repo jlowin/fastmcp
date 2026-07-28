@@ -8,7 +8,7 @@ icon: circle-question
 
 Most servers run untouched. The defining change in FastMCP 4 is its engine — the MCP Python SDK v2 — and FastMCP absorbs nearly all of it for you, including the wire-wide rename from camelCase to snake_case, which is bridged so your existing reads keep working.
 
-Most of what does reach your code fails loudly at import or call time, and the fix is mechanical: your own `from mcp.types import X` becomes `from mcp_types import X`, `McpError(ErrorData(...))` becomes `McpError(code=..., message=...)`, custom `httpx` clients handed to a transport become `httpx2`, and `ctx.sample()` and `ctx.list_roots()` are gone.
+Most of what does reach your code fails loudly at import or call time, and the fix is mechanical: `McpError(ErrorData(...))` becomes `McpError(code=..., message=...)`, custom `httpx` clients handed to a transport become `httpx2`, and `ctx.sample()` and `ctx.list_roots()` are gone.
 
 One change is silent, so go looking for it: an `except httpx.ConnectError:` around a FastMCP call still imports and still type-checks, because `httpx` usually remains installed through some other dependency — but FastMCP now raises the `httpx2` exception, so the handler simply stops matching and your fallback quietly never runs. Grep for `except httpx.` and move those to `httpx2`. [Upgrading from FastMCP 3](/getting-started/upgrading/from-fastmcp-3) covers each one and ends with a checklist.
 

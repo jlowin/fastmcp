@@ -31,6 +31,7 @@ from abc import abstractmethod
 from collections.abc import Awaitable, Callable, Sequence
 from typing import Annotated, Any
 
+from fastmcp.exceptions import NotFoundError
 from fastmcp.server.context import Context
 from fastmcp.server.transforms import GetToolNext
 from fastmcp.server.transforms.catalog import CatalogTransform
@@ -240,6 +241,13 @@ class BaseSearchTransform(CatalogTransform):
                 raise ValueError(
                     f"'{name}' is a synthetic search tool and cannot be called via the call_tool proxy"
                 )
+            # The name comes from the model, so this proxy is a second way
+            # into the server that no host mediates. It may reach only what
+            # the model was allowed to discover.
+            if not any(
+                tool.name == name for tool in await transform.get_tool_catalog(ctx)
+            ):
+                raise NotFoundError(f"Unknown tool: {name!r}")
             return await ctx.fastmcp.call_tool(name, arguments)
 
         return Tool.from_function(fn=call_tool, name=self._call_tool_name)

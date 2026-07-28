@@ -68,13 +68,17 @@ See the [Upgrade Guide](/getting-started/upgrading/from-fastmcp-2) for a complet
 
 ### From the MCP SDK
 
-#### From FastMCP 1.0
+Which guide you want depends on which `mcp` version you're on and which of its two server APIs you used.
 
-If you're using FastMCP 1.0 via the `mcp` package (meaning you import FastMCP as  `from mcp.server.fastmcp import FastMCP`), upgrading is straightforward — for most servers, it's a single import change. See the [full upgrade guide](/getting-started/upgrading/from-mcp-sdk) for details.
+#### From the high-level server
 
-#### From the Low-Level Server API
+If you're using FastMCP 1.0 via SDK v1 (meaning you import FastMCP as `from mcp.server.fastmcp import FastMCP`), upgrading is straightforward — for most servers it's a single import change. See [Upgrading from MCP SDK v1](/getting-started/upgrading/from-mcp-sdk-v1), which also explains why that route is usually easier than moving to MCP SDK v2.
 
-If you built your server directly on the `mcp` package's `Server` class — with `list_tools()`/`call_tool()` handlers and hand-written JSON Schema — see the [migration guide](/getting-started/upgrading/from-low-level-sdk) for a full walkthrough.
+If you already moved to SDK v2 and write against `MCPServer`, see [Upgrading from MCP SDK v2](/getting-started/upgrading/from-mcp-sdk-v2) — that migration is mostly renaming.
+
+#### From the low-level server
+
+If you built your server directly on the `mcp` package's `Server` class, the guide you want depends on how its handlers are registered. Decorators like `@server.list_tools()` mean SDK v1 — see [Upgrading from the Low-Level SDK v1](/getting-started/upgrading/from-low-level-sdk-v1). Handlers passed to the constructor as `on_list_tools=` mean SDK v2 — see [Upgrading from the Low-Level SDK v2](/getting-started/upgrading/from-low-level-sdk-v2).
 
 ## Troubleshooting
 
