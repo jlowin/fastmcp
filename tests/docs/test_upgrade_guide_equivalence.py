@@ -46,20 +46,62 @@ def _block_containing(page: str, needle: str) -> dict[str, Any]:
     return namespace
 
 
-def _normalize(schema: dict[str, Any] | None) -> dict[str, Any]:
-    """Compare schemas by structure, ignoring generated titles.
+def _strip_titles(node: Any) -> Any:
+    """Recursively drop every "title" key, the one difference that's genuinely cosmetic.
 
-    FastMCP derives a schema from the function signature and names it after the
-    function; a hand-written schema has no title at all. That difference is
-    cosmetic — the properties and required list are the contract.
+    A hand-written SDK schema has no title anywhere; FastMCP derives one at every
+    level from the function/model it built the schema from. Everything else in the
+    tree — constraints, "additionalProperties", nested "anyOf"/"const", enum values —
+    is retained, because those describe what a client is allowed to send and a
+    silent difference there is exactly the kind of regression this test exists to
+    catch.
+    """
+    if isinstance(node, dict):
+        return {k: _strip_titles(v) for k, v in node.items() if k != "title"}
+    if isinstance(node, list):
+        return [_strip_titles(v) for v in node]
+    return node
+
+
+def _normalize(schema: dict[str, Any] | None) -> dict[str, Any]:
+    """Compare schemas by their full structure, modulo generated titles.
+
+    "required" is sorted because the SDK and FastMCP may build it in a different
+    parameter order for the same signature — an ordering difference, not a
+    contract difference.
     """
     if not schema:
         return {}
-    properties = {
-        name: {k: v for k, v in prop.items() if k != "title"}
-        for name, prop in schema.get("properties", {}).items()
-    }
-    return {"properties": properties, "required": sorted(schema.get("required", []))}
+    stripped = _strip_titles(schema)
+    if "required" in stripped:
+        stripped["required"] = sorted(stripped["required"])
+    return stripped
+
+
+def _reconcile_declared_strictness(
+    sdk_schema: dict[str, Any], fastmcp_schema: dict[str, Any]
+) -> dict[str, Any]:
+    """Allow exactly one documented, verified schema addition: "additionalProperties": false.
+
+    FastMCP's generated tool schemas declare `"additionalProperties": false`; the
+    raw SDK's do not declare it at all. Both actually reject an unexpected keyword
+    argument at call time (the underlying Python function has no **kwargs) — this
+    is a difference in what the wire schema *advertises*, not in what either
+    implementation *does*. Popping the key here only fires when it is exactly that
+    known, additive difference: `False` on the FastMCP side and altogether absent
+    on the SDK side. Any other schema difference — a missing `required` entry, a
+    changed `enum`, `additionalProperties: true` on one side — is left in place and
+    fails the equality check that follows, which is the whole point of comparing
+    the full schema rather than a hand-picked subset of it.
+    """
+    if (
+        fastmcp_schema.get("additionalProperties") is False
+        and "additionalProperties" not in sdk_schema
+    ):
+        fastmcp_schema = {
+            k: v for k, v in fastmcp_schema.items() if k != "additionalProperties"
+        }
+    return fastmcp_schema
 
 
 async def _fastmcp_surface(mcp: FastMCP) -> dict[str, Any]:
@@ -102,7 +144,12 @@ class TestMCPServerGuide:
             },
         }
 
-        assert before == await _fastmcp_surface(mcp)
+        after = await _fastmcp_surface(mcp)
+        after["tools"] = {
+            name: _reconcile_declared_strictness(before["tools"].get(name, {}), schema)
+            for name, schema in after["tools"].items()
+        }
+        assert before == after
 
     async def test_migrated_tools_still_work(self, pair):
         _, mcp = pair
@@ -139,7 +186,12 @@ class TestLowLevelGuide:
             },
         }
 
-        assert before == await _fastmcp_surface(mcp)
+        after = await _fastmcp_surface(mcp)
+        after["tools"] = {
+            name: _reconcile_declared_strictness(before["tools"].get(name, {}), schema)
+            for name, schema in after["tools"].items()
+        }
+        assert before == after
 
     async def test_handlers_and_tools_agree(self, pair):
         """The rewritten tool returns what the hand-written handler returned."""

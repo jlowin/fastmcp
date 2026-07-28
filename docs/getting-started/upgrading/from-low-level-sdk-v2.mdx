@@ -29,15 +29,15 @@ CONSTRUCTION AND TRANSPORT
 - `server.run(read_stream, write_stream, server.create_initialization_options())` and its `stdio_server()` context manager
 - `server.streamable_http_app()` and any Starlette app assembled around it
 - `asyncio.run(main())` boilerplate
-- `lifespan=` and anything reading `ctx.lifespan_context`
+- `lifespan=` — carries over directly: pass the same async context manager to `FastMCP(lifespan=...)`, and read what it yields from `ctx.request_context.lifespan_context` in any tool. Do not drop it — the tools that depended on it (a DB connection, a client pool) lose their dependency silently if you do.
 
-HANDLERS TO DELETE (each becomes one or more decorated functions)
-- `on_list_tools` + `on_call_tool` — note the `if params.name == ...` dispatch chain inside `on_call_tool`; each branch becomes its own tool
-- `on_list_resources` + `on_list_resource_templates` + `on_read_resource`
-- `on_list_prompts` + `on_get_prompt`
-- `on_completion`
-- `on_subscribe_resource` / `on_unsubscribe_resource` / `on_subscriptions_listen`
-- `on_set_logging_level`, `on_progress`, `on_roots_list_changed`, `on_ping`
+HANDLERS TO DELETE, EACH REPLACED BY ONE DECORATOR (not simply removed)
+- `on_list_tools` + `on_call_tool` → one `@mcp.tool` function per branch of the `if params.name == ...` dispatch chain inside `on_call_tool`
+- `on_list_resources` + `on_list_resource_templates` + `on_read_resource` → one `@mcp.resource` function per resource/template
+- `on_list_prompts` + `on_get_prompt` → one `@mcp.prompt` function per prompt
+- `on_completion` → one `@mcp.completion` function. This one is easy to drop by mistake: skipping it does not just remove autocomplete cleanly, it silently stops FastMCP from advertising the completions capability at all, since that capability is only advertised when a handler is registered.
+- `on_subscribe_resource` / `on_unsubscribe_resource` / `on_subscriptions_listen` — flag for the user, no single-decorator equivalent
+- `on_set_logging_level`, `on_progress`, `on_roots_list_changed`, `on_ping` — flag for the user, these are protocol-level hooks with no direct FastMCP surface
 
 TYPES THAT DISAPPEAR FROM YOUR CODE
 - Hand-written `input_schema` / `output_schema` JSON Schema dicts — these come from type hints now
@@ -65,11 +65,15 @@ For each item found, show the original code, say what it did, and give the FastM
 
 ## Install
 
+FastMCP 4 is in prerelease, so pin the exact version rather than installing unqualified — a bare `pip install fastmcp` or `uv add fastmcp` resolves to the latest *stable* release, which today is FastMCP 3:
+
 ```bash
-pip install fastmcp
+pip install "fastmcp==4.0.0b1"
 # or
-uv add fastmcp
+uv add "fastmcp==4.0.0b1"
 ```
+
+An exact version pin installs even though it's a prerelease — neither installer needs `--pre` or `--prerelease allow` for a version this specific, only for an open-ended range. For a reproducible lockfile that also pins the prerelease protocol dependencies, see [Install the v4 Prerelease](/getting-started/upgrading/from-fastmcp-3#install-the-v4-prerelease).
 
 FastMCP 4 depends on the MCP SDK v2 you are already using, so `mcp_types` stays importable and every protocol type keeps its current name and fields. Most of those imports vanish from your code anyway — FastMCP derives them — but the ones you keep need no changes.
 
