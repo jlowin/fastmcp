@@ -77,9 +77,11 @@ A reference this server cannot resolve is left alone rather than corrupted. This
 
 ### One copy of an app per server
 
-An app name must be unique within a server. The identity is derived from the app name and the tool's registered name, so composing the same app twice produces two tools claiming one identity — and nothing in the listing says which copy a given UI belongs to.
+**An app name must be unique within a server.** Composing the same app twice breaks its UI, and no namespace or mount arrangement makes it work.
 
-FastMCP refuses that rather than guessing. Neither copy's name is bound, the reference keeps its identity-addressed form, and calling it reports the ambiguity:
+The reason is structural. Identity is derived from the app name and the tool's registered name, and deliberately nothing else — that is what makes it survive renaming. Two copies of one app therefore produce two tools claiming a single identity, and no fact anywhere in the listing says which copy a given button belongs to. The information needed to choose was never recorded.
+
+FastMCP declines to bind rather than picking a copy, so buttons stop working instead of quietly invoking the wrong tenant's tool. Expect a message naming the cause:
 
 ```
 Ambiguous app tool 'save': 2 components share the identity '10c0803009ff'.
@@ -87,7 +89,7 @@ The same app is composed more than once, so this call cannot be routed to a
 single tool.
 ```
 
-Give each copy its own app name. Two tenants running the same product need `FastMCPApp("contacts-acme")` and `FastMCPApp("contacts-globex")`, not two instances of `FastMCPApp("contacts")` under different namespaces — namespaces rename tools, and the identity is deliberately immune to renaming.
+Give each copy its own app name. Two tenants running the same product want `FastMCPApp("contacts-acme")` and `FastMCPApp("contacts-globex")` — not two instances of `FastMCPApp("contacts")` under different namespaces, since namespaces rename tools and identity is immune to renaming by design.
 
 ### The hashed lookup fallback
 
