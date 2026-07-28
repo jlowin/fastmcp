@@ -80,7 +80,7 @@ mcp = FastMCP("Booking Server")
 
 
 def which_airport(destination: str) -> Elicit[str]:
-    return Elicit(f"Which airport in {destination} — CDG or ORY?", elicit_type=str)
+    return Elicit(f"Which airport in {destination} — CDG or ORY?", response_type=str)
 
 
 @mcp.tool
@@ -120,7 +120,7 @@ def current_profile() -> Profile:
 def which_airport(destination: str, profile: Profile = Depends(current_profile)) -> str | Elicit[str]:
     if profile.home_airport:
         return profile.home_airport
-    return Elicit(f"Which airport in {destination}?", elicit_type=str)
+    return Elicit(f"Which airport in {destination}?", response_type=str)
 
 
 @mcp.tool
@@ -133,7 +133,16 @@ async def book_flight(
 
 A returning traveller is never asked and never pays a round trip; a new one gets the question. The tool body is identical either way, and so is the annotation — only the resolver knows the difference.
 
-State the type with `elicit_type` when you build an `Elicit` inside a resolver. The parameter's annotation is two functions away at that point, and repeating it locally is worth more than the brevity of leaving it out. When a resolver also declares it — `-> str | Elicit[str]` — FastMCP checks the two agree at registration.
+An `Elicit` takes the same `message` and `response_type` as [`ctx.elicit()`](#requesting-input-on-handshake-connections), because it describes the same thing. The only difference is where it goes — you `await` the imperative one and `return` this one:
+
+```python
+result = await ctx.elicit(message="Which airport?", response_type=Airport)   # imperative
+return Elicit(message="Which airport?", response_type=Airport)               # declarative
+```
+
+State `response_type` when you build an `Elicit` inside a resolver. The parameter's annotation is two functions away at that point, and repeating it locally is worth more than the brevity of leaving it out; omit it and the parameter's annotation is used. When a resolver also declares the type in its return — `-> str | Elicit[str]` — FastMCP checks the two agree at registration.
+
+A question that has already been answered is not asked again. Resolvers re-run on every round, so a three-round call re-forms all its earlier questions, but each one is satisfied by the answer recorded against it rather than put to the user a second time. That holds for every `Elicit`, whether it came from a literal or a resolver — as long as the question still renders the same way, which is what the [digest](#repeated-questions) checks.
 
 Because a question can quote a tool argument, it can also quote something the model supplied — which is exactly what you want for `f"Which airport in {destination}?"`, and a good reason to treat the wording as untrusted display text rather than as an instruction to the user.
 
@@ -149,7 +158,7 @@ mcp = FastMCP("Booking Server")
 
 
 def confirm(destination: str, date: str) -> Elicit[bool]:
-    return Elicit(f"Book a flight to {destination} on {date}?", elicit_type=bool)
+    return Elicit(f"Book a flight to {destination} on {date}?", response_type=bool)
 
 
 @mcp.tool
@@ -222,7 +231,7 @@ def search_flights(destination: str, date: str) -> list[str]:
 
 def which_flight(destination: str, date: str) -> Elicit[str]:
     options = search_flights(destination, date)
-    return Elicit(f"Which flight? {', '.join(options)}", elicit_type=str)
+    return Elicit(f"Which flight? {', '.join(options)}", response_type=str)
 
 
 @mcp.tool

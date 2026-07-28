@@ -113,7 +113,7 @@ class Elicit(Generic[T]):
     def which_airport(destination: str, profile: Profile = Depends(get_profile)) -> Airport | Elicit[Airport]:
         if profile.home_airport:
             return profile.home_airport
-        return Elicit(f"Which airport in {destination}?", elicit_type=Airport)
+        return Elicit(f"Which airport in {destination}?", response_type=Airport)
 
 
     airport: Annotated[Airport, Elicit(which_airport)]
@@ -124,14 +124,15 @@ class Elicit(Generic[T]):
     and declining it fails the call.
 
     Args:
-        question: The text to show the user, or a resolver that decides. A
+        message: The text to show the user, or a resolver that decides. A
             resolver's parameters are filled by name from the call's own
             arguments and from other elicited parameters, which is also what
             orders the asks; it may declare its own `Depends(...)` parameters,
             and it may be sync or async.
-        elicit_type: The type to ask for. State it when constructing an `Elicit`
-            inside a resolver, where the parameter's annotation is not in view.
-            Omitted, the parameter's own annotation is used.
+        response_type: The type to ask for, exactly as `ctx.elicit()` takes it.
+            State it when constructing an `Elicit` inside a resolver, where the
+            parameter's annotation is not in view; omitted, the parameter's own
+            annotation is used.
         title: Optional label for the wrapped `value` field, for the scalar and
             shorthand forms. Same scope rules as `ctx.elicit()`.
         description: Optional description for the wrapped `value` field.
@@ -139,14 +140,14 @@ class Elicit(Generic[T]):
 
     def __init__(
         self,
-        question: str | Callable[..., Any],
+        message: str | Callable[..., Any],
         *,
-        elicit_type: Any = None,
+        response_type: Any = None,
         title: str | None = None,
         description: str | None = None,
     ) -> None:
-        self.question = question
-        self.elicit_type = elicit_type
+        self.message = message
+        self.response_type = response_type
         self.title = title
         self.description = description
 
@@ -192,10 +193,10 @@ class ElicitParam:
         A resolver may also declare its own `Depends(...)` parameters, which
         resolve the ordinary way.
         """
-        if isinstance(self.marker.question, str):
+        if isinstance(self.marker.message, str):
             return self.marker
         bound = {name: values[name] for name in self.depends_on}
-        async with resolved_dependencies(self.marker.question, bound) as injected:
+        async with resolved_dependencies(self.marker.message, bound) as injected:
             for param_name, value in injected.items():
                 # The DI engine reports a dependency it could not build as a
                 # sentinel rather than raising, which would otherwise reach the
@@ -207,24 +208,24 @@ class ElicitParam:
                         f"The resolver for {self.name!r} depends on {param_name!r}, "
                         "which could not be resolved"
                     ) from value.error
-            outcome = self.marker.question(**bound, **injected)
+            outcome = self.marker.message(**bound, **injected)
             return await outcome if inspect.isawaitable(outcome) else outcome
 
-    def elicit_type(self, request: Elicit[Any]) -> Any:
+    def type_for(self, request: Elicit[Any]) -> Any:
         """The type one question asks for.
 
         Taken from the `Elicit` when it states one — a resolver naming
-        `elicit_type` where the parameter's annotation is out of view — and from
+        `response_type` where the parameter's annotation is out of view — and from
         the parameter's own annotation otherwise.
         """
-        if request.elicit_type is not None:
-            return request.elicit_type
+        if request.response_type is not None:
+            return request.response_type
         return self.response_type
 
     def config(self, request: Elicit[Any]) -> ElicitConfig:
         """Schema and response handling for one question's answer."""
         return parse_elicit_response_type(
-            self.elicit_type(request),
+            self.type_for(request),
             response_title=request.title,
             response_description=request.description,
         )
@@ -323,7 +324,7 @@ def find_elicit_parameters(fn: Callable[..., Any]) -> dict[str, ElicitParam]:
             response_type=_response_type(annotation),
             has_default=has_default,
             default=parameter.default if has_default else None,
-            depends_on=_question_parameters(marker, name, fn),
+            depends_on=_message_parameters(marker, name, fn),
         )
 
     if not found:
@@ -343,7 +344,7 @@ def find_elicit_parameters(fn: Callable[..., Any]) -> dict[str, ElicitParam]:
     return _in_resolution_order(found, _fn_name(fn))
 
 
-def _declared_elicit_type(fn: Callable[..., Any]) -> Any | None:
+def _declared_response_type(fn: Callable[..., Any]) -> Any | None:
     """The `T` a resolver declares in an `Elicit[T]` return arm, if it declares one.
 
     A resolver annotated `-> Airport | Elicit[Airport]` states the type it asks
@@ -379,9 +380,9 @@ def _check_declared_type(spec: ElicitParam, fn_name: str) -> None:
     Raises:
         TypeError: If the two types disagree.
     """
-    if isinstance(spec.marker.question, str):
+    if isinstance(spec.marker.message, str):
         return
-    declared = _declared_elicit_type(spec.marker.question)
+    declared = _declared_response_type(spec.marker.message)
     if declared is None or declared == spec.response_type:
         return
     raise TypeError(
@@ -391,7 +392,7 @@ def _check_declared_type(spec: ElicitParam, fn_name: str) -> None:
     )
 
 
-def _question_parameters(
+def _message_parameters(
     marker: Elicit, name: str, fn: Callable[..., Any]
 ) -> tuple[str, ...]:
     """Names a resolver needs filled by name; empty for a literal question.
@@ -400,16 +401,16 @@ def _question_parameters(
     by the DI engine when the resolver runs, not matched against the call's
     arguments.
     """
-    if isinstance(marker.question, str):
+    if isinstance(marker.message, str):
         return ()
     try:
-        question_signature = inspect.signature(marker.question)
+        question_signature = inspect.signature(marker.message)
     except (TypeError, ValueError) as e:
         raise TypeError(
             f"The question for parameter {name!r} of {_fn_name(fn)!r} is a callable "
             "whose signature could not be read"
         ) from e
-    injected = get_dependency_parameters(marker.question)
+    injected = get_dependency_parameters(marker.message)
     return tuple(p for p in question_signature.parameters if p not in injected)
 
 
@@ -573,8 +574,8 @@ async def _resolve_in_process(
             resolved[spec.name] = request
             continue
         outcome = await context.elicit(
-            _question_text(request, spec),
-            response_type=spec.elicit_type(request),
+            _message_text(request, spec),
+            response_type=spec.type_for(request),
             response_title=request.title,
             response_description=request.description,
         )
@@ -591,15 +592,15 @@ async def _resolve_in_process(
     return resolved
 
 
-def _question_text(request: Elicit[Any], spec: ElicitParam) -> str:
+def _message_text(request: Elicit[Any], spec: ElicitParam) -> str:
     """The text an `Elicit` shows the user.
 
     Raises:
         ToolError: If a resolver built an `Elicit` around another callable, which
             has no meaning — a resolver has already decided what to ask.
     """
-    if isinstance(request.question, str):
-        return request.question
+    if isinstance(request.message, str):
+        return request.message
     raise ToolError(
         f"The resolver for {spec.name!r} returned an Elicit wrapping a callable; "
         "return Elicit(<the question text>) instead"
@@ -640,7 +641,7 @@ async def _resolve_across_rounds(
             continue
 
         config = spec.config(decision)
-        request = _build_request(_question_text(decision, spec), config)
+        request = _build_request(_message_text(decision, spec), config)
         question = _digest(request)
 
         answer = _recall(state, spec.name, question)

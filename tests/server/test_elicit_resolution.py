@@ -183,7 +183,7 @@ class TestModernProtocol:
         mcp.add_middleware(recorder)
 
         def which_airport(destination: str) -> Elicit[str]:
-            return Elicit(f"Which airport in {destination}?", elicit_type=str)
+            return Elicit(f"Which airport in {destination}?", response_type=str)
 
         @mcp.tool
         async def book(
@@ -204,7 +204,7 @@ class TestModernProtocol:
         mcp = FastMCP("x")
 
         def which_airport(destination: str) -> Elicit[str]:
-            return Elicit(f"Which airport in {destination}?", elicit_type=str)
+            return Elicit(f"Which airport in {destination}?", response_type=str)
 
         @mcp.tool
         async def book(
@@ -227,7 +227,7 @@ class TestModernProtocol:
         mcp = FastMCP("x")
 
         def which_airport(destination: str) -> Elicit[str]:
-            return Elicit(f"Which airport in {destination}?", elicit_type=str)
+            return Elicit(f"Which airport in {destination}?", response_type=str)
 
         @mcp.tool
         async def book(
@@ -248,7 +248,7 @@ class TestModernProtocol:
         mcp = FastMCP("x")
 
         def follow_up(first: str) -> Elicit[str]:
-            return Elicit(f"After {first}, then?", elicit_type=str)
+            return Elicit(f"After {first}, then?", response_type=str)
 
         @mcp.tool
         async def chain(
@@ -328,7 +328,7 @@ class TestHandshakeProtocol:
         mcp = FastMCP("x")
 
         def which_airport(destination: str) -> Elicit[str]:
-            return Elicit(f"Which airport in {destination}?", elicit_type=str)
+            return Elicit(f"Which airport in {destination}?", response_type=str)
 
         @mcp.tool
         async def book(
@@ -438,7 +438,7 @@ class TestConditionalResolvers:
         def which_airport(destination: str) -> str | Elicit[str]:
             if destination == "London":
                 return "LHR"  # only one option — no question
-            return Elicit(f"Which airport in {destination}?", elicit_type=str)
+            return Elicit(f"Which airport in {destination}?", response_type=str)
 
         @mcp.tool
         async def book(
@@ -462,7 +462,7 @@ class TestConditionalResolvers:
         def which_airport(destination: str) -> str | Elicit[str]:
             if destination == "London":
                 return "LHR"
-            return Elicit(f"Which airport in {destination}?", elicit_type=str)
+            return Elicit(f"Which airport in {destination}?", response_type=str)
 
         @mcp.tool
         async def book(
@@ -486,7 +486,7 @@ class TestConditionalResolvers:
         def which_airport(destination: str) -> str | Elicit[str]:
             if known:
                 return known[0]  # learned between rounds
-            return Elicit(f"Which airport in {destination}?", elicit_type=str)
+            return Elicit(f"Which airport in {destination}?", response_type=str)
 
         @mcp.tool
         async def book(
@@ -510,11 +510,11 @@ class TestConditionalResolvers:
         # The client answered "CDG", but by the next round the resolver knew "LHR".
         assert result.data == "Paris/LHR/2026-08-01"
 
-    async def test_explicit_elicit_type_wins_over_the_annotation(self):
+    async def test_explicit_response_type_wins_over_the_annotation(self):
         mcp = FastMCP("x")
 
         def pick(destination: str) -> Airport | Elicit[Airport]:
-            return Elicit(f"Which airport in {destination}?", elicit_type=Airport)
+            return Elicit(f"Which airport in {destination}?", response_type=Airport)
 
         @mcp.tool
         async def book(
@@ -536,7 +536,7 @@ class TestConditionalResolvers:
         mcp = FastMCP("x")
 
         def pick(destination: str) -> Airport | Elicit[Airport]:
-            return Elicit("Which airport?", elicit_type=Airport)
+            return Elicit("Which airport?", response_type=Airport)
 
         with pytest.raises(TypeError, match="declares it elicits"):
 
@@ -546,6 +546,43 @@ class TestConditionalResolvers:
                 airport: Annotated[str, Elicit(pick)],
             ) -> str:
                 return airport
+
+
+class TestAskedOnce:
+    """An answer already given satisfies its question on later rounds."""
+
+    async def test_each_question_reaches_the_user_once(self):
+        """Resolvers re-run every round, so without recall a three-round call
+        would put the first question six times."""
+        mcp = FastMCP("x")
+
+        def second(a: str) -> Elicit[str]:
+            return Elicit(f"second, given {a}?", response_type=str)
+
+        def third(b: str) -> Elicit[str]:
+            return Elicit(f"third, given {b}?", response_type=str)
+
+        @mcp.tool
+        async def chain(
+            a: Annotated[str, Elicit("first?")],
+            b: Annotated[str, Elicit(second)],
+            c: Annotated[str, Elicit(third)],
+        ) -> str:
+            return f"{a}{b}{c}"
+
+        asked: list[str] = []
+
+        async def handler(message, response_type, params, ctx):
+            asked.append(message)
+            return ElicitResult(
+                action="accept", content=response_type(value=str(len(asked)))
+            )
+
+        async with Client(mcp, mode="auto", elicitation_handler=handler) as client:
+            result = await client.call_tool("chain", {})
+
+        assert result.data == "123"
+        assert asked == ["first?", "second, given 1?", "third, given 2?"]
 
 
 class TestOrdering:
@@ -582,7 +619,7 @@ class TestOrdering:
 
         def confirm(destination: str, date: str) -> Elicit[bool]:
             return Elicit(
-                f"Book a flight to {destination} on {date}?", elicit_type=bool
+                f"Book a flight to {destination} on {date}?", response_type=bool
             )
 
         @mcp.tool
