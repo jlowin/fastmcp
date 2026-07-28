@@ -16,6 +16,7 @@ from fastmcp.experimental.transforms.code_mode import CodeMode
 from fastmcp.server.providers.addressing import hash_tool, hashed_backend_name
 from fastmcp.server.providers.proxy import ProxyClient, ProxyProvider
 from fastmcp.server.transforms.search import RegexSearchTransform
+from fastmcp.tools.base import Tool
 
 prefab_ui = pytest.importorskip("prefab_ui")
 from prefab_ui.actions.mcp import CallTool  # noqa: E402
@@ -416,6 +417,35 @@ class TestLateBoundToolNames:
 
         clicked = await gateway.call_tool(ref, {"name": "alice"})
         assert clicked.content[0].text == "[be] saved alice"  # type: ignore[union-attr]  # ty:ignore[unresolved-attribute]
+
+    async def test_versions_of_one_tool_are_a_single_target(self):
+        """Versions are listed individually and share an identity, but they
+        also share a name that resolves to the highest version on its own.
+        Only distinct names mean distinct copies of an app.
+        """
+        app = FastMCPApp("contacts")
+        for version, prefix in (("1.0.0", "v1"), ("2.0.0", "v2")):
+
+            def save(name: str, _prefix: str = prefix) -> str:
+                return f"{_prefix} saved {name}"
+
+            app.add_tool(Tool.from_function(save, name="save", version=version))
+
+        @app.ui()
+        def form() -> Column:
+            return Column(
+                children=[Button(label="Save", on_click=CallTool(tool="save"))]
+            )
+
+        server = FastMCP("Platform")
+        server.add_provider(app)
+
+        result = await server.call_tool("form", {})
+        (ref,) = _tool_refs(result.structured_content)
+        assert ref == "save"
+
+        clicked = await server.call_tool(ref, {"name": "alice"})
+        assert clicked.content[0].text == "v2 saved alice"  # type: ignore[union-attr]  # ty:ignore[unresolved-attribute]
 
     async def test_unresolvable_identity_is_restored(self):
         """An inner server binds to a name that means nothing further out, so

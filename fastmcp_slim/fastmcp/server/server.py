@@ -722,8 +722,14 @@ class FastMCP(
         by_identity: dict[str, list[str]] = {}
         for tool in await self.list_tools(run_middleware=False):
             identity = _tool_identity(tool)
-            if identity is not None:
-                by_identity.setdefault(identity, []).append(tool.name)
+            if identity is None:
+                continue
+            names = by_identity.setdefault(identity, [])
+            # Versions are listed individually but share a name, and that name
+            # resolves to the highest version on its own. They are one target;
+            # only distinct names mean distinct copies of an app.
+            if tool.name not in names:
+                names.append(tool.name)
 
         def resolve(identity: str) -> str | None:
             candidates = by_identity.get(identity, [])
