@@ -366,6 +366,32 @@ class TestLateBoundToolNames:
         clicked = await server.call_tool(ref, {"name": "alice"})
         assert clicked.content[0].text == "[cat] saved alice"  # type: ignore[union-attr]  # ty:ignore[unresolved-attribute]
 
+    async def test_branch_is_tracked_not_inferred_from_names(self):
+        """Namespaces whose names prefix one another must not cross-resolve.
+
+        With namespaces `a` and `a_form`, the entry tool `a_form` belongs to
+        branch `a` while `a_form_save` belongs to branch `a_form`. Anything
+        matching on name similarity picks the longer shared prefix and routes
+        into the wrong branch.
+        """
+        top = FastMCP("Top")
+        top.add_provider(self._app(marker="A"), namespace="a")
+        top.add_provider(self._app(marker="AFORM"), namespace="a_form")
+
+        result = await top.call_tool("a_form", {})
+        (ref,) = _tool_refs(result.structured_content)
+        assert ref == "a_save"
+
+        clicked = await top.call_tool(ref, {"name": "alice"})
+        assert clicked.content[0].text == "[A] saved alice"  # type: ignore[union-attr]  # ty:ignore[unresolved-attribute]
+
+        other = await top.call_tool("a_form_form", {})
+        (other_ref,) = _tool_refs(other.structured_content)
+        assert other_ref == "a_form_save"
+
+        other_clicked = await top.call_tool(other_ref, {"name": "alice"})
+        assert other_clicked.content[0].text == "[AFORM] saved alice"  # type: ignore[union-attr]  # ty:ignore[unresolved-attribute]
+
     async def test_unresolvable_identity_is_left_alone(self):
         """A reference this server cannot resolve keeps its identity-addressed
         form rather than being corrupted, so the hashed path can still take it.

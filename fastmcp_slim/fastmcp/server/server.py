@@ -90,6 +90,7 @@ from fastmcp.settings import DuplicateBehavior as DuplicateBehaviorSetting
 from fastmcp.tools.base import Tool, ToolResult
 from fastmcp.tools.function_tool import FunctionTool
 from fastmcp.tools.tool_transform import ToolTransformConfig
+from fastmcp.utilities.async_utils import gather
 from fastmcp.utilities.components import FastMCPComponent, _coerce_version
 from fastmcp.utilities.exceptions import HTTP_STATUS_ERRORS, TIMEOUT_ERRORS
 from fastmcp.utilities.logging import get_logger
@@ -236,32 +237,6 @@ def _tool_identity(tool: Tool) -> str | None:
         return None
     identity = fastmcp_meta.get(TOOL_HASH_META_KEY)
     return identity if isinstance(identity, str) else None
-
-
-def _closest_sibling(candidates: list[str], called_name: str) -> str | None:
-    """Pick the candidate composed alongside ``called_name``.
-
-    One identity is claimed by several tools when the same app is composed
-    into more than one branch. The entry tool and its backends share a branch,
-    so they share whatever prefix that branch's namespaces produced — the
-    candidate sharing the longest prefix with the entry tool is the one in the
-    caller's own branch. Returns None if that does not pick a single winner,
-    leaving the reference for the identity-addressed path to resolve.
-    """
-
-    def shared_prefix(candidate: str) -> int:
-        length = 0
-        for left, right in zip(candidate, called_name, strict=False):
-            if left != right:
-                break
-            length += 1
-        return length
-
-    ranked = sorted(candidates, key=shared_prefix, reverse=True)
-    best = shared_prefix(ranked[0])
-    if best == 0 or (len(ranked) > 1 and shared_prefix(ranked[1]) == best):
-        return None
-    return ranked[0]
 
 
 @asynccontextmanager
@@ -753,16 +728,43 @@ class FastMCP(
             if identity is not None:
                 by_identity.setdefault(identity, []).append(tool.name)
 
+        branch = await self._branch_names(called_name)
+
         def resolve(identity: str) -> str | None:
             candidates = by_identity.get(identity, [])
             if len(candidates) == 1:
                 return candidates[0]
-            if not candidates:
-                return None
-            return _closest_sibling(candidates, called_name)
+            if branch is not None:
+                candidates = [name for name in candidates if name in branch]
+                if len(candidates) == 1:
+                    return candidates[0]
+            return None
 
         rewrite_payload_tool_names(payload, resolve)
         return result
+
+    async def _branch_names(self, called_name: str) -> set[str] | None:
+        """Names yielded by the provider subtree that served ``called_name``.
+
+        Composing one app twice leaves two tools claiming a single identity,
+        and only the caller's own branch is a correct target. Providers are
+        already namespace-wrapped, so a provider's listing is exactly the set
+        of names its subtree contributes — membership answers which branch a
+        call came from. Returns None when no single provider claims the name,
+        leaving the reference for the identity-addressed path to resolve
+        rather than guessing.
+        """
+        listings = await gather(
+            (provider.list_tools() for provider in self.providers),
+            return_exceptions=True,
+        )
+        matches = [
+            {tool.name for tool in listing}
+            for listing in listings
+            if not isinstance(listing, BaseException)
+            and any(tool.name == called_name for tool in listing)
+        ]
+        return matches[0] if len(matches) == 1 else None
 
     # -------------------------------------------------------------------------
     # Provider interface overrides - inherited from AggregateProvider
