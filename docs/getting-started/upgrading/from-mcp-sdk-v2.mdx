@@ -62,7 +62,7 @@ CONSTRUCTOR ARGUMENTS THAT DO NOT CARRY OVER
 - `token_verifier=`, `auth_server_provider=`, `auth=AuthSettings(...)` — FastMCP consolidates all three into one `auth=` provider
 - `cache_hints=`
 - `extensions=`
-- `tools=[...]` — the keyword survives but its contents do not: FastMCP takes plain callables (or its own `Tool`) and raises TypeError on an SDK `Tool`. Pass the underlying functions.
+- `tools=[...]` (rare — the SDK's `Tool` type is not exported): FastMCP takes plain callables, so pass the underlying functions
 These raise TypeError, most naming their replacement. `name`, `version`, `instructions`, `icons`, `website_url`, `lifespan`, `resource_security`, and `request_state_security` carry over unchanged.
 
 CONTEXT
@@ -210,20 +210,6 @@ if __name__ == "__main__":
 | `token_verifier=`, `auth_server_provider=`, `auth=AuthSettings(...)` | a single `auth=` provider |
 | `cache_hints={...}` | `cache_ttl=`, `cache_scope=` |
 | `extensions=[...]` | `mcp.add_extension(...)` |
-
-The `tools=` row is easy to miss, because the keyword survives while its contents do not. `MCPServer(tools=[...])` takes the SDK's own `Tool` objects; `FastMCP(tools=[...])` takes plain callables or FastMCP's `Tool`, and raises `TypeError` on an SDK tool. Pass the underlying functions instead — FastMCP rebuilds the schema from each signature, which is the same derivation `Tool.from_function` was doing for you:
-
-```python
-from fastmcp import FastMCP
-
-
-def greet(name: str) -> str:
-    """Greet someone by name"""
-    return f"Hello, {name}!"
-
-
-mcp = FastMCP("demo", tools=[greet])
-```
 
 Authentication is the largest of these, and it consolidates rather than moves. `MCPServer` exposes the SDK's raw auth plumbing — a token verifier, an authorization-server provider, and an `AuthSettings` object, configured separately. FastMCP takes one `auth=` provider that carries the whole configuration, and ships providers for the common cases: `JWTVerifier` for validating tokens you already issue, `RemoteAuthProvider` for delegating to an external authorization server, `OAuthProxy` for wrapping a provider that lacks Dynamic Client Registration, and named providers for GitHub, Google, Auth0, Keycloak, WorkOS, and others. See [Authentication](/servers/auth/authentication).
 
