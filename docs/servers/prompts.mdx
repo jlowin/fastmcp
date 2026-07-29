@@ -448,7 +448,7 @@ A prompt can ask the client for information before it renders. On an MCP 2026-07
 
 <VersionBadge version="2.1.0" />
 
-You can configure how the FastMCP server handles attempts to register multiple prompts with the same name. The `on_duplicate` setting covers every component type, so it applies to prompts alongside tools and resources.
+You can configure how the FastMCP server handles attempts to register the same prompt twice. Identity is the component's type, name, and version together, so a prompt may share a name with a tool, and two versions of one prompt coexist. The `on_duplicate` setting covers every component type, so it applies to prompts alongside tools and resources.
 
 ```python
 from fastmcp import FastMCP

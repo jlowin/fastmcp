@@ -1081,7 +1081,7 @@ For full documentation on the Context object and all its capabilities, see the [
 
 <VersionBadge version="2.1.0" />
 
-You can control how the FastMCP server behaves if you try to register two components with the same name. The `on_duplicate` argument sets that policy once for every component type, so tools, resources, and prompts all follow the same rule.
+You can control how the FastMCP server behaves if you register the same component twice. Identity is the component's type, name, and version together, so a tool and a prompt may share a name, and two versions of one tool coexist. Only an exact repeat of all three counts as a duplicate. The `on_duplicate` argument sets that policy once for every component type.
 
 ```python
 from fastmcp import FastMCP

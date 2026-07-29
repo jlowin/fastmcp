@@ -793,7 +793,7 @@ A resource or resource template can ask the client for information before it pro
 
 <VersionBadge version="2.1.0" />
 
-You can configure how the FastMCP server handles attempts to register multiple resources or templates with the same URI. The `on_duplicate` setting covers every component type, so it applies to resources and templates alongside tools and prompts.
+You can configure how the FastMCP server handles attempts to register the same resource or template twice. Identity is the component's type, URI, and version together, so two versions of one resource coexist and only an exact repeat collides. The `on_duplicate` setting covers every component type, so it applies to resources and templates alongside tools and prompts.
 
 ```python
 from fastmcp import FastMCP
