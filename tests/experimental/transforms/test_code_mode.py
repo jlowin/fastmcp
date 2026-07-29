@@ -792,6 +792,63 @@ async def test_code_mode_monty_execute_chaining() -> None:
 
 
 @requires_monty
+@pytest.mark.parametrize(
+    ("failing_call", "expected_message"),
+    [
+        ("await call_tool('no_such_tool', {})", "Unknown tool: no_such_tool"),
+        ("await call_tool('boom', {})", "deliberate tool failure"),
+    ],
+    ids=["unknown-tool", "tool-error"],
+)
+async def test_code_mode_monty_call_tool_errors_are_catchable(
+    failing_call: str, expected_message: str
+) -> None:
+    """Sandbox code can catch call_tool errors and preserve prior work."""
+    mcp = FastMCP("CodeMode Monty Catch Errors")
+
+    @mcp.tool
+    def add(x: int, y: int) -> int:
+        return x + y
+
+    @mcp.tool
+    def boom() -> None:
+        raise ToolError("deliberate tool failure")
+
+    mcp.add_transform(CodeMode(sandbox_provider=MontySandboxProvider()))
+
+    code = (
+        "total = (await call_tool('add', {'x': 2, 'y': 3}))['result']\n"
+        "caught = None\n"
+        "try:\n"
+        f"    {failing_call}\n"
+        "except Exception as exc:\n"
+        "    caught = str(exc)\n"
+        "return {'caught': caught, 'total': total}"
+    )
+    result = await _run_tool(mcp, "execute", {"code": code})
+
+    assert _unwrap_result(result) == {
+        "caught": expected_message,
+        "total": 5,
+    }
+
+
+@requires_monty
+async def test_code_mode_monty_uncaught_call_tool_error_surfaces() -> None:
+    """Uncaught backend errors still propagate out of the sandbox."""
+    mcp = FastMCP("CodeMode Monty Uncaught Error")
+
+    @mcp.tool
+    def boom() -> None:
+        raise ToolError("deliberate tool failure")
+
+    mcp.add_transform(CodeMode(sandbox_provider=MontySandboxProvider()))
+
+    with pytest.raises(ToolError, match="deliberate tool failure"):
+        await _run_tool(mcp, "execute", {"code": "return await call_tool('boom', {})"})
+
+
+@requires_monty
 async def test_code_mode_monty_bare_call_returns_empty() -> None:
     """Pins the reported #4263 symptom as a usage error, not a sandbox bug.
 
