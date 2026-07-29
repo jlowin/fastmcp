@@ -604,6 +604,51 @@ class TestCacheableToolResult:
         assert cached_tool_result.is_error is True
 
 
+class TestErrorResultsAreNotCached:
+    """Regression tests for issue #4395: an error result was cached for the full
+    TTL, so a transient failure permanently shadowed the tool until it expired."""
+
+    async def test_error_result_is_not_cached(self):
+        mcp = FastMCP("ErrorCachingTestServer")
+        mcp.add_middleware(ResponseCachingMiddleware(cache_storage=MemoryStore()))
+
+        call_count = 0
+
+        @mcp.tool
+        def flakey() -> ToolResult:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return ToolResult("upstream 503", is_error=True)
+            return ToolResult("recovered")
+
+        async with Client(mcp) as client:
+            first = await client.call_tool("flakey", {}, raise_on_error=False)
+            assert first.is_error is True
+
+            # The tool must actually run again rather than replay the error.
+            second = await client.call_tool("flakey", {}, raise_on_error=False)
+            assert second.is_error is False
+            assert call_count == 2
+
+    async def test_successful_result_is_still_cached(self):
+        mcp = FastMCP("SuccessCachingTestServer")
+        mcp.add_middleware(ResponseCachingMiddleware(cache_storage=MemoryStore()))
+
+        call_count = 0
+
+        @mcp.tool
+        def stable() -> str:
+            nonlocal call_count
+            call_count += 1
+            return "ok"
+
+        async with Client(mcp) as client:
+            await client.call_tool("stable", {})
+            await client.call_tool("stable", {})
+            assert call_count == 1
+
+
 class TestCachingWithImportedServerPrefixes:
     """Test that caching preserves prefixes from imported servers.
 

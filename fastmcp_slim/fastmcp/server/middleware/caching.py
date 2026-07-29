@@ -474,6 +474,14 @@ class ResponseCachingMiddleware(Middleware):
         if not isinstance(tool_result, ToolResult):
             return tool_result
 
+        # Never cache an error result. A tool that reports failure by returning
+        # is_error=True is describing this attempt, not a stable answer — the
+        # upstream 503 or bad gateway it is reporting is exactly the kind of
+        # thing that clears on retry. Caching it would pin the failure in place
+        # for the full TTL and stop the tool from ever being retried.
+        if tool_result.is_error:
+            return tool_result
+
         cacheable_tool_result: CacheableToolResult = CacheableToolResult.wrap(
             value=tool_result
         )
