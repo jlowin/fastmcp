@@ -184,6 +184,20 @@ Because the docs land *before* the tag exists, derive the entry from the maintai
 - **Style:** Prose over code comments for important information
 - **Docstrings:** FastMCP docstrings are automatically compiled into MDX documents. Use markdown (single backticks, fenced code blocks), not RST (no double backticks). Bare `{}` in examples will be interpreted as JSX — wrap in backticks instead.
 
+## Code Review Rules
+
+### Framework regressions and root causes
+
+- Review changes carefully for regressions in supported framework behavior, including interactions beyond the immediate diff. Trace relevant callers, shared abstractions, protocol and public API contracts, and all affected MCP component types. Determine whether a change fixes the causal code path or merely compensates for the symptom; side channels and special cases that leave the root cause intact should be treated as suspect.
+
+### Comprehensive first pass
+
+- Review the entire pull request diff against the merge base, not only the latest commits. Inspect every changed file and the relevant surrounding code, collect all independent, substantiated consequential findings before submitting the review, and report the complete set in one review whenever possible. Do not stop after finding the first few issues or defer other already-visible findings to later review cycles.
+
+### Prior discussion and proportionality
+
+- When prior review threads and author or maintainer replies are available, read them before commenting. Evaluate responses on their merits and do not repeat a resolved or convincingly rebutted finding without new evidence. Avoid fixating on speculative edge cases: report an edge case only when it is reachable under supported usage or a credible threat model and has meaningful impact; otherwise omit it or clearly treat it as non-blocking.
+
 ## Critical Patterns
 
 - Never use bare `except` - be specific with exception types
