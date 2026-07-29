@@ -74,7 +74,7 @@ def search_products_implementation(query: str, category: str | None = None) -> l
 </ParamField>
 
 <ParamField body="title" type="str | None">
-  A human-readable display title for the tool. If omitted, FastMCP falls back to `annotations.title` when present.
+  A human-readable display title for the tool. If omitted, FastMCP falls back to `annotations.title` when present, then to a title derived from the tool's name (e.g. `find_products` becomes "Find Products") — some MCP clients drop tools that have no title at all.
 </ParamField>
 
 <ParamField body="tags" type="set[str] | None">
@@ -431,7 +431,7 @@ def get_user_details(user_id: str = Depends(get_user_id)) -> str:
     return f"Details for {user_id}"
 ```
 
-See [Custom Dependencies](/servers/context#custom-dependencies) for more details on dependency injection.
+See [Custom Dependencies](/servers/dependency-injection#custom-dependencies) for more details on dependency injection.
 
 ## Return Values
 
