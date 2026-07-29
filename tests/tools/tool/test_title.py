@@ -1,3 +1,6 @@
+import pytest
+from mcp_types import ToolAnnotations
+
 from fastmcp.tools.base import Tool
 
 
@@ -30,7 +33,13 @@ class TestToolTitle:
         )
 
     def test_tool_without_title(self):
-        """Test that tools without titles use name as display name."""
+        """Test that tools without an explicit title derive one from the name.
+
+        Some MCP clients (e.g. ChatGPT) drop tools with no `title` rather
+        than falling back to `name` as the spec allows, so FastMCP always
+        emits a derived title on the wire instead of relying on that
+        fallback.
+        """
 
         def multiply(a: int, b: int) -> int:
             return a * b
@@ -40,14 +49,40 @@ class TestToolTitle:
         assert tool.name == "multiply"
         assert tool.title is None
 
-        # Test MCP conversion doesn't include title when None
         mcp_tool = tool.to_mcp_tool()
         assert mcp_tool.name == "multiply"
-        assert not hasattr(mcp_tool, "title") or mcp_tool.title is None
+        assert mcp_tool.title == "Multiply"
+
+    def test_derived_title_follows_name_override(self):
+        """The derived title should reflect a `name` override, not the original name."""
+
+        def multiply(a: int, b: int) -> int:
+            return a * b
+
+        tool = Tool.from_function(multiply, name="multiply_tool")
+
+        mcp_tool = tool.to_mcp_tool(name="renamed_tool")
+        assert mcp_tool.name == "renamed_tool"
+        assert mcp_tool.title == "Renamed Tool"
+
+    @pytest.mark.parametrize(
+        "annotations",
+        [ToolAnnotations(title="Custom"), {"title": "Custom"}],
+        ids=["object", "dict"],
+    )
+    def test_annotations_override_beats_derived_title(self, annotations):
+        """An `annotations` override still outranks the name-derived title."""
+
+        def multiply(a: int, b: int) -> int:
+            return a * b
+
+        tool = Tool.from_function(multiply)
+
+        mcp_tool = tool.to_mcp_tool(annotations=annotations)
+        assert mcp_tool.title == "Custom"
 
     def test_tool_title_priority(self):
         """Test that explicit title takes priority over annotations.title."""
-        from mcp_types import ToolAnnotations
 
         def divide(x: int, y: int) -> float:
             """Divide two numbers."""
@@ -72,7 +107,6 @@ class TestToolTitle:
 
     def test_tool_annotations_title_fallback(self):
         """Test that annotations.title is used when no explicit title is provided."""
-        from mcp_types import ToolAnnotations
 
         def modulo(x: int, y: int) -> int:
             """Get modulo of two numbers."""
