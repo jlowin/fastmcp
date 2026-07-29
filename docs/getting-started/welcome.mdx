@@ -23,7 +23,7 @@ mode: center
   src="/assets/brand/f-watercolor-waves-4-dark-animated.mp4"
 ></video>
 
-**FastMCP is the standard framework for building [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) applications.** It gives you one coherent API for servers, clients, and interactive apps. Use it to expose Python functions as MCP tools, connect to local or remote MCP servers, and return interactive interfaces directly from your tools. FastMCP manages schema generation, validation, transport, authentication, and protocol compatibility around your application code.
+**FastMCP is a full framework for building [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) applications.** It gives you one coherent API for servers, clients, and interactive apps. Use it to expose Python functions as MCP tools, connect to local or remote MCP servers, and return interactive interfaces directly from your tools. FastMCP manages schema generation, validation, transport, authentication, and protocol compatibility around your application code.
 
 A FastMCP server starts with ordinary Python:
 
@@ -49,7 +49,7 @@ An effective MCP application needs more than a function registry. Models need ac
 
 FastMCP treats those as framework responsibilities. Declare a Python function and FastMCP derives its schema, validates its inputs and outputs, and exposes it through MCP. Connect a client to a URL and FastMCP handles protocol negotiation, authentication, and connection lifecycle. Your application remains ordinary Python while FastMCP keeps the MCP boundary correct.
 
-FastMCP created the high-level Python API incorporated into the official MCP Python SDK in 2024. The actively maintained standalone project is now downloaded more than a million times a day, and some version of FastMCP powers 70% of MCP servers across all languages.
+**That's why FastMCP is the standard framework for working with MCP.** FastMCP created the high-level Python API incorporated into the official MCP Python SDK in 2024. The actively maintained standalone project is now downloaded more than a million times a day, and some version of FastMCP powers 70% of MCP servers across all languages.
 
 ## Servers, clients, and apps
 
@@ -75,7 +75,7 @@ The three pillars share one model: FastMCP owns the protocol machinery while you
 
 <CardGroup cols={2}>
   <Card title="Install FastMCP" icon="download" href="/getting-started/installation">
-    Install FastMCP with `uv` or `pip`, verify the package, and find the right upgrade guide.
+    Add FastMCP to your project with `uv add fastmcp`, verify the package, and find the right upgrade guide.
   </Card>
   <Card title="Build your first server" icon="rocket-launch" href="/getting-started/quickstart">
     Create a tool, run its server, call it from a client, and add an interactive UI.
@@ -88,15 +88,15 @@ FastMCP is made with 💙 by [Prefect](https://www.prefect.io/).
 **This documentation reflects FastMCP's `main` branch**, so it may describe features that have not reached a stable release. Version badges identify when features were introduced.
 </Tip>
 
-## Govern MCP with Horizon
+## Scale MCP with Horizon
 
-FastMCP handles the MCP application layer. **[Prefect Horizon](https://www.prefect.io/horizon?utm_source=gofastmcp&utm_medium=docs&utm_campaign=docs_welcome&utm_content=welcome_body)** is the enterprise MCP gateway for governing how MCP servers and tools are deployed, discovered, secured, and used.
+FastMCP handles the MCP application layer. **[Prefect Horizon](https://www.prefect.io/horizon?utm_source=gofastmcp&utm_medium=docs&utm_campaign=docs_welcome&utm_content=welcome_body)** is the enterprise MCP gateway for scaling servers and tools across teams, with centralized governance over how they are deployed, discovered, secured, and used.
 
 Horizon applies the operational patterns developed while maintaining FastMCP: deploy servers from GitHub with branch previews and instant rollback, organize them in a private registry, protect access with SSO and tool-level RBAC, and observe activity through audit logs and telemetry.
 
 Horizon can also combine approved tools into purpose-built MCP endpoints for different teams and agents, while keeping access policy and governance centralized.
 
-[Govern MCP with Prefect Horizon →](https://www.prefect.io/horizon?utm_source=gofastmcp&utm_medium=docs&utm_campaign=docs_welcome&utm_content=welcome_cta)
+Start with FastMCP. [Scale with Horizon →](https://www.prefect.io/horizon?utm_source=gofastmcp&utm_medium=docs&utm_campaign=docs_welcome&utm_content=welcome_cta)
 
 ## LLM-friendly docs
 
