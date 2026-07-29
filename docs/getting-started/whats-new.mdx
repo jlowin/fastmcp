@@ -1,13 +1,17 @@
 ---
 title: "What's New in FastMCP 4"
 sidebarTitle: "What's New"
-description: A sessionless MCP protocol, the state layer that replaces sessions, and enterprise identity.
+description: MCP went sessionless. FastMCP 4 absorbs the rewrite and adds tasks, extensions, and enterprise identity.
 icon: sparkles
 ---
 
-FastMCP 4 runs on version 2 of the MCP Python SDK, which rewrote the protocol layer to support MCP's new sessionless protocol, `2026-07-28`. That protocol drives most of this release. It changes how servers deploy, how clients connect, where state lives between calls, and how a running tool asks the user a question.
+MCP just made the largest change in its history: the protocol went sessionless. The `2026-07-28` revision removes the persistent session that clients and servers held open between them, and with it the server's ability to call back into a connected client. Every MCP implementation has to answer for that.
 
-Most FastMCP 3 servers run on 4 unchanged. Two things need attention: `ctx.sample()` and `ctx.list_roots()` are gone, and code that builds MCP protocol models by hand now uses snake_case field names where the SDK used camelCase. [Upgrading from FastMCP 3](/getting-started/upgrading/from-fastmcp-3) covers every break in detail.
+FastMCP is the framework most MCP servers are built on, and version 4 answers for it on your behalf. The protocol layer underneath was rewritten end to end, and almost none of that reaches your code: most FastMCP 3 servers move to 4 without a single edit.
+
+What you get for that is a server that stops caring which protocol its clients speak, and a deployment that no longer needs sticky sessions to scale. Statelessness also made room for capabilities that could not exist before it, so this release adds [tools that pause to ask a question](#tools-that-ask-questions), durable [background tasks](#background-tasks), [state that outlives a request](#session-state), [protocol extensions](#server-extensions) you can write yourself, [enterprise identity](#enterprise-identity), and [response caching](#response-caching).
+
+The exception is narrow. Servers that generate text through the caller's model or read the caller's filesystem roots used `ctx.sample()` and `ctx.list_roots()`, and a sessionless protocol has nowhere to put them. [Upgrading from FastMCP 3](/getting-started/upgrading/from-fastmcp-3) covers the replacements and every other break in detail.
 
 <Note>
 FastMCP 4 is in **beta**. Pin an exact version and expect sharp edges. See [Install the v4 prerelease](/getting-started/upgrading/from-fastmcp-3#install-the-v4-prerelease).
@@ -15,9 +19,9 @@ FastMCP 4 is in **beta**. Pin an exact version and expect sharp edges. See [Inst
 
 ## Every protocol era
 
-A FastMCP 4 server answers clients on both sides of the protocol transition from a single deployment. The SDK negotiates per connection: the sessionless protocol for clients that have moved forward, the session-based handshake for everyone else. You adopt the new protocol without forking your deployment or gating clients by version, which supersedes FastMCP's earlier "latest protocol only" stance.
+A protocol migration usually forces a choice: break the clients that haven't moved yet, or stay behind with them. A FastMCP 4 server does neither. It answers both eras from one deployment, negotiating per connection, so clients that speak the sessionless protocol get it while everyone else keeps working untouched. Earlier FastMCP versions served only the newest protocol. This one serves the transition itself.
 
-Statelessness pays off in how you run the server. A sessionless request carries everything needed to answer it, so any replica behind an ordinary load balancer can serve any request and session affinity stops being a deployment requirement.
+Statelessness then pays off in how you run the server. A sessionless request carries everything needed to answer it, so any replica behind an ordinary load balancer can serve any request, and session affinity stops being a deployment requirement.
 
 The client default flipped to match. `Client(url)` probes for the modern protocol and adopts it when the server offers it, where every earlier FastMCP version pinned the handshake outright.
 
@@ -35,7 +39,47 @@ That default is what puts the modern capabilities within reach of ordinary clien
 
 Intermediaries benefit too. On a modern connection, FastMCP's client attaches the method, the target name, and any opted-in argument values as HTTP headers, so a gateway or load balancer can route a request without parsing its JSON-RPC body. See [Gateway Routing Headers](/deployment/http#gateway-routing-headers).
 
-## Server-to-client requests
+## Tools that ask questions
+
+Plenty of useful tools cannot answer in one shot. A booking tool needs a destination, then a date, then a confirmation. A destructive operation wants the user to agree first. On the old protocol a running tool interrupted its client through the open session and waited for the reply, which is exactly the move a sessionless connection cannot make.
+
+So the tool stops interrupting and starts asking. Rather than blocking, it *returns* a description of what it needs, and that return value completes the call normally. The client fulfils the request, calls the tool again with the answer attached, and the tool re-runs from the top, finds the answer waiting on `ctx.input_responses`, and either asks for the next thing or finishes.
+
+The payoff is that every round is a complete, independent request. Nothing on the server stays alive between them, so a three-question conversation survives load balancers, serverless cold starts, and worker restarts, and no two rounds need to land on the same process.
+
+```python
+from fastmcp import Context, FastMCP
+from mcp.types import ElicitRequest, ElicitRequestFormParams, InputRequiredResult
+
+mcp = FastMCP("Booking")
+
+
+@mcp.tool
+async def book_flight(ctx: Context) -> str | InputRequiredResult:
+    answers = ctx.input_responses
+    if answers is None:
+        params = ElicitRequestFormParams(
+            message="Where would you like to fly?",
+            requested_schema={
+                "type": "object",
+                "properties": {"destination": {"type": "string"}},
+                "required": ["destination"],
+            },
+        )
+        return InputRequiredResult(
+            result_type="input_required",
+            input_requests={
+                "destination": ElicitRequest(method="elicitation/create", params=params)
+            },
+        )
+
+    destination = answers["destination"].content["destination"]
+    return f"Booked a flight to {destination}."
+```
+
+A FastMCP client drives that loop for you, answering from the elicitation handler it already has, so a client written against a handshake-era server satisfies a modern tool with no extra wiring. See [Elicitation on the modern protocol](/servers/elicitation#elicitation-on-the-modern-protocol).
+
+## Sampling and roots
 
 A sessionless connection gives the server no channel to push a request down to a connected client mid-execution. Three `Context` methods depended on that channel, and this is the one part of FastMCP 4 likely to break an existing server.
 
@@ -76,7 +120,7 @@ When one user needs several independent buckets, such as separate carts or paral
 
 ## Background tasks
 
-Long-running work runs as a background task: the server accepts the call and returns a handle immediately, and the client polls for the result while the work proceeds. Tasks left the core MCP spec during the SDK rewrite and returned as the `io.modelcontextprotocol/tasks` extension, which FastMCP implements end to end in the optional `fastmcp-tasks` package.
+A tool that takes five minutes is a hard problem for a protocol built on request and response. The client blocks, the connection times out, and the user watches a spinner with no way to tell whether anything is still happening. Background tasks break that coupling: the server accepts the call and hands back a handle immediately, then the client polls while the work proceeds somewhere else entirely. Tasks left the core MCP spec during the SDK rewrite and returned as the `io.modelcontextprotocol/tasks` extension, which FastMCP implements end to end in the optional `fastmcp-tasks` package.
 
 `@mcp.tool(task=True)` remains the authoring surface and [Docket](https://github.com/chrisguidry/docket) still provides the durable execution engine, so the wire protocol modernizing underneath costs you no code change. What's new is the registration: tasks arrive as an extension you add to the server.
 
@@ -134,7 +178,9 @@ Registering a handler advertises the completions capability during negotiation, 
 
 ## Enterprise identity
 
-FastMCP 4 ships a complete server-side implementation of identity assertion, the enterprise "on-behalf-of" flow: a corporate identity provider issues a signed assertion, the user's agent presents it, and the server mints a short-lived token, with no browser login and no per-user consent screen. Behind one parameter on the existing auth providers, FastMCP performs the signature verification, binding checks, replay rejection, and scoped token issuance.
+Standard OAuth wants a browser login and a consent screen for every user, which is precisely what an internal tool cannot do when the callers are ten thousand employees' agents rather than ten thousand people at keyboards. Identity assertion is the enterprise answer: a corporate identity provider issues a signed assertion, the user's agent presents it, and the server mints a short-lived token, with no browser and no consent screen anywhere in the loop.
+
+FastMCP 4 ships the complete server side of that flow. Behind one parameter on the auth providers you already use, it performs the signature verification, binding checks, replay rejection, and scoped token issuance.
 
 ```python
 from fastmcp import FastMCP
