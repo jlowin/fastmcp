@@ -162,6 +162,7 @@
                       "servers/lifespan",
                       "servers/storage-backends",
                       "servers/sessions",
+                      "servers/extensions",
                       "servers/tasks",
                       "servers/versioning"
                     ]

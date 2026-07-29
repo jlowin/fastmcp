@@ -70,12 +70,6 @@ When a client requests a component by name or URI, FastMCP queries providers and
 - [Proxy a remote server](/servers/providers/proxy) through yours
 - [Control visibility state](/servers/visibility) of components
 - [Build dynamic sources](/servers/providers/custom) like database-backed tools
+- [Transform components](/servers/transforms/transforms) to namespace, rename, or modify them
 
-## Next Steps
-
-- [Local](/servers/providers/local) - How decorators work
-- [Mounting](/servers/composition) - Compose servers together
-- [Proxying](/servers/providers/proxy) - Connect to remote servers
-- [Transforms](/servers/transforms/transforms) - Namespace, rename, and modify components
-- [Visibility](/servers/visibility) - Control which components clients can access
-- [Custom](/servers/providers/custom) - Build your own providers
+The decorators you already use are themselves a provider: [`LocalProvider`](/servers/providers/local) is what backs `@mcp.tool` and its siblings.
