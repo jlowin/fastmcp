@@ -8,6 +8,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 
 @dataclass
 class SkillFileInfo:
@@ -30,14 +32,54 @@ class SkillInfo:
     frontmatter: dict[str, Any] = field(default_factory=dict)
 
 
+def _parse_frontmatter_line_based(frontmatter_text: str) -> dict[str, Any]:
+    """Legacy line-based frontmatter parser (key: value only).
+
+    Used as a fallback when full YAML parsing fails so plain scalar keys
+    (including values that contain `: `) are not discarded entirely.
+    Multiline YAML block scalars (`|` / `>`) are not supported here —
+    those require a successful `yaml.safe_load`.
+    """
+    frontmatter: dict[str, Any] = {}
+    for line in frontmatter_text.strip().split("\n"):
+        if ":" not in line:
+            continue
+        key, _, value = line.partition(":")
+        key = key.strip()
+        value = value.strip()
+
+        # Handle quoted strings
+        if (value.startswith('"') and value.endswith('"')) or (
+            value.startswith("'") and value.endswith("'")
+        ):
+            value = value[1:-1]
+
+        # Handle lists [a, b, c]
+        if value.startswith("[") and value.endswith("]"):
+            items = value[1:-1].split(",")
+            value = [item.strip().strip("\"'") for item in items if item.strip()]
+
+        frontmatter[key] = value
+    return frontmatter
+
+
 def parse_frontmatter(content: str) -> tuple[dict[str, Any], str]:
     """Parse YAML frontmatter from markdown content.
+
+    Prefers full YAML parsing so multiline block scalars (`|` / `>`) work.
+    If YAML parsing fails (invalid YAML, recursion limit, etc.), falls back to
+    a line-based key:value parser so plain frontmatter is not discarded.
 
     Args:
         content: Markdown content potentially starting with ---
 
     Returns:
-        Tuple of (frontmatter dict, remaining content)
+        Tuple of (frontmatter dict, remaining content). If no frontmatter
+        block is found at all (no opening/closing `---` delimiters),
+        returns `({}, content)` unchanged. If a delimited block is found
+        but is empty or does not parse to a YAML mapping (and the line-based
+        fallback also yields nothing), returns `({}, remaining)` with the
+        delimited block stripped.
     """
     if not content.startswith("---"):
         return {}, content
@@ -50,28 +92,21 @@ def parse_frontmatter(content: str) -> tuple[dict[str, Any], str]:
     frontmatter_text = content[3 : 3 + end_match.start()]
     remaining = content[3 + end_match.end() :]
 
-    # Parse YAML (simple key: value parsing, no complex types)
-    frontmatter: dict[str, Any] = {}
-    for line in frontmatter_text.strip().split("\n"):
-        if ":" in line:
-            key, _, value = line.partition(":")
-            key = key.strip()
-            value = value.strip()
+    try:
+        parsed = yaml.safe_load(frontmatter_text)
+    except (yaml.YAMLError, RecursionError):
+        # Prefer partial recovery over discarding every key (issue #4416 review).
+        return _parse_frontmatter_line_based(frontmatter_text), remaining
 
-            # Handle quoted strings
-            if (value.startswith('"') and value.endswith('"')) or (
-                value.startswith("'") and value.endswith("'")
-            ):
-                value = value[1:-1]
+    if not isinstance(parsed, dict):
+        return {}, remaining
 
-            # Handle lists [a, b, c]
-            if value.startswith("[") and value.endswith("]"):
-                items = value[1:-1].split(",")
-                value = [item.strip().strip("\"'") for item in items if item.strip()]
+    # YAML may type `description: true` / dates as non-str, but SkillInfo.description
+    # is a str field that callers truthiness-check.
+    if "description" in parsed and parsed["description"] is not None:
+        parsed["description"] = str(parsed["description"])
 
-            frontmatter[key] = value
-
-    return frontmatter, remaining
+    return parsed, remaining
 
 
 def compute_file_hash(path: Path) -> str:
