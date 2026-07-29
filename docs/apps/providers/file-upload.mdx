@@ -59,15 +59,23 @@ This works with **stdio**, **SSE**, and **stateful HTTP** transports, where sess
 In **stateless HTTP** mode, each request creates a new session object with a new ID. Files stored during one request (e.g. the UI upload) will be invisible to the next request (e.g. the LLM calling `list_files`). You **must** override `_get_scope_key` to use a stable identifier like a user ID from your auth token.
 </Warning>
 
-For stateless deployments, override `_get_scope_key` to return a stable identifier. For example, to scope files by authenticated user:
+For stateless deployments, override `_get_scope_key` to return a stable identifier. To scope files by authenticated user, read the caller from `get_access_token()`.
+
+Reject the request when there is no subject to key on. `get_access_token()` returns `None` on an unauthenticated request, and `subject` is optional even on a valid token, since not every verifier populates it. Returning a fallback in either case would put every such caller in one shared bucket, so they would see each other's uploads.
 
 ```python
 from fastmcp.apps.file_upload import FileUpload
+from fastmcp.server.dependencies import get_access_token
 
 class UserScopedUpload(FileUpload):
     def _get_scope_key(self, ctx):
-        return ctx.access_token["sub"]
+        token = get_access_token()
+        if token is None or not token.subject:
+            raise ValueError("File scoping requires an authenticated user with a subject")
+        return token.subject
 ```
+
+If your provider carries the user identity in a different claim, read it from `token.claims` and validate it the same way.
 
 For process-wide shared storage (all users see all files):
 
@@ -85,10 +93,17 @@ The default implementation stores files in memory for the lifetime of the server
 import base64
 
 from fastmcp.apps.file_upload import FileUpload
+from fastmcp.server.dependencies import get_access_token
 
 class S3Upload(FileUpload):
+    def _get_scope_key(self, ctx):
+        token = get_access_token()
+        if token is None or not token.subject:
+            raise ValueError("File scoping requires an authenticated user with a subject")
+        return token.subject
+
     def on_store(self, files, ctx):
-        user_id = ctx.access_token["sub"]
+        user_id = self._get_scope_key(ctx)
         for f in files:
             s3.put_object(
                 Bucket="uploads",
@@ -98,7 +113,7 @@ class S3Upload(FileUpload):
         return self.on_list(ctx)
 
     def on_list(self, ctx):
-        user_id = ctx.access_token["sub"]
+        user_id = self._get_scope_key(ctx)
         objects = s3.list_objects(Bucket="uploads", Prefix=f"{user_id}/")
         return [
             {
@@ -112,7 +127,7 @@ class S3Upload(FileUpload):
         ]
 
     def on_read(self, name, ctx):
-        user_id = ctx.access_token["sub"]
+        user_id = self._get_scope_key(ctx)
         obj = s3.get_object(Bucket="uploads", Key=f"{user_id}/{name}")
         content = obj["Body"].read()
         return {

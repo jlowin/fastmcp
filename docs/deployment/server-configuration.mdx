@@ -39,30 +39,33 @@ The `fastmcp.json` configuration answers three fundamental questions about your 
 
 This conceptual model helps you understand the purpose of each configuration section and organize your settings effectively. The configuration file maps directly to these three concerns:
 
+`source` is the *where*, `environment` the *what*, and `deployment` the *how*:
+
 ```json
 {
   "$schema": "https://gofastmcp.com/public/schemas/fastmcp.json/v1.json",
   "source": {
-    // WHERE: Location of your server code
-    "type": "filesystem",  // Optional, defaults to "filesystem"
+    "type": "filesystem",
     "path": "server.py",
     "entrypoint": "mcp"
   },
   "environment": {
-    // WHAT: Environment setup and dependencies
-    "type": "uv",  // Optional, defaults to "uv"
+    "type": "uv",
     "python": ">=3.10",
     "dependencies": ["pandas", "numpy"]
   },
   "deployment": {
-    // HOW: Runtime configuration
     "transport": "stdio",
     "log_level": "INFO"
   }
 }
 ```
 
-Only the `source` field is required. The `environment` and `deployment` sections are optional and provide additional configuration when needed.
+Only the `source` field is required. The `environment` and `deployment` sections are optional and provide additional configuration when needed. Both `type` fields shown above are optional too, defaulting to `"filesystem"` and `"uv"` respectively.
+
+<Warning>
+`fastmcp.json` is parsed as strict JSON, so it accepts no comments or trailing commas.
+</Warning>
 
 ### JSON Schema Support
 
