@@ -70,7 +70,7 @@ An object containing environment variables to set when launching the server. All
 
 This format is widely adopted across the MCP ecosystem:
 
-- **Claude Desktop**: Uses `~/.claude/claude_desktop_config.json`
+- **Claude Desktop**: Uses `~/Library/Application Support/Claude/claude_desktop_config.json` on macOS, `%APPDATA%\Claude\claude_desktop_config.json` on Windows
 - **Cursor**: Uses `~/.cursor/mcp.json`
 - **VS Code**: Uses workspace `.vscode/mcp.json`
 - **Other clients**: Many MCP-compatible applications follow this standard
@@ -457,7 +457,7 @@ The generated configuration works with any MCP-compatible application:
 <Note>
 **Prefer [`fastmcp install claude-desktop`](/integrations/claude-desktop)** for automatic installation. Use MCP JSON for advanced configuration needs.
 </Note>
-Copy the `mcpServers` object into `~/.claude/claude_desktop_config.json`
+Copy the `mcpServers` object into Claude Desktop's config file (`~/Library/Application Support/Claude/claude_desktop_config.json` on macOS, `%APPDATA%\Claude\claude_desktop_config.json` on Windows)
 
 ### Cursor
 <Note>

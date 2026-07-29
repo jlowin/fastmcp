@@ -1,65 +1,112 @@
 ---
 title: "What's New in FastMCP 4"
 sidebarTitle: "What's New"
-description: A sessionless MCP protocol, the state layer that replaces sessions, and enterprise identity.
+description: FastMCP 4 makes stateful MCP applications work on the sessionless protocol while one server serves every protocol era.
 icon: sparkles
 ---
 
-FastMCP 4 runs on version 2 of the MCP Python SDK, which rewrote the protocol layer to support MCP's new sessionless protocol, `2026-07-28`. That protocol drives most of this release. It changes how servers deploy, how clients connect, where state lives between calls, and how a running tool asks the user a question.
+FastMCP 4 makes stateful MCP applications work on MCP's sessionless protocol. Tools can ask follow-up questions across requests, preserve authenticated user state, and move long-running work into background tasks without sticky sessions or a continuously connected client.
 
-Most FastMCP 3 servers run on 4 unchanged. Two things need attention: `ctx.sample()` and `ctx.list_roots()` are gone, and code that builds MCP protocol models by hand now uses snake_case field names where the SDK used camelCase. [Upgrading from FastMCP 3](/getting-started/upgrading/from-fastmcp-3) covers every break in detail.
+The protocol changed completely underneath those APIs. Your application usually does not: one FastMCP server negotiates both protocol eras per connection, and most FastMCP 3 servers upgrade unchanged.
+
+That is the theme of version 4: stateless transport without stateless application code. The release also makes protocol extensions a first-class surface, adds enterprise identity for agents acting on behalf of users, and strengthens production defaults across caching, routing, and security.
 
 <Note>
 FastMCP 4 is in **beta**. Pin an exact version and expect sharp edges. See [Install the v4 prerelease](/getting-started/upgrading/from-fastmcp-3#install-the-v4-prerelease).
 </Note>
 
-## Every protocol era
+## Protocol compatibility
 
-A FastMCP 4 server answers clients on both sides of the protocol transition from a single deployment. The SDK negotiates per connection: the sessionless protocol for clients that have moved forward, the session-based handshake for everyone else. You adopt the new protocol without forking your deployment or gating clients by version, which supersedes FastMCP's earlier "latest protocol only" stance.
+A protocol migration usually forces a choice between breaking clients that have not moved yet and holding the server back with them. FastMCP 4 serves both eras from one deployment, negotiating the best mutual version for each connection. Modern clients get the sessionless protocol while handshake-era clients continue working unchanged.
 
-Statelessness pays off in how you run the server. A sessionless request carries everything needed to answer it, so any replica behind an ordinary load balancer can serve any request and session affinity stops being a deployment requirement.
+Statelessness changes how that deployment scales. Each modern request carries everything needed to answer it, so any replica behind an ordinary load balancer can serve any request and session affinity stops being a requirement.
 
-The client default flipped to match. `Client(url)` probes for the modern protocol and adopts it when the server offers it, where every earlier FastMCP version pinned the handshake outright.
+The client default follows the same rule. `Client(url)` probes for the modern protocol and falls back to the handshake when necessary. Pin `mode="legacy"` only when your application specifically needs the session back-channel.
 
 ```python
 from fastmcp import Client
 
-# Probes for the modern protocol, falls back to the handshake
+# Negotiate the best mutual protocol
 client = Client("https://example.com/mcp")
 
-# Pins the handshake, when you need the session back-channel
+# Require the handshake-era protocol
 legacy = Client("https://example.com/mcp", mode="legacy")
 ```
 
-That default is what puts the modern capabilities within reach of ordinary client code: a task-enabled tool hands back a handle to poll, and multi-round-trip elicitation resolves across successive requests, with the caller opting in to neither. Once connected, `client.protocol_version`, `client.server_info`, `client.server_capabilities`, and `client.instructions` read the same whichever era you negotiated, so code that inspects a connection never branches on how it was established. See [Protocol negotiation](/clients/client#protocol-negotiation).
+Once connected, `client.protocol_version`, `client.server_info`, `client.server_capabilities`, and `client.instructions` expose the same interface whichever era was negotiated. Application code that inspects a server does not need a protocol-version branch. See [Protocol negotiation](/clients/client#protocol-negotiation).
 
-Intermediaries benefit too. On a modern connection, FastMCP's client attaches the method, the target name, and any opted-in argument values as HTTP headers, so a gateway or load balancer can route a request without parsing its JSON-RPC body. See [Gateway Routing Headers](/deployment/http#gateway-routing-headers).
+On modern connections, FastMCP also attaches the method, target name, and opted-in argument values as HTTP headers. Gateways and load balancers can route requests without parsing JSON-RPC bodies. See [Gateway routing headers](/deployment/http#gateway-routing-headers).
 
-## Server-to-client requests
+## Stateful applications
 
-A sessionless connection gives the server no channel to push a request down to a connected client mid-execution. Three `Context` methods depended on that channel, and this is the one part of FastMCP 4 likely to break an existing server.
+The modern protocol removes transport-level sessions, but applications still need conversations, user state, and long-running work. FastMCP moves those concerns into explicit application primitives that survive fresh connections. Shared stores and request-state keys extend them across replicas and worker restarts.
 
-`ctx.sample()`, `ctx.sample_step()`, and `ctx.list_roots()` are removed. Touching one raises `AttributeError` on every era, so the break surfaces when you upgrade rather than in production against whichever client happens to negotiate the modern protocol.
+### Interactive tools
 
-For generation, call an LLM directly from your tool: your server holds the API key, creates a provider client, and awaits a completion inline. That works against every client, including the many that never implemented sampling at all, and a tool that chains several generations pays no round trip for any of them. See [Sampling](/servers/sampling).
+Many useful tools need more than one exchange. A booking tool asks for a destination, then a date, then confirmation. A destructive operation asks the user to approve it before continuing.
 
-When borrowing the *caller's* model is the actual point, or when a tool genuinely needs the client's roots, the tool asks by returning a description of what it needs. The round completes normally, the client answers, and it re-issues the call with the answer attached. `ctx.elicit()` is untouched and still works on handshake connections; on modern connections that same return-and-resume shape covers elicitation as well. See [the guard pattern](/servers/elicitation#elicitation-on-the-modern-protocol).
+On the modern protocol, the tool returns a description of the input it needs. That result completes the request normally. The client fulfils the request and calls the tool again with the answer attached; the tool runs from the top, reads `ctx.input_responses`, and either asks another question or returns its final result.
 
-Logging and progress are unaffected. Both are notifications, and notifications ride the response stream on every era.
+Each request completes while the user responds. Single-process servers use an automatic process-local key to protect the state carried between rounds; load-balanced deployments configure one shared key so any replica can validate and resume the next round:
 
-## Session state
+```python
+import os
 
-If every request arrives on a fresh connection, a tool that wants to remember something between calls has nowhere to keep it. Weighing protocol-level sessions against statelessness, the MCP working group [chose statelessness](https://github.com/modelcontextprotocol/transports-wg/blob/main/docs/sessions-vs-sessionless-decision.md) and moved session semantics up to the application: the server hands out an identifier, and the client passes it back.
+from fastmcp import Context, FastMCP
+from mcp.server.request_state import RequestStateSecurity
+from mcp.types import ElicitRequest, ElicitRequestFormParams, InputRequiredResult
 
-FastMCP implements that pattern and adds the isolation a bare handle lacks. State is stored server-side and keyed to the authenticated user, so a handle is inert in anyone else's hands.
+mcp = FastMCP(
+    "Booking",
+    request_state_security=RequestStateSecurity(
+        keys=[os.environ["REQUEST_STATE_KEY"].encode()]
+    ),
+)
 
-Most tools want a single bucket per user. Declare a `UserSession` parameter and FastMCP injects it the way it injects `Context`: it never appears in the tool's input schema, and the caller passes nothing, because the user's identity selects the right bucket.
+
+@mcp.tool
+async def book_flight(ctx: Context) -> str | InputRequiredResult:
+    answers = ctx.input_responses
+    if answers is None:
+        params = ElicitRequestFormParams(
+            message="Where would you like to fly?",
+            requested_schema={
+                "type": "object",
+                "properties": {"destination": {"type": "string"}},
+                "required": ["destination"],
+            },
+        )
+        return InputRequiredResult(
+            result_type="input_required",
+            input_requests={
+                "destination": ElicitRequest(
+                    method="elicitation/create",
+                    params=params,
+                )
+            },
+        )
+
+    response = answers["destination"]
+    if response.action != "accept" or response.content is None:
+        return "Booking cancelled."
+
+    destination = response.content["destination"]
+    return f"Booked a flight to {destination}."
+```
+
+Every replica must receive the same `REQUEST_STATE_KEY`, containing at least 32 bytes of secret key material. A FastMCP client drives the loop through its existing elicitation handler, so client code receives the terminal result without managing the intermediate rounds. See [Elicitation on the modern protocol](/servers/elicitation#elicitation-on-the-modern-protocol).
+
+### Session state
+
+Application state follows the same explicit model. FastMCP stores state server-side and binds it to the authenticated user, so a session handle is inert in another user's hands.
+
+Most tools want one state bucket per user. Declare a `UserSession` parameter and FastMCP injects it like `Context`: it never appears in the tool schema, and the caller passes nothing because their authenticated identity selects the bucket.
 
 ```python
 from fastmcp import FastMCP
 from fastmcp.server.sessions import UserSession
 
-mcp = FastMCP("assistant")
+mcp = FastMCP("Assistant")
 
 
 @mcp.tool
@@ -70,18 +117,19 @@ async def remember(fact: str, session: UserSession) -> str:
     return f"Remembered {len(facts)} facts."
 ```
 
-Because the bucket is chosen from the caller's identity, `UserSession` requires [authentication](/servers/auth/authentication). An unauthenticated request has no user to key on, so the tool raises rather than guessing at a bucket.
+`UserSession` requires [authentication](/servers/auth/authentication), since an unauthenticated request has no user to key on. When one user needs several independent buckets, such as separate carts or conversations, `SessionId` exposes the handle as an explicit string argument.
 
-When one user needs several independent buckets, such as separate carts or parallel conversations, `SessionId` makes the handle an explicit string argument that the agent obtains from `create_session` and supplies on each call. See [Session State](/servers/sessions).
+The default in-memory state store is process-local. To preserve state across restarts or share it among replicas, pass a shared persistent `session_state_store`. See [Session state](/servers/sessions).
 
-## Background tasks
+### Background work
 
-Long-running work runs as a background task: the server accepts the call and returns a handle immediately, and the client polls for the result while the work proceeds. Tasks left the core MCP spec during the SDK rewrite and returned as the `io.modelcontextprotocol/tasks` extension, which FastMCP implements end to end in the optional `fastmcp-tasks` package.
+Long-running tools create a different kind of state problem: holding a request open for several minutes invites timeouts and leaves the user unable to tell whether work is progressing. Background tasks accept the call and return a handle immediately, then let the client poll while work proceeds asynchronously.
 
-`@mcp.tool(task=True)` remains the authoring surface and [Docket](https://github.com/chrisguidry/docket) still provides the durable execution engine, so the wire protocol modernizing underneath costs you no code change. What's new is the registration: tasks arrive as an extension you add to the server.
+FastMCP implements the `io.modelcontextprotocol/tasks` extension in the optional `fastmcp-tasks` package. The authoring API remains `@mcp.tool(task=True)`, backed by [Docket](https://github.com/chrisguidry/docket):
 
 ```python
 import asyncio
+
 from fastmcp import FastMCP
 from fastmcp_tasks import TasksExtension
 
@@ -91,24 +139,28 @@ mcp.add_extension(TasksExtension())
 
 @mcp.tool(task=True)
 async def slow_computation(duration: int) -> str:
-    """A long-running operation."""
+    """Run a long computation."""
     await asyncio.sleep(duration)
     return f"Completed in {duration} seconds"
 ```
 
-A FastMCP client handles the handle-and-poll cycle transparently, so `client.call_tool(...)` looks the same whether or not the call ran in the background. See [Background Tasks](/servers/tasks).
+`fastmcp.Client` handles the task handle and polling cycle, so `client.call_tool(...)` returns the same way whether the tool ran inline or in the background. See [Background tasks](/servers/tasks).
 
-## Server extensions
+`TasksExtension()` uses an in-memory, single-process backend by default. Configure a Redis or Valkey backend for durable work that survives restarts and runs across separate workers.
 
-Background tasks are the first capability built on a more general one. An MCP extension is a protocol feature named by a reverse-DNS string and negotiated as a capability, and FastMCP 4 makes extensions a first-class surface rather than something only the framework can add.
+## Extensible protocol
 
-`FastMCP.add_extension()` lets an extension advertise a capability, add request methods, intercept `tools/call`, and run a lifespan hook, all with full access to the component registry, `Context`, and auth. The same extensions flow through the client with `Client(extensions=...)`. A cross-cutting protocol feature becomes a supported plugin instead of surgery on core, and `TasksExtension` is the worked example of everything the interface allows. See [Server Extensions](/servers/extensions).
+Background tasks are built on a general extension surface. An MCP extension advertises a capability under a reverse-DNS identifier and can add behavior negotiated between a server and client.
 
-## Argument completion
+### Server extensions
 
-When a client offers autocomplete for a prompt argument or a resource-template parameter, it asks the server which values fit, narrowing the list as the user types. FastMCP 4 lets a server answer. A single `@mcp.completion` handler receives the reference being completed, the argument and its partial value, and the arguments the user has already supplied, and returns the candidates the client surfaces as suggestions.
+`FastMCP.add_extension()` lets an extension advertise capabilities, add request methods, intercept `tools/call`, and own lifespan behavior with access to the component registry, `Context`, and authentication. Client extensions use the matching `Client(extensions=...)` interface.
 
-Because the handler sees the earlier arguments, completions can depend on them: a `repo` parameter can suggest only the repositories under the `owner` already chosen.
+Cross-cutting protocol behavior can therefore live in a supported plugin instead of requiring changes to FastMCP core. `TasksExtension` is a complete example of the interface. See [Server extensions](/servers/extensions).
+
+### Argument completion
+
+FastMCP 4 also lets servers answer MCP argument-completion requests. A completion handler sees the prompt or resource-template argument, its partial value, and values already supplied, so suggestions can depend on earlier choices.
 
 ```python
 from fastmcp import FastMCP
@@ -126,74 +178,40 @@ def write_poem(theme: str) -> str:
 def complete(ref, argument, context):
     if isinstance(ref, PromptReference) and argument.name == "theme":
         options = ["nature", "love", "adventure"]
-        return [o for o in options if o.startswith(argument.value)]
+        return [option for option in options if option.startswith(argument.value)]
     return None
 ```
 
-Registering a handler advertises the completions capability during negotiation, so a client only sends requests to a server that answers them, identically on both protocol eras. See [Argument Completion](/servers/completions).
+Registering the handler advertises the completion capability during negotiation, so clients only send requests to servers that support them. See [Argument completion](/servers/completions).
 
 ## Enterprise identity
 
-FastMCP 4 ships a complete server-side implementation of identity assertion, the enterprise "on-behalf-of" flow: a corporate identity provider issues a signed assertion, the user's agent presents it, and the server mints a short-lived token, with no browser login and no per-user consent screen. Behind one parameter on the existing auth providers, FastMCP performs the signature verification, binding checks, replay rejection, and scoped token issuance.
+Interactive OAuth authorization assumes a person can complete a browser flow. Internal agents often act for employees without a person waiting at a keyboard, while the server still needs the employee's identity for authorization and audit.
+
+Identity assertion carries that identity through the agent. A corporate identity provider signs an assertion, the agent presents it, and the server exchanges it for a short-lived token without an interactive login or consent screen. FastMCP performs signature verification, binding checks, replay rejection, and scoped token issuance through the authentication providers you already use.
 
 ```python
 from fastmcp import FastMCP
 from fastmcp.server.auth import IdentityAssertion, OAuthProxy
 
 auth = OAuthProxy(
-    # existing upstream configuration unchanged
-    identity_assertion=IdentityAssertion(trusted_issuers=["https://login.acme-corp.com"]),
+    # Existing upstream configuration
+    identity_assertion=IdentityAssertion(
+        trusted_issuers=["https://login.acme-corp.com"]
+    ),
 )
 mcp = FastMCP("Internal API", auth=auth)
 ```
 
-The asserted subject flows into the normal auth context, so tools read it through `get_access_token()` like any other identity. See [Identity Assertion](/servers/auth/oauth-proxy#identity-assertion-sep-990).
+The asserted subject enters the normal authentication context, so tools read it through `get_access_token()` like any other identity. See [Identity assertion](/servers/auth/oauth-proxy#identity-assertion-sep-990).
 
-Authorizing a caller by role is a related, provider-agnostic need. Scopes are standardized, so `require_scopes` behaves the same everywhere, but roles and groups are not part of OIDC and every provider files them under a different claim. `require_roles` handles the comparison and takes an `extract` callable naming where to look, so Keycloak's `realm_access.roles`, Cognito's `cognito:groups`, and Auth0's namespaced claims all work without FastMCP guessing.
+Authorization gained a provider-neutral role check as well. `require_roles` accepts an extraction function for providers that store roles and groups under different claims, while [scope step-up challenges](/servers/authorization#signaling-scope-shortfalls) tell a client exactly which scopes to request.
 
-```python
-from fastmcp import FastMCP
-from fastmcp.server.auth import require_roles
+For clients with no user behind them, such as backend services and scheduled jobs, `ClientCredentialsOAuthProvider` implements the OAuth 2.0 client-credentials grant with no browser or redirect. See [Machine-to-machine authentication](/clients/auth/client-credentials).
 
-mcp = FastMCP("Internal API")
+## Production defaults
 
-
-@mcp.tool(auth=require_roles("admin", extract=lambda c: c["realm_access"]["roles"]))
-def rotate_credentials() -> str:
-    """Only callable by a caller holding the 'admin' role."""
-    return "Rotated"
-```
-
-That example shows the check in isolation. Enforcing it for real needs an HTTP-transport server with a token-validating `auth` provider configured, since STDIO has no OAuth concept and skips every check. A `JWTVerifier`, a `RemoteAuthProvider`, or any provider built on one such as `KeycloakAuthProvider` all expose claims directly. See [Authorization](/servers/authorization#require_roles).
-
-The client side arrived too. Plenty of FastMCP clients have no user behind them, such as a backend service, a scheduled job, or one MCP server calling another. `ClientCredentialsOAuthProvider` authenticates one of those to a protected server with the OAuth 2.0 client-credentials grant: no browser, no redirect, no consent screen.
-
-```python
-import asyncio
-
-from fastmcp import Client
-from fastmcp.client.auth import ClientCredentialsOAuthProvider
-
-auth = ClientCredentialsOAuthProvider(
-    client_id="my-client-id",
-    client_secret="my-client-secret",
-    scopes=["read", "write"],
-)
-
-
-async def main():
-    async with Client("https://example.com/mcp", auth=auth) as client:
-        await client.list_tools()
-
-
-asyncio.run(main())
-```
-
-See [Machine-to-Machine Authentication](/clients/auth/client-credentials).
-
-## Response caching
-
-A server can stamp freshness hints on its results, and a caching client reuses a result within that window instead of making the round trip. Set the defaults on the server and every response carries them.
+A server can now attach freshness hints to its results, and a caching client can reuse those results without another round trip. Set a default time-to-live and scope on the server:
 
 ```python
 from fastmcp import FastMCP
@@ -201,10 +219,18 @@ from fastmcp import FastMCP
 mcp = FastMCP("Weather", cache_ttl=300, cache_scope="public")
 ```
 
-Backing the client's cache with the distributed `KeyValueResponseCacheStore` puts it in Redis or any key-value store, so a fleet of clients or proxy replicas shares fills rather than each paying for its own. See [Response caching](/clients/client#response-caching).
+`KeyValueResponseCacheStore` can place the client cache in Redis or another key-value store so a fleet of clients or proxies shares fills. See [Response caching](/clients/client#response-caching).
 
-## Security defaults
+Resource templates now reject path traversal, absolute paths, and null bytes in their parameters before the handler runs. The protection is enabled by default and applies to mounted and proxied templates. See [Path security](/servers/resources#path-security).
 
-Templated resources now screen their parameters for path traversal, absolute paths, and null bytes before the handler runs. This is on by default and covers mounted and proxied templates too, so a template that interpolates a parameter into a filesystem path no longer has to validate it by hand. See [path security](/servers/resources#path-security).
+OAuth defaults also distinguish native clients from web applications during Dynamic Client Registration, and missing scopes now produce an `InsufficientScopeError` that names the scopes required to continue. See [Application type](/servers/auth/oauth-proxy#application-type-web-vs-native) and [scope shortfalls](/servers/authorization#signaling-scope-shortfalls).
 
-The OAuth flow got more precise in two places. Dynamic Client Registration honors a client's declared `application_type`: the permissive loopback and app-scheme callbacks that MCP clients rely on stay the default for `"native"`, while a client registering as `"web"` is held to stricter browser-app redirect rules. And when `AuthMiddleware` denies a call specifically for a missing scope, it raises `InsufficientScopeError` naming which scopes would fix it, so a caller re-authorizes precisely instead of retrying blind. See [Application Type](/servers/auth/oauth-proxy#application-type-web-vs-native) and [Signaling Scope Shortfalls](/servers/authorization#signaling-scope-shortfalls).
+## Upgrade note
+
+The sessionless protocol has no live connection for a server to call back into during execution. FastMCP 4 therefore removes `ctx.sample()`, `ctx.sample_step()`, and `ctx.list_roots()` from every protocol era so incompatible code fails immediately during an upgrade.
+
+For generation, call an LLM directly from the server when your application owns the model. When borrowing the caller's model is the point, return an `InputRequiredResult` carrying a sampling request and read the answer on the next round. Roots use the same return-and-resume pattern. See [Sampling](/servers/sampling) and [the guard pattern](/servers/elicitation#sampling-and-roots).
+
+`ctx.elicit()` remains available on handshake-era connections; modern connections use the multi-round pattern described above. Code that constructs MCP protocol models directly must also use snake_case Python field names with SDK v2.
+
+[Upgrading from FastMCP 3](/getting-started/upgrading/from-fastmcp-3) covers these changes and every other compatibility break.

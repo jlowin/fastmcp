@@ -11,11 +11,13 @@ title="FastMCP v4.0.0b1: Fourgone Conclusion"
 href="https://github.com/PrefectHQ/fastmcp/releases/tag/v4.0.0b1"
 cta="Read the release notes"
 >
-FastMCP 4 rebuilds the framework on the MCP Python SDK v2, and this beta is the first release to run on the SDK's stable 2.0. The engine underneath changed completely, but FastMCP absorbs nearly all of it — most FastMCP 3 servers run untouched.
+FastMCP 4 makes stateful MCP applications work on the sessionless protocol while one deployment continues serving handshake-era clients. The engine underneath changed completely, but FastMCP absorbs nearly all of it — most FastMCP 3 servers upgrade untouched.
 
 🌐 **Every protocol era** — one server answers both the sessionless `2026-07-28` protocol and the older session-based handshake, negotiated per connection.
 
-💾 **State without a session** — `UserSession` and `SessionId` give tools durable state on a protocol that deliberately has none, keyed per user when the request is authenticated.
+💬 **Interactive tools** — tools ask follow-up questions across complete request-response rounds, with shared request-state keys for load balancing and worker restarts.
+
+💾 **State without a session** — `UserSession` and `SessionId` give tools explicit server-side state on a protocol that deliberately has none, keyed per user when the request is authenticated.
 
 ⏳ **Background tasks** — the `io.modelcontextprotocol/tasks` extension in the new `fastmcp-tasks` package, on the same Docket engine FastMCP 3 used.
 
