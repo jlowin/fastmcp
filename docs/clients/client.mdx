@@ -144,12 +144,12 @@ async with Client(mcp) as client:
     print(f"Capabilities: {client.server_capabilities.tools}")
 ```
 
-For advanced scenarios where you need precise control over when initialization happens, disable automatic initialization and call `initialize()` manually:
+For advanced scenarios where you need precise control over when initialization happens, disable automatic initialization and call `initialize()` manually. `initialize()` is a handshake-era operation, so pin the connection with `mode="legacy"`: the modern protocol has no `initialize` round trip, and calling it on a modern connection raises.
 
 ```python
 from fastmcp import Client
 
-client = Client("my_mcp_server.py", auto_initialize=False)
+client = Client("my_mcp_server.py", auto_initialize=False, mode="legacy")
 
 async with client:
     # Connection established, but not initialized yet
@@ -219,7 +219,7 @@ The SSE transport is legacy-only — it cannot carry the sessionless modern era 
 
 <VersionBadge version="4.0.0" />
 
-The client can cache the results of `list_tools`, `list_resources`, `list_prompts`, and `read_resource` so that repeated calls avoid a network round-trip. Caching is opt-in and honors the server's own cache hints, so it only takes effect against modern-era servers that advertise them — a cache is inert on a legacy connection.
+The client can cache the results of `list_tools`, `list_resources`, and `list_prompts` so that repeated calls avoid a network round-trip. Caching is opt-in and honors the server's own cache hints, so it only takes effect against modern-era servers that advertise them — a cache is inert on a legacy connection.
 
 Enable the default in-memory cache by passing `cache=True`. It respects the `ttlMs` and `cacheScope` hints the server attaches to each response.
 
@@ -243,7 +243,7 @@ config = CacheConfig(target_id="weather-api", default_ttl_ms=60_000)
 client = Client("https://example.com/mcp", mode="auto", cache=config)
 ```
 
-The high-level `list_tools`, `list_resources`, `list_prompts`, and `read_resource` methods always use the cache when one is configured. To override the behavior for a single call, use the lower-level `*_mcp` variants, which accept a `cache_mode` argument: `"use"` (the default) serves and stores, `"refresh"` stores a fresh result without serving a cached one, and `"bypass"` skips the cache entirely.
+The high-level `list_tools`, `list_resources`, and `list_prompts` methods always use the cache when one is configured. To override the behavior for a single call, use the lower-level `list_tools_mcp`, `list_resources_mcp`, `list_resource_templates_mcp`, and `list_prompts_mcp` variants, which accept a `cache_mode` argument: `"use"` (the default) serves and stores, `"refresh"` stores a fresh result without serving a cached one, and `"bypass"` skips the cache entirely.
 
 ```python
 async with client:

@@ -59,14 +59,15 @@ This works with **stdio**, **SSE**, and **stateful HTTP** transports, where sess
 In **stateless HTTP** mode, each request creates a new session object with a new ID. Files stored during one request (e.g. the UI upload) will be invisible to the next request (e.g. the LLM calling `list_files`). You **must** override `_get_scope_key` to use a stable identifier like a user ID from your auth token.
 </Warning>
 
-For stateless deployments, override `_get_scope_key` to return a stable identifier. For example, to scope files by authenticated user:
+For stateless deployments, override `_get_scope_key` to return a stable identifier. To scope files by authenticated user, read the caller from `get_access_token()`, whose `subject` field carries the user identifier:
 
 ```python
 from fastmcp.apps.file_upload import FileUpload
+from fastmcp.server.dependencies import get_access_token
 
 class UserScopedUpload(FileUpload):
     def _get_scope_key(self, ctx):
-        return ctx.access_token["sub"]
+        return get_access_token().subject
 ```
 
 For process-wide shared storage (all users see all files):
@@ -85,10 +86,11 @@ The default implementation stores files in memory for the lifetime of the server
 import base64
 
 from fastmcp.apps.file_upload import FileUpload
+from fastmcp.server.dependencies import get_access_token
 
 class S3Upload(FileUpload):
     def on_store(self, files, ctx):
-        user_id = ctx.access_token["sub"]
+        user_id = get_access_token().subject
         for f in files:
             s3.put_object(
                 Bucket="uploads",
@@ -98,7 +100,7 @@ class S3Upload(FileUpload):
         return self.on_list(ctx)
 
     def on_list(self, ctx):
-        user_id = ctx.access_token["sub"]
+        user_id = get_access_token().subject
         objects = s3.list_objects(Bucket="uploads", Prefix=f"{user_id}/")
         return [
             {
@@ -112,7 +114,7 @@ class S3Upload(FileUpload):
         ]
 
     def on_read(self, name, ctx):
-        user_id = ctx.access_token["sub"]
+        user_id = get_access_token().subject
         obj = s3.get_object(Bucket="uploads", Key=f"{user_id}/{name}")
         content = obj["Body"].read()
         return {
