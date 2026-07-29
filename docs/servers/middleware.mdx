@@ -378,7 +378,7 @@ mcp.add_middleware(LoggingMiddleware(
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `include_payloads` | `bool` | `False` | Log request/response content |
-| `max_payload_length` | `int` | `500` | Truncate payloads beyond this length |
+| `max_payload_length` | `int` | `1000` | Truncate payloads beyond this length |
 | `logger` | `Logger` | module logger | Custom logger instance |
 
 ### Timing
@@ -533,7 +533,7 @@ mcp.add_middleware(ErrorHandlingMiddleware(
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `include_traceback` | `bool` | `False` | Include stack traces in logs |
-| `transform_errors` | `bool` | `False` | Convert exceptions to MCP errors |
+| `transform_errors` | `bool` | `True` | Convert exceptions to MCP errors |
 | `error_callback` | `Callable` | `None` | Custom callback on errors |
 
 For automatic retries:

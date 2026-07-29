@@ -111,7 +111,9 @@ def summarize_text(text_to_summarize: str) -> str:
 
 ## Advanced Capabilities
 
-Beyond the core components, MCP also supports more advanced interaction patterns, such as a server requesting that the *client's* LLM generate a completion (known as **sampling**), or a server sending asynchronous **notifications** to a client. These features enable more complex, bidirectional workflows and are fully supported by FastMCP.
+Beyond the core components, MCP supports richer interaction patterns. A server can send asynchronous **notifications** to a client, and a tool can pause to ask the user a question partway through its work.
+
+How a tool asks depends on the protocol era. The modern protocol (`2026-07-28`) is sessionless, so a server cannot interrupt a connected client; instead the tool returns a description of what it needs and the client calls back with the answer. That change also removed server-initiated **sampling**, where a server borrowed the client's LLM mid-call. On FastMCP 4, generate text by [calling an LLM from your server](/servers/sampling) instead.
 
 ## Next Steps
 

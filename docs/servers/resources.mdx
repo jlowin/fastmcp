@@ -78,7 +78,7 @@ mcp = FastMCP(name="DataServer")
 )
 def get_application_status() -> str:
     """Internal function description (ignored if description is provided above)."""
-    return json.dumps({"status": "ok", "uptime": 12345, "version": mcp.settings.version})
+    return json.dumps({"status": "ok", "uptime": 12345, "version": "2.1"})
 ```
 
 <Card icon="code" title="@resource Decorator Arguments">
@@ -793,14 +793,14 @@ A resource or resource template can ask the client for information before it pro
 
 <VersionBadge version="2.1.0" />
 
-You can configure how the FastMCP server handles attempts to register multiple resources or templates with the same URI. Use the `on_duplicate_resources` setting during `FastMCP` initialization.
+You can configure how the FastMCP server handles attempts to register multiple resources or templates with the same URI. The `on_duplicate` setting covers every component type, so it applies to resources and templates alongside tools and prompts.
 
 ```python
 from fastmcp import FastMCP
 
 mcp = FastMCP(
     name="ResourceServer",
-    on_duplicate_resources="error" # Raise error on duplicates
+    on_duplicate="error" # Raise error on duplicates
 )
 
 @mcp.resource("data://config")
