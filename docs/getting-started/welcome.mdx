@@ -1,7 +1,7 @@
 ---
-title: "FastMCP: The Python Framework for MCP"
+title: "FastMCP: The Framework for MCP"
 sidebarTitle: "Welcome!"
-description: FastMCP is the standard Python framework for building Model Context Protocol (MCP) servers, clients, and interactive applications.
+description: FastMCP is the standard framework for building Model Context Protocol (MCP) servers, clients, and interactive applications.
 icon: hand-wave
 mode: center
 ---
@@ -23,7 +23,7 @@ mode: center
   src="/assets/brand/f-watercolor-waves-4-dark-animated.mp4"
 ></video>
 
-**FastMCP is the standard Python framework for building [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) applications.** Use it to expose Python functions as MCP tools, connect to local or remote MCP servers, and return interactive interfaces directly from your tools. FastMCP manages schema generation, validation, transport, authentication, and protocol compatibility around your application code.
+**FastMCP is the standard framework for building [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) applications.** It gives you one coherent API for servers, clients, and interactive apps. Use it to expose Python functions as MCP tools, connect to local or remote MCP servers, and return interactive interfaces directly from your tools. FastMCP manages schema generation, validation, transport, authentication, and protocol compatibility around your application code.
 
 A FastMCP server starts with ordinary Python:
 
@@ -43,7 +43,7 @@ if __name__ == "__main__":
     mcp.run()
 ```
 
-## Why FastMCP
+## Move fast and make things
 
 An effective MCP application needs more than a function registry. Models need accurate schemas, callers need validated results, clients need compatible transports, and production servers need authentication and predictable lifecycle management.
 
@@ -82,19 +82,21 @@ The three pillars share one model: FastMCP owns the protocol machinery while you
   </Card>
 </CardGroup>
 
+FastMCP is made with 💙 by [Prefect](https://www.prefect.io/).
+
 <Tip>
 **This documentation reflects FastMCP's `main` branch**, so it may describe features that have not reached a stable release. Version badges identify when features were introduced.
 </Tip>
 
-## Production with Horizon
+## Govern MCP with Horizon
 
-FastMCP handles the MCP application layer. **[Prefect Horizon](https://www.prefect.io/horizon?utm_source=gofastmcp&utm_medium=docs&utm_campaign=docs_welcome&utm_content=welcome_body)** is the enterprise MCP gateway for deploying, securing, and operating FastMCP servers in production.
+FastMCP handles the MCP application layer. **[Prefect Horizon](https://www.prefect.io/horizon?utm_source=gofastmcp&utm_medium=docs&utm_campaign=docs_welcome&utm_content=welcome_body)** is the enterprise MCP gateway for governing how MCP servers and tools are deployed, discovered, secured, and used.
 
-FastMCP and Horizon are built by the same team at [Prefect](https://www.prefect.io/). Horizon applies the operational patterns developed while maintaining FastMCP: deploy servers from GitHub with branch previews and instant rollback, organize them in a private registry, protect access with SSO and tool-level RBAC, and observe activity through audit logs and telemetry.
+Horizon applies the operational patterns developed while maintaining FastMCP: deploy servers from GitHub with branch previews and instant rollback, organize them in a private registry, protect access with SSO and tool-level RBAC, and observe activity through audit logs and telemetry.
 
 Horizon can also combine approved tools into purpose-built MCP endpoints for different teams and agents, while keeping access policy and governance centralized.
 
-[Deploy FastMCP servers with Prefect Horizon →](https://www.prefect.io/horizon?utm_source=gofastmcp&utm_medium=docs&utm_campaign=docs_welcome&utm_content=welcome_cta)
+[Govern MCP with Prefect Horizon →](https://www.prefect.io/horizon?utm_source=gofastmcp&utm_medium=docs&utm_campaign=docs_welcome&utm_content=welcome_cta)
 
 ## LLM-friendly docs
 
@@ -102,7 +104,7 @@ FastMCP documentation is designed for developers and coding agents. Every page i
 
 ### MCP server
 
-Connect a FastMCP client to `https://gofastmcp.com/mcp` to search the documentation programmatically:
+Point any MCP-compatible agent at `https://gofastmcp.com/mcp` to let it search the documentation as it works. You can also connect with FastMCP's Python client directly:
 
 ```python
 import asyncio
