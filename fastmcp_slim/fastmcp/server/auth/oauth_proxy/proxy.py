@@ -386,7 +386,7 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
                 If None, an encrypted file store will be created in the data directory.
             jwt_signing_key: Secret for signing FastMCP JWT tokens (any string or bytes).
                 If bytes are provided, they will be used as-is.
-                If a string is provided, it will be derived into a 32-byte key using PBKDF2 (1.2M iterations).
+                If a string is provided, it will be derived into a 32-byte key using PBKDF2 (1,000,000 iterations).
                 If not provided, it will be derived from the upstream client secret using HKDF.
             require_authorization_consent: Consent screen behavior (default True).
                 - True: always show the consent screen before redirecting to the

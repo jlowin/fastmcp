@@ -58,18 +58,25 @@ async with client:
 
 Binary resources include images, PDFs, and other non-text data:
 
+Binary resources arrive as `BlobResourceContents`, whose `blob` field is a base64 **string**, so decode it before writing bytes to disk:
+
 ```python
+import base64
+
+from mcp_types import BlobResourceContents
+
 async with client:
     content = await client.read_resource("resource://images/logo.png")
 
     for item in content:
-        if hasattr(item, 'blob'):
-            print(f"Binary content: {len(item.blob)} bytes")
+        if isinstance(item, BlobResourceContents):
+            data = base64.b64decode(item.blob)
+            print(f"Binary content: {len(data)} bytes")
             print(f"MIME type: {item.mime_type}")
 
             # Save to file
             with open("downloaded_logo.png", "wb") as f:
-                f.write(item.blob)
+                f.write(data)
 ```
 
 ## Multi-Server Clients

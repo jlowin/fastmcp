@@ -16,7 +16,7 @@
       "dark": "#475569",
       "light": "#1e3a5f"
     },
-    "content": "FastMCP 4 is in beta — check out [what's new](/getting-started/whats-new)!"
+    "content": "FastMCP 4 is in beta — build stateful applications on sessionless MCP. [See what's new](/getting-started/whats-new)."
   },
   "colors": {
     "dark": "#f72585",
