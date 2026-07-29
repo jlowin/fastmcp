@@ -9,7 +9,7 @@ tag: NEW
 
 **[v4.0.0b1: Fourgone Conclusion](https://github.com/PrefectHQ/fastmcp/releases/tag/v4.0.0b1)**
 
-FastMCP 4 makes stateful MCP applications work on the sessionless `2026-07-28` protocol while one deployment continues serving handshake-era clients. Tools can ask follow-up questions across requests, preserve authenticated user state, and move long-running work into durable background tasks without sticky sessions. Protocol extensions and enterprise identity become first-class surfaces, and most FastMCP 3 servers upgrade unchanged even though MCP Python SDK v2 rewrote the engine underneath them. Server-initiated sampling and roots are removed from the server API; the [upgrade guide](/getting-started/upgrading/from-fastmcp-3) covers their replacements.
+FastMCP 4 makes stateful MCP applications work on the sessionless `2026-07-28` protocol while one deployment continues serving handshake-era clients. Tools can ask follow-up questions across requests, preserve authenticated user state, and move long-running work into background tasks without sticky sessions. Protocol extensions and enterprise identity become first-class surfaces, and most FastMCP 3 servers upgrade unchanged even though MCP Python SDK v2 rewrote the engine underneath them. Server-initiated sampling and roots are removed from the server API; the [upgrade guide](/getting-started/upgrading/from-fastmcp-3) covers their replacements.
 
 ### New Features 🎉
 * Migrate to MCP Python SDK v2 by [@jlowin](https://github.com/jlowin) in [#4437](https://github.com/PrefectHQ/fastmcp/pull/4437)

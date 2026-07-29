@@ -5,7 +5,7 @@ description: FastMCP 4 makes stateful MCP applications work on the sessionless p
 icon: sparkles
 ---
 
-FastMCP 4 makes stateful MCP applications work on MCP's sessionless protocol. Tools can ask follow-up questions across requests, preserve authenticated user state, and move long-running work into durable background tasks without sticky sessions or a continuously connected client.
+FastMCP 4 makes stateful MCP applications work on MCP's sessionless protocol. Tools can ask follow-up questions across requests, preserve authenticated user state, and move long-running work into background tasks without sticky sessions or a continuously connected client.
 
 The protocol changed completely underneath those APIs. Your application usually does not: one FastMCP server negotiates both protocol eras per connection, and most FastMCP 3 servers upgrade unchanged.
 
@@ -39,7 +39,7 @@ On modern connections, FastMCP also attaches the method, target name, and opted-
 
 ## Stateful applications
 
-The modern protocol removes transport-level sessions, but applications still need conversations, user state, and long-running work. FastMCP moves those concerns into explicit application primitives that survive fresh connections, load balancing, and worker restarts.
+The modern protocol removes transport-level sessions, but applications still need conversations, user state, and long-running work. FastMCP moves those concerns into explicit application primitives that survive fresh connections. Shared stores and request-state keys extend them across replicas and worker restarts.
 
 ### Interactive tools
 
@@ -47,13 +47,21 @@ Many useful tools need more than one exchange. A booking tool asks for a destina
 
 On the modern protocol, the tool returns a description of the input it needs. That result completes the request normally. The client fulfils the request and calls the tool again with the answer attached; the tool runs from the top, reads `ctx.input_responses`, and either asks another question or returns its final result.
 
-Every round is independent, so no process has to remain alive while the user responds:
+Each request completes while the user responds. Single-process servers use an automatic process-local key to protect the state carried between rounds; load-balanced deployments configure one shared key so any replica can validate and resume the next round:
 
 ```python
+import os
+
 from fastmcp import Context, FastMCP
+from mcp.server.request_state import RequestStateSecurity
 from mcp.types import ElicitRequest, ElicitRequestFormParams, InputRequiredResult
 
-mcp = FastMCP("Booking")
+mcp = FastMCP(
+    "Booking",
+    request_state_security=RequestStateSecurity(
+        keys=[os.environ["REQUEST_STATE_KEY"].encode()]
+    ),
+)
 
 
 @mcp.tool
@@ -78,11 +86,15 @@ async def book_flight(ctx: Context) -> str | InputRequiredResult:
             },
         )
 
-    destination = answers["destination"].content["destination"]
+    response = answers["destination"]
+    if response.action != "accept" or response.content is None:
+        return "Booking cancelled."
+
+    destination = response.content["destination"]
     return f"Booked a flight to {destination}."
 ```
 
-A FastMCP client drives the loop through its existing elicitation handler, so client code receives the terminal result without managing the intermediate rounds. See [Elicitation on the modern protocol](/servers/elicitation#elicitation-on-the-modern-protocol).
+Every replica must receive the same `REQUEST_STATE_KEY`, containing at least 32 bytes of secret key material. A FastMCP client drives the loop through its existing elicitation handler, so client code receives the terminal result without managing the intermediate rounds. See [Elicitation on the modern protocol](/servers/elicitation#elicitation-on-the-modern-protocol).
 
 ### Session state
 
@@ -105,11 +117,13 @@ async def remember(fact: str, session: UserSession) -> str:
     return f"Remembered {len(facts)} facts."
 ```
 
-`UserSession` requires [authentication](/servers/auth/authentication), since an unauthenticated request has no user to key on. When one user needs several independent buckets, such as separate carts or conversations, `SessionId` exposes the handle as an explicit string argument. See [Session state](/servers/sessions).
+`UserSession` requires [authentication](/servers/auth/authentication), since an unauthenticated request has no user to key on. When one user needs several independent buckets, such as separate carts or conversations, `SessionId` exposes the handle as an explicit string argument.
+
+The default in-memory state store is process-local. To preserve state across restarts or share it among replicas, pass a shared persistent `session_state_store`. See [Session state](/servers/sessions).
 
 ### Background work
 
-Long-running tools create a different kind of state problem: holding a request open for several minutes invites timeouts and leaves the user unable to tell whether work is progressing. Background tasks accept the call and return a handle immediately, then let the client poll while durable work proceeds elsewhere.
+Long-running tools create a different kind of state problem: holding a request open for several minutes invites timeouts and leaves the user unable to tell whether work is progressing. Background tasks accept the call and return a handle immediately, then let the client poll while work proceeds asynchronously.
 
 FastMCP implements the `io.modelcontextprotocol/tasks` extension in the optional `fastmcp-tasks` package. The authoring API remains `@mcp.tool(task=True)`, backed by [Docket](https://github.com/chrisguidry/docket):
 
@@ -131,6 +145,8 @@ async def slow_computation(duration: int) -> str:
 ```
 
 `fastmcp.Client` handles the task handle and polling cycle, so `client.call_tool(...)` returns the same way whether the tool ran inline or in the background. See [Background tasks](/servers/tasks).
+
+`TasksExtension()` uses an in-memory, single-process backend by default. Configure a Redis or Valkey backend for durable work that survives restarts and runs across separate workers.
 
 ## Extensible protocol
 

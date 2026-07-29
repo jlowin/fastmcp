@@ -285,7 +285,7 @@ auth = OAuthProxy(..., client_storage=MemoryStore())
 <VersionBadge version="2.13.0" />
   Secret used to sign FastMCP JWT tokens issued to clients. How the key is derived depends on what you pass:
 
-  - **`bytes`** are used as-is, with no stretching, so supply 32 bytes of real entropy.
+  - **`bytes`** are used as-is, with no stretching, so supply at least 32 bytes of high-entropy key material. With the default file-backed client storage, the bytes must also decode as UTF-8; use `secrets.token_urlsafe(32).encode()` instead of raw `secrets.token_bytes()`, or configure `client_storage` explicitly.
   - **A string** is stretched into a 32-byte key with PBKDF2 (1,000,000 iterations), since a supplied string may be low-entropy. Strings shorter than 12 characters also log a warning.
   - **`None`** (the default) derives a 32-byte key from the upstream client secret using HKDF.
 
