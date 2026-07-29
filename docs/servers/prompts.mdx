@@ -455,7 +455,7 @@ from fastmcp import FastMCP
 
 mcp = FastMCP(
     name="PromptServer",
-    on_duplicate="error"  # Raise an error if a name is duplicated
+    on_duplicate="error"  # Raise an error on an exact duplicate
 )
 
 @mcp.prompt

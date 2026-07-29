@@ -800,7 +800,7 @@ from fastmcp import FastMCP
 
 mcp = FastMCP(
     name="ResourceServer",
-    on_duplicate="error" # Raise error on duplicates
+    on_duplicate="error" # Raise an error on an exact duplicate
 )
 
 @mcp.resource("data://config")
