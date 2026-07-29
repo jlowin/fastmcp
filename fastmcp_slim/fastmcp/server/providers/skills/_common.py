@@ -104,7 +104,13 @@ def parse_frontmatter(content: str) -> tuple[dict[str, Any], str]:
     # YAML may type `description: true` / dates as non-str, but SkillInfo.description
     # is a str field that callers truthiness-check.
     if "description" in parsed and parsed["description"] is not None:
-        parsed["description"] = str(parsed["description"])
+        if not isinstance(parsed["description"], str):
+            # YAML 1.1 coerces bare words like `yes` to non-str; recover the
+            # original text via the line-based parser instead.
+            raw = _parse_frontmatter_line_based(frontmatter_text).get("description")
+            parsed["description"] = (
+                raw if isinstance(raw, str) else str(parsed["description"])
+            )
 
     return parsed, remaining
 

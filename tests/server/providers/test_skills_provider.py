@@ -152,7 +152,7 @@ Body
         assert frontmatter["enabled"] is True
         assert isinstance(frontmatter["enabled"], bool)
 
-    def test_frontmatter_description_bool_coerced_to_str(self):
+    def test_frontmatter_description_bool_recovers_original_text(self):
         content = """---
 description: true
 ---
@@ -160,8 +160,40 @@ description: true
 Body
 """
         frontmatter, body = parse_frontmatter(content)
-        assert frontmatter["description"] == "True"
+        assert frontmatter["description"] == "true"
         assert isinstance(frontmatter["description"], str)
+
+    def test_frontmatter_description_yes_not_coerced_to_true(self):
+        # FastMCP #4416 regression: `yes` bare word previously coerced to True.
+        content = """---
+description: yes
+---
+
+Body
+"""
+        frontmatter, body = parse_frontmatter(content)
+        assert frontmatter["description"] == "yes"
+
+    def test_frontmatter_description_no_not_coerced_to_false(self):
+        content = """---
+description: no
+---
+
+Body
+"""
+        frontmatter, body = parse_frontmatter(content)
+        assert frontmatter["description"] == "no"
+
+    def test_frontmatter_description_numeric_scalar_preserves_original_text(self):
+        # YAML resolves `1.10` to float 1.1, dropping the trailing zero the author wrote.
+        content = """---
+description: 1.10
+---
+
+Body
+"""
+        frontmatter, body = parse_frontmatter(content)
+        assert frontmatter["description"] == "1.10"
 
 
 class TestSkillProvider:
