@@ -1022,7 +1022,10 @@ class Client(
                         raise RuntimeError(
                             "Session task completed without exception but connection failed"
                         )
-                    raise _connection_failure(exception) from exception
+                    failure = _connection_failure(exception)
+                    if failure is exception:
+                        raise exception
+                    raise failure from exception
 
             self._session_state.nesting_counter += 1
 
