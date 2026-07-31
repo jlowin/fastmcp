@@ -1,5 +1,8 @@
 from typing import TYPE_CHECKING
 
+__all__ = [
+    "AuthPlaneAuthProvider",
+]
 from .auth import (
     OAuthProvider,
     TokenVerifier,
