@@ -221,7 +221,9 @@ class StdioMCPServer(BaseModel):
         )
 
 
-class TransformingStdioMCPServer(_TransformingMCPServerMixin, StdioMCPServer):
+class TransformingStdioMCPServer(  # ty: ignore[invalid-method-override]
+    _TransformingMCPServerMixin, StdioMCPServer
+):
     """A Stdio server with tool transforms."""
 
 
@@ -288,7 +290,9 @@ class RemoteMCPServer(BaseModel):
             )
 
 
-class TransformingRemoteMCPServer(_TransformingMCPServerMixin, RemoteMCPServer):
+class TransformingRemoteMCPServer(  # ty: ignore[invalid-method-override]
+    _TransformingMCPServerMixin, RemoteMCPServer
+):
     """A Remote server with tool transforms."""
 
 
