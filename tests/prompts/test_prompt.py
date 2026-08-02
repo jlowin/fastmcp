@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import Annotated, Any
 
 import pytest
@@ -348,6 +349,26 @@ class TestPromptTypeConversion:
         result = await prompt.render(arguments={"value": "null"})
 
         assert result.messages == [Message("NoneType:None")]
+
+    @pytest.mark.parametrize(
+        ("annotation", "value", "expected"),
+        [
+            (bytes, '"hello"', b"hello"),
+            (Path, '"folder/file.txt"', Path("folder/file.txt")),
+        ],
+    )
+    async def test_string_coercible_non_string_annotations_decode_json(
+        self, annotation: Any, value: str, expected: Any
+    ):
+        def typed_prompt(value):
+            return f"{type(value).__name__}:{value!r}"
+
+        typed_prompt.__annotations__ = {"value": annotation, "return": str}
+        prompt = Prompt.from_function(typed_prompt)
+
+        result = await prompt.render(arguments={"value": value})
+
+        assert result.messages == [Message(f"{type(expected).__name__}:{expected!r}")]
 
 
 class TestPromptArgumentDescriptions:

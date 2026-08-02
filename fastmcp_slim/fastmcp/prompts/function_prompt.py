@@ -271,17 +271,30 @@ class FunctionPrompt(Prompt):
                     # Try to convert string argument using type adapter
                     try:
                         adapter = get_cached_typeadapter(param.annotation)
-                        # Preserve the MCP wire string whenever the annotation
-                        # accepts it. If it does not, decode it as JSON for
-                        # structured and scalar non-string types.
+                        # Preserve the MCP wire string when validation keeps it
+                        # as a string. Non-string results still prefer JSON
+                        # decoding so coercible types such as bytes and Path do
+                        # not retain JSON quote characters.
                         try:
-                            converted_kwargs[param_name] = adapter.validate_python(
-                                param_value
-                            )
+                            python_value = adapter.validate_python(param_value)
                         except (ValueError, TypeError, pydantic_core.ValidationError):
                             converted_kwargs[param_name] = adapter.validate_json(
                                 param_value
                             )
+                        else:
+                            if isinstance(python_value, str):
+                                converted_kwargs[param_name] = python_value
+                            else:
+                                try:
+                                    converted_kwargs[param_name] = (
+                                        adapter.validate_json(param_value)
+                                    )
+                                except (
+                                    ValueError,
+                                    TypeError,
+                                    pydantic_core.ValidationError,
+                                ):
+                                    converted_kwargs[param_name] = python_value
                     except (ValueError, TypeError, pydantic_core.ValidationError) as e:
                         # If conversion fails, provide informative error
                         raise PromptError(
