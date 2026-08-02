@@ -32,8 +32,10 @@ def _could_be_prefab(value_or_type: Any) -> bool:
         value_or_type if isinstance(value_or_type, type) else type(value_or_type)
     )
     module = getattr(candidate_type, "__module__", "")
-    return "prefab_ui" in sys.modules or module == "prefab_ui" or module.startswith(
-        "prefab_ui."
+    return (
+        "prefab_ui" in sys.modules
+        or module == "prefab_ui"
+        or module.startswith("prefab_ui.")
     )
 
 
