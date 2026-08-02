@@ -263,24 +263,23 @@ class FunctionPrompt(Prompt):
             if param_name in sig.parameters:
                 param = sig.parameters[param_name]
 
-                # If parameter has no annotation or annotation is str, pass as-is
-                if (
-                    param.annotation == inspect.Parameter.empty
-                    or param.annotation is str
-                ) or not isinstance(param_value, str):
+                if param.annotation == inspect.Parameter.empty or not isinstance(
+                    param_value, str
+                ):
                     converted_kwargs[param_name] = param_value
                 else:
                     # Try to convert string argument using type adapter
                     try:
                         adapter = get_cached_typeadapter(param.annotation)
-                        # Try JSON parsing first for complex types
+                        # Preserve the MCP wire string whenever the annotation
+                        # accepts it. If it does not, decode it as JSON for
+                        # structured and scalar non-string types.
                         try:
-                            converted_kwargs[param_name] = adapter.validate_json(
+                            converted_kwargs[param_name] = adapter.validate_python(
                                 param_value
                             )
                         except (ValueError, TypeError, pydantic_core.ValidationError):
-                            # Fallback to direct validation
-                            converted_kwargs[param_name] = adapter.validate_python(
+                            converted_kwargs[param_name] = adapter.validate_json(
                                 param_value
                             )
                     except (ValueError, TypeError, pydantic_core.ValidationError) as e:

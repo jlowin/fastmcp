@@ -1,5 +1,8 @@
+from typing import Annotated, Any
+
 import pytest
 from mcp_types import EmbeddedResource, TextResourceContents
+from pydantic import Field
 
 from fastmcp.prompts.base import (
     Message,
@@ -312,6 +315,39 @@ class TestPromptTypeConversion:
         )
 
         assert result.messages == [Message("Hello world (repeated 3 times)")]
+
+    @pytest.mark.parametrize(
+        ("annotation", "value"),
+        [
+            (Annotated[str, Field(description="Text")], '"hello"'),
+            (str | None, "null"),
+            (Any, "123"),
+            (object, "true"),
+            (int | str, "42"),
+        ],
+    )
+    async def test_string_compatible_annotations_preserve_wire_strings(
+        self, annotation: Any, value: str
+    ):
+        def typed_prompt(value):
+            return f"{type(value).__name__}:{value!r}"
+
+        typed_prompt.__annotations__ = {"value": annotation, "return": str}
+        prompt = Prompt.from_function(typed_prompt)
+
+        result = await prompt.render(arguments={"value": value})
+
+        assert result.messages == [Message(f"str:{value!r}")]
+
+    async def test_optional_non_string_still_decodes_json_null(self):
+        def optional_integer_prompt(value: int | None) -> str:
+            return f"{type(value).__name__}:{value!r}"
+
+        prompt = Prompt.from_function(optional_integer_prompt)
+
+        result = await prompt.render(arguments={"value": "null"})
+
+        assert result.messages == [Message("NoneType:None")]
 
 
 class TestPromptArgumentDescriptions:
