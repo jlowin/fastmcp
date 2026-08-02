@@ -10,7 +10,6 @@ from logging import Logger
 from typing import Any, Literal, cast, overload
 
 import mcp_types
-from key_value.aio.errors import SerializationError
 from mcp import LoggingLevel, ServerSession
 from mcp.server.context import ServerRequestContext
 from mcp_types import (
@@ -1146,10 +1145,9 @@ class Context:
                 value=StateValue(value=value),
                 ttl=self._STATE_TTL_SECONDS,
             )
-        except (ValueError, SerializationError) as e:
+        except ValueError as e:
             # Pydantic raises PydanticSerializationError (a ValueError) and the
-            # key_value library raises SerializationError; both carry "serialize"
-            # in the message. Other ValueErrors propagate unchanged.
+            # message carries "serialize". Other ValueErrors propagate unchanged.
             if "serialize" in str(e).lower():
                 raise TypeError(
                     f"Value for state key {key!r} is not serializable. "
@@ -1158,6 +1156,19 @@ class Context:
                     f"request-scoped and will not persist across requests."
                 ) from e
             raise
+        except Exception as e:
+            # Import the optional storage implementation only on its error path,
+            # rather than adding the key_value package to every server startup.
+            from key_value.aio.errors import SerializationError
+
+            if not isinstance(e, SerializationError):
+                raise
+            raise TypeError(
+                f"Value for state key {key!r} is not serializable. "
+                f"Use set_state({key!r}, value, serializable=False) to store "
+                f"non-serializable values. Note: non-serializable state is "
+                f"request-scoped and will not persist across requests."
+            ) from e
 
     async def get_state(self, key: str) -> Any:
         """Get a value from the state store.

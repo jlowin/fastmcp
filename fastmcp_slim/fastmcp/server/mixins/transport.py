@@ -11,13 +11,13 @@ import anyio
 import uvicorn
 from mcp.server.lowlevel.server import NotificationOptions
 from mcp.server.stdio import stdio_server
+from mcp.server.streamable_http import EventStore
 from starlette.middleware import Middleware as ASGIMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
 from starlette.routing import BaseRoute, Route
 
 import fastmcp
-from fastmcp.server.event_store import EventStore
 from fastmcp.server.http import (
     HostOriginProtection,
     StarletteWithLifespan,

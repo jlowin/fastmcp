@@ -20,9 +20,6 @@ from typing import TYPE_CHECKING, Any, Generic, Literal, TypeVar, cast, overload
 
 import httpx2
 import mcp_types
-from key_value.aio.adapters.pydantic import PydanticAdapter
-from key_value.aio.protocols import AsyncKeyValue
-from key_value.aio.stores.memory import MemoryStore
 from mcp.server.lowlevel.server import LifespanResultT
 from mcp.server.request_state import RequestStateSecurity
 from mcp.shared.exceptions import MCPError
@@ -101,6 +98,9 @@ from fastmcp.utilities.versions import (
 )
 
 if TYPE_CHECKING:
+    from key_value.aio.adapters.pydantic import PydanticAdapter
+    from key_value.aio.protocols import AsyncKeyValue
+
     from fastmcp.client import Client
     from fastmcp.client.client import SDKServer
     from fastmcp.client.transports import ClientTransport, ClientTransportT
@@ -333,12 +333,8 @@ class FastMCP(
         self._additional_http_routes: list[BaseRoute] = []
 
         # Session-scoped state store (shared across all requests)
-        self._state_storage: AsyncKeyValue = session_state_store or MemoryStore()
-        self._state_store: PydanticAdapter[StateValue] = PydanticAdapter[StateValue](
-            key_value=self._state_storage,
-            pydantic_model=StateValue,
-            default_collection="fastmcp_state",
-        )
+        self._state_storage: AsyncKeyValue | None = session_state_store
+        self.__state_store: PydanticAdapter[StateValue] | None = None
 
         # Create LocalProvider for local components
         self._local_provider: LocalProvider = LocalProvider(
@@ -495,6 +491,22 @@ class FastMCP(
 
     def __repr__(self) -> str:
         return f"{type(self).__name__}({self.name!r})"
+
+    @property
+    def _state_store(self) -> PydanticAdapter[StateValue]:
+        """Create the session-state adapter only when state is first used."""
+        if self.__state_store is None:
+            from key_value.aio.adapters.pydantic import PydanticAdapter
+            from key_value.aio.stores.memory import MemoryStore
+
+            if self._state_storage is None:
+                self._state_storage = MemoryStore()
+            self.__state_store = PydanticAdapter[StateValue](
+                key_value=self._state_storage,
+                pydantic_model=StateValue,
+                default_collection="fastmcp_state",
+            )
+        return self.__state_store
 
     @property
     def name(self) -> str:
