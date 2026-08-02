@@ -26,6 +26,11 @@ from pydantic.json_schema import SkipJsonSchema
 from fastmcp.utilities.authorization import AuthCheck
 from fastmcp.utilities.components import FastMCPComponent
 from fastmcp.utilities.logging import get_logger
+from fastmcp.utilities.prefab import (
+    is_prefab_app,
+    is_prefab_component,
+    prefab_app_from_component,
+)
 from fastmcp.utilities.tasks import TaskConfig
 from fastmcp.utilities.types import (
     Audio,
@@ -34,14 +39,6 @@ from fastmcp.utilities.types import (
     NotSet,
     NotSetT,
 )
-
-try:
-    from prefab_ui.app import PrefabApp as _PrefabApp
-    from prefab_ui.components.base import Component as _PrefabComponent
-
-    _HAS_PREFAB = True
-except ImportError:
-    _HAS_PREFAB = False
 
 if TYPE_CHECKING:
     from fastmcp.tools.function_tool import FunctionTool
@@ -128,13 +125,12 @@ class ToolResult(BaseModel):
         if structured_content is not None:
             # Convert Prefab types to their wire-format envelope before
             # generic serialization, so the renderer gets the right shape.
-            if _HAS_PREFAB:
-                if isinstance(structured_content, _PrefabApp):
-                    structured_content = _prefab_to_json(structured_content)
-                elif isinstance(structured_content, _PrefabComponent):
-                    structured_content = _prefab_to_json(
-                        _PrefabApp(view=structured_content)
-                    )
+            if is_prefab_app(structured_content):
+                structured_content = _prefab_to_json(structured_content)
+            elif is_prefab_component(structured_content):
+                structured_content = _prefab_to_json(
+                    prefab_app_from_component(structured_content)
+                )
 
             try:
                 structured_content = pydantic_core.to_jsonable_python(
@@ -379,17 +375,16 @@ class Tool(FastMCPComponent):
         if isinstance(raw_value, CallToolResult):
             return ToolResult.from_mcp_result(raw_value)
 
-        if _HAS_PREFAB:
-            if isinstance(raw_value, _PrefabApp):
-                return _prefab_to_tool_result(
-                    raw_value,
-                    fastmcp_app_name=_get_fastmcp_app_name(self),
-                )
-            if isinstance(raw_value, _PrefabComponent):
-                return _prefab_to_tool_result(
-                    _PrefabApp(view=raw_value),
-                    fastmcp_app_name=_get_fastmcp_app_name(self),
-                )
+        if is_prefab_app(raw_value):
+            return _prefab_to_tool_result(
+                raw_value,
+                fastmcp_app_name=_get_fastmcp_app_name(self),
+            )
+        if is_prefab_component(raw_value):
+            return _prefab_to_tool_result(
+                prefab_app_from_component(raw_value),
+                fastmcp_app_name=_get_fastmcp_app_name(self),
+            )
 
         content = _convert_to_content(raw_value)
 
