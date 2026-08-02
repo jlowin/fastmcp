@@ -117,6 +117,22 @@ class TestParseMcpConfig:
         assert all(s.source == "test-source" for s in servers)
         assert all(s.config_path == path for s in servers)
 
+    def test_invalid_server_does_not_hide_valid_servers(self, tmp_path: Path):
+        path = tmp_path / "config.json"
+        _write_config(
+            path,
+            {
+                "mcpServers": {
+                    "working": {"command": "python", "args": ["server.py"]},
+                    "broken": {"args": ["missing-command.py"]},
+                }
+            },
+        )
+
+        servers = _parse_mcp_config(path, "project")
+
+        assert [server.name for server in servers] == ["working"]
+
     def test_missing_file(self, tmp_path: Path):
         path = tmp_path / "nonexistent.json"
         servers = _parse_mcp_config(path, "test")

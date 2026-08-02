@@ -97,24 +97,29 @@ def _parse_mcp_servers(
     if not servers_dict:
         return []
 
-    normalized = {
-        name: _normalize_server_entry(entry)
-        for name, entry in servers_dict.items()
-        if isinstance(entry, dict)
-    }
+    discovered: list[DiscoveredServer] = []
+    for name, entry in servers_dict.items():
+        if not isinstance(entry, dict):
+            continue
 
-    try:
-        config = MCPConfig.from_dict({"mcpServers": normalized})
-    except Exception as exc:
-        logger.warning("Could not parse MCP servers from %s: %s", config_path, exc)
-        return []
+        normalized = _normalize_server_entry(entry)
+        try:
+            config = MCPConfig.from_dict({"mcpServers": {name: normalized}})
+        except Exception as exc:
+            logger.warning(
+                "Could not parse MCP server %r from %s: %s", name, config_path, exc
+            )
+            continue
 
-    return [
-        DiscoveredServer(
-            name=name, source=source, config=server, config_path=config_path
-        )
-        for name, server in config.mcpServers.items()
-    ]
+        server = config.mcpServers.get(name)
+        if server is not None:
+            discovered.append(
+                DiscoveredServer(
+                    name=name, source=source, config=server, config_path=config_path
+                )
+            )
+
+    return discovered
 
 
 def _parse_mcp_config(path: Path, source: str) -> list[DiscoveredServer]:
