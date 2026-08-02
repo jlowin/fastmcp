@@ -27,20 +27,32 @@ Example:
 
 from typing import TYPE_CHECKING
 
-from fastmcp.server.providers.aggregate import AggregateProvider
-from fastmcp.server.providers.base import Provider
-from fastmcp.server.providers.fastmcp_provider import FastMCPProvider
-from fastmcp.server.providers.filesystem import FileSystemProvider
-from fastmcp.server.providers.local_provider import LocalProvider
-from fastmcp.server.providers.skills import (
-    ClaudeSkillsProvider,
-    SkillProvider,
-    SkillsDirectoryProvider,
+from fastmcp.utilities.lazy_imports import (
+    list_module_attributes,
+    resolve_lazy_import,
 )
 
 if TYPE_CHECKING:
+    from fastmcp.server.providers.aggregate import (
+        AggregateProvider as AggregateProvider,
+    )
+    from fastmcp.server.providers.base import Provider as Provider
+    from fastmcp.server.providers.fastmcp_provider import (
+        FastMCPProvider as FastMCPProvider,
+    )
+    from fastmcp.server.providers.filesystem import (
+        FileSystemProvider as FileSystemProvider,
+    )
+    from fastmcp.server.providers.local_provider import LocalProvider as LocalProvider
     from fastmcp.server.providers.openapi import OpenAPIProvider as OpenAPIProvider
     from fastmcp.server.providers.proxy import ProxyProvider as ProxyProvider
+    from fastmcp.server.providers.skills import (
+        ClaudeSkillsProvider as ClaudeSkillsProvider,
+    )
+    from fastmcp.server.providers.skills import SkillProvider as SkillProvider
+    from fastmcp.server.providers.skills import (
+        SkillsDirectoryProvider as SkillsDirectoryProvider,
+    )
 
 __all__ = [
     "AggregateProvider",
@@ -55,15 +67,35 @@ __all__ = [
     "SkillsDirectoryProvider",
 ]
 
+_LAZY_IMPORTS = {
+    "AggregateProvider": ("fastmcp.server.providers.aggregate", "AggregateProvider"),
+    "ClaudeSkillsProvider": (
+        "fastmcp.server.providers.skills",
+        "ClaudeSkillsProvider",
+    ),
+    "FastMCPProvider": (
+        "fastmcp.server.providers.fastmcp_provider",
+        "FastMCPProvider",
+    ),
+    "FileSystemProvider": (
+        "fastmcp.server.providers.filesystem",
+        "FileSystemProvider",
+    ),
+    "LocalProvider": ("fastmcp.server.providers.local_provider", "LocalProvider"),
+    "OpenAPIProvider": ("fastmcp.server.providers.openapi", "OpenAPIProvider"),
+    "Provider": ("fastmcp.server.providers.base", "Provider"),
+    "ProxyProvider": ("fastmcp.server.providers.proxy", "ProxyProvider"),
+    "SkillProvider": ("fastmcp.server.providers.skills", "SkillProvider"),
+    "SkillsDirectoryProvider": (
+        "fastmcp.server.providers.skills",
+        "SkillsDirectoryProvider",
+    ),
+}
+
 
 def __getattr__(name: str) -> object:
-    """Lazy import for providers to avoid circular imports."""
-    if name == "ProxyProvider":
-        from fastmcp.server.providers.proxy import ProxyProvider
+    return resolve_lazy_import(name, __name__, globals(), _LAZY_IMPORTS)
 
-        return ProxyProvider
-    if name == "OpenAPIProvider":
-        from fastmcp.server.providers.openapi import OpenAPIProvider
 
-        return OpenAPIProvider
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+def __dir__() -> list[str]:
+    return list_module_attributes(globals(), _LAZY_IMPORTS)

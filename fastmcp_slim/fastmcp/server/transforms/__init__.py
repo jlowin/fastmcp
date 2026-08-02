@@ -23,12 +23,31 @@ from __future__ import annotations
 from collections.abc import Awaitable, Sequence
 from typing import TYPE_CHECKING, Protocol
 
+from fastmcp.utilities.lazy_imports import (
+    list_module_attributes,
+    resolve_lazy_import,
+)
 from fastmcp.utilities.versions import VersionSpec
 
 if TYPE_CHECKING:
     from fastmcp.prompts.base import Prompt
     from fastmcp.resources.base import Resource
     from fastmcp.resources.template import ResourceTemplate
+    from fastmcp.server.transforms.namespace import Namespace as Namespace
+    from fastmcp.server.transforms.prompts_as_tools import (
+        PromptsAsTools as PromptsAsTools,
+    )
+    from fastmcp.server.transforms.resources_as_tools import (
+        ResourcesAsTools as ResourcesAsTools,
+    )
+    from fastmcp.server.transforms.tool_transform import (
+        ToolTransform as ToolTransform,
+    )
+    from fastmcp.server.transforms.version_filter import (
+        VersionFilter as VersionFilter,
+    )
+    from fastmcp.server.transforms.visibility import Visibility as Visibility
+    from fastmcp.server.transforms.visibility import is_enabled as is_enabled
     from fastmcp.tools.base import Tool
 
 
@@ -219,14 +238,6 @@ class Transform:
         return await call_next(name, version=version)
 
 
-# Re-export built-in transforms (must be after Transform class to avoid circular imports)
-from fastmcp.server.transforms.visibility import Visibility, is_enabled  # noqa: E402
-from fastmcp.server.transforms.namespace import Namespace  # noqa: E402
-from fastmcp.server.transforms.prompts_as_tools import PromptsAsTools  # noqa: E402
-from fastmcp.server.transforms.resources_as_tools import ResourcesAsTools  # noqa: E402
-from fastmcp.server.transforms.tool_transform import ToolTransform  # noqa: E402
-from fastmcp.server.transforms.version_filter import VersionFilter  # noqa: E402
-
 __all__ = [
     "Namespace",
     "PromptsAsTools",
@@ -238,3 +249,33 @@ __all__ = [
     "Visibility",
     "is_enabled",
 ]
+
+_LAZY_IMPORTS = {
+    "Namespace": ("fastmcp.server.transforms.namespace", "Namespace"),
+    "PromptsAsTools": (
+        "fastmcp.server.transforms.prompts_as_tools",
+        "PromptsAsTools",
+    ),
+    "ResourcesAsTools": (
+        "fastmcp.server.transforms.resources_as_tools",
+        "ResourcesAsTools",
+    ),
+    "ToolTransform": (
+        "fastmcp.server.transforms.tool_transform",
+        "ToolTransform",
+    ),
+    "VersionFilter": (
+        "fastmcp.server.transforms.version_filter",
+        "VersionFilter",
+    ),
+    "Visibility": ("fastmcp.server.transforms.visibility", "Visibility"),
+    "is_enabled": ("fastmcp.server.transforms.visibility", "is_enabled"),
+}
+
+
+def __getattr__(name: str) -> object:
+    return resolve_lazy_import(name, __name__, globals(), _LAZY_IMPORTS)
+
+
+def __dir__() -> list[str]:
+    return list_module_attributes(globals(), _LAZY_IMPORTS)
