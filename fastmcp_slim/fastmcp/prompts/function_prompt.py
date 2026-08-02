@@ -32,7 +32,7 @@ from fastmcp.utilities.authorization import AuthCheck
 from fastmcp.utilities.docstring_parsing import ParsedDocstring, parse_docstring
 from fastmcp.utilities.json_schema import compress_schema
 from fastmcp.utilities.logging import get_logger
-from fastmcp.utilities.types import get_cached_typeadapter
+from fastmcp.utilities.types import get_cached_typeadapter, is_class_member_of_type
 
 F = TypeVar("F", bound=Callable[..., Any])
 
@@ -263,10 +263,10 @@ class FunctionPrompt(Prompt):
             if param_name in sig.parameters:
                 param = sig.parameters[param_name]
 
-                # If parameter has no annotation or annotation is str, pass as-is
+                # If parameter has no annotation or resolves to str, pass as-is
                 if (
                     param.annotation == inspect.Parameter.empty
-                    or param.annotation is str
+                    or is_class_member_of_type(param.annotation, str)
                 ) or not isinstance(param_value, str):
                     converted_kwargs[param_name] = param_value
                 else:
