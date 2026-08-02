@@ -269,6 +269,53 @@ class TestDownloadSkill:
         downloaded = (result / "SKILL.md").read_text()
         assert downloaded == original
 
+    async def test_writes_text_resources_as_utf8(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        content = "Use the tool — then stop."
+        manifest = {
+            "skill": "unicode",
+            "files": [
+                {
+                    "path": "SKILL.md",
+                    "size": len(content.encode("utf-8")),
+                    "hash": "sha256:unicode",
+                }
+            ],
+        }
+        client = FakeResourceReader(
+            {
+                "skill://unicode/_manifest": [
+                    text_resource("skill://unicode/_manifest", json.dumps(manifest))
+                ],
+                "skill://unicode/SKILL.md": [
+                    text_resource("skill://unicode/SKILL.md", content)
+                ],
+            }
+        )
+        original_write_text = Path.write_text
+
+        def locale_sensitive_write_text(
+            path: Path,
+            data: str,
+            encoding: str | None = None,
+            errors: str | None = None,
+            newline: str | None = None,
+        ) -> int:
+            return original_write_text(
+                path,
+                data,
+                encoding=encoding or "ascii",
+                errors=errors,
+                newline=newline,
+            )
+
+        monkeypatch.setattr(Path, "write_text", locale_sensitive_write_text)
+
+        result = await download_skill(cast(Client, client), "unicode", tmp_path)
+
+        assert (result / "SKILL.md").read_text(encoding="utf-8") == content
+
     async def test_raises_if_exists_without_overwrite(
         self, skills_server: FastMCP, tmp_path: Path
     ):
