@@ -36,6 +36,28 @@ def valid_oidc_configuration_dict():
 class TestOCIProvider:
     """Test OCIProvider initialization."""
 
+    def test_cimd_can_be_disabled(self, valid_oidc_configuration_dict):
+        """The provider forwards the CIMD opt-out to OIDCProxy."""
+        with patch(
+            "fastmcp.server.auth.oidc_proxy.OIDCConfiguration.get_oidc_configuration"
+        ) as mock_get:
+            mock_get.return_value = OIDCConfiguration.model_validate(
+                valid_oidc_configuration_dict
+            )
+
+            provider = OCIProvider(
+                config_url=TEST_CONFIG_URL,
+                client_id=TEST_CLIENT_ID,
+                client_secret=TEST_CLIENT_SECRET,
+                audience=TEST_AUDIENCE,
+                base_url=TEST_BASE_URL,
+                client_storage=MemoryStore(),
+                jwt_signing_key="test-secret-key",
+                enable_cimd=False,
+            )
+
+            assert provider._cimd_manager is None
+
     def test_init_with_explicit_params(self, valid_oidc_configuration_dict):
         """Test initialization with explicit parameters."""
         with patch(
@@ -85,3 +107,4 @@ class TestOCIProvider:
             assert str(provider.base_url) == TEST_BASE_URL
             assert provider._redirect_path == TEST_REDIRECT_PATH
             assert provider._token_validator.required_scopes == TEST_REQUIRED_SCOPES
+            assert provider._cimd_manager is not None

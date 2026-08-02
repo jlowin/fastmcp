@@ -37,6 +37,20 @@ def mock_cognito_oidc_discovery():
 class TestAWSCognitoProvider:
     """Test AWSCognitoProvider initialization."""
 
+    def test_cimd_can_be_disabled(self):
+        """The provider forwards the CIMD opt-out to OIDCProxy."""
+        with mock_cognito_oidc_discovery():
+            provider = AWSCognitoProvider(
+                user_pool_id="us-east-1_XXXXXXXXX",
+                client_id="test_client",
+                client_secret="test_secret",
+                base_url="https://example.com",
+                jwt_signing_key="test-secret",
+                enable_cimd=False,
+            )
+
+            assert provider._cimd_manager is None
+
     def test_init_with_explicit_params(self):
         """Test initialization with explicit parameters."""
         with mock_cognito_oidc_discovery():
@@ -85,6 +99,7 @@ class TestAWSCognitoProvider:
             assert provider._redirect_path == "/auth/callback"
             assert provider._token_validator.required_scopes == ["openid"]
             assert provider.aws_region == "eu-central-1"
+            assert provider._cimd_manager is not None
 
     def test_oidc_discovery_integration(self):
         """Test that OIDC discovery endpoints are used correctly."""

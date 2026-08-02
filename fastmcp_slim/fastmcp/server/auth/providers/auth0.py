@@ -104,6 +104,7 @@ class Auth0Provider(OIDCProxy):
         fallback_refresh_token_expiry_seconds: int | None = None,
         fastmcp_access_token_expiry_seconds: int | None = None,
         token_expiry_threshold_seconds: int = 0,
+        enable_cimd: bool = True,
     ) -> None:
         """Initialize Auth0 OAuth provider.
 
@@ -148,6 +149,8 @@ class Auth0Provider(OIDCProxy):
                 refresh gracefully (e.g. `mcp-remote`). See `OAuthProxy` for details.
             token_expiry_threshold_seconds: Number of seconds before actual expiry to
                 treat a token as expired, refreshing early to avoid races. Defaults to 0.
+            enable_cimd: Whether to enable CIMD (Client ID Metadata Document) client support.
+                Defaults to True.
         """
         # Parse scopes if provided as string
         auth0_required_scopes = (
@@ -174,6 +177,7 @@ class Auth0Provider(OIDCProxy):
             fallback_refresh_token_expiry_seconds=fallback_refresh_token_expiry_seconds,
             fastmcp_access_token_expiry_seconds=fastmcp_access_token_expiry_seconds,
             token_expiry_threshold_seconds=token_expiry_threshold_seconds,
+            enable_cimd=enable_cimd,
         )
 
         logger.debug(
