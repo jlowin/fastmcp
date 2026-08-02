@@ -313,6 +313,41 @@ class TestPromptTypeConversion:
 
         assert result.messages == [Message("Hello world (repeated 3 times)")]
 
+    async def test_annotated_str_not_json_coerced(self):
+        """Test that Annotated[str] params pass strings through without JSON coercion."""
+        from typing import Annotated
+
+        from pydantic import Field
+
+        def annotated_str_prompt(
+            value: Annotated[str, Field(description="A string")],
+        ) -> str:
+            return f"value={value}"
+
+        prompt = Prompt.from_function(annotated_str_prompt)
+        result = await prompt.render(arguments={"value": '"hello"'})
+        assert result.messages == [Message('value="hello"')]
+
+    async def test_optional_str_not_json_coerced(self):
+        """Test that Optional[str] params pass strings through without JSON coercion."""
+
+        def optional_str_prompt(value: str | None = None) -> str:
+            return f"value={value}"
+
+        prompt = Prompt.from_function(optional_str_prompt)
+        result = await prompt.render(arguments={"value": "null"})
+        assert result.messages == [Message("value=null")]
+
+    async def test_union_str_none_not_json_coerced(self):
+        """Test that str | None params pass strings through without JSON coercion."""
+
+        def union_str_prompt(value: str | None = None) -> str:
+            return f"value={value}"
+
+        prompt = Prompt.from_function(union_str_prompt)
+        result = await prompt.render(arguments={"value": "null"})
+        assert result.messages == [Message("value=null")]
+
 
 class TestPromptArgumentDescriptions:
     def test_enhanced_descriptions_for_non_string_types(self):
