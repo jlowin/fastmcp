@@ -372,6 +372,20 @@ class TestPromptTypeConversion:
 
 
 class TestPromptArgumentDescriptions:
+    def test_string_compatible_annotation_guidance_preserves_raw_strings(self):
+        def documented_prompt(
+            text: Annotated[str, Field(description="Text")],
+        ) -> str:
+            return text
+
+        prompt = Prompt.from_function(documented_prompt)
+
+        assert prompt.arguments is not None
+        text_arg = next(arg for arg in prompt.arguments if arg.name == "text")
+        assert text_arg.description is not None
+        assert "Provide as a JSON string" not in text_arg.description
+        assert "Encode non-string values as JSON." in text_arg.description
+
     def test_enhanced_descriptions_for_non_string_types(self):
         """Test that non-string argument types get enhanced descriptions with JSON schema."""
 
@@ -400,7 +414,7 @@ class TestPromptArgumentDescriptions:
         assert numbers_arg is not None
         assert numbers_arg.description is not None
         assert (
-            "Provide as a JSON string matching the following schema:"
+            "Provide a value matching the following JSON schema:"
             in numbers_arg.description
         )
         assert '{"items":{"type":"integer"},"type":"array"}' in numbers_arg.description
@@ -411,7 +425,7 @@ class TestPromptArgumentDescriptions:
         assert metadata_arg is not None
         assert metadata_arg.description is not None
         assert (
-            "Provide as a JSON string matching the following schema:"
+            "Provide a value matching the following JSON schema:"
             in metadata_arg.description
         )
         assert (
@@ -425,7 +439,7 @@ class TestPromptArgumentDescriptions:
         assert threshold_arg is not None
         assert threshold_arg.description is not None
         assert (
-            "Provide as a JSON string matching the following schema:"
+            "Provide a value matching the following JSON schema:"
             in threshold_arg.description
         )
         assert '{"type":"number"}' in threshold_arg.description
@@ -436,7 +450,7 @@ class TestPromptArgumentDescriptions:
         assert active_arg is not None
         assert active_arg.description is not None
         assert (
-            "Provide as a JSON string matching the following schema:"
+            "Provide a value matching the following JSON schema:"
             in active_arg.description
         )
         assert '{"type":"boolean"}' in active_arg.description
@@ -467,7 +481,7 @@ class TestPromptArgumentDescriptions:
         assert "A list of integers to process" in numbers_arg.description
         assert "\n\n" in numbers_arg.description  # Should have newline separator
         assert (
-            "Provide as a JSON string matching the following schema:"
+            "Provide a value matching the following JSON schema:"
             in numbers_arg.description
         )
 
@@ -484,7 +498,7 @@ class TestPromptArgumentDescriptions:
             # String parameters should not have schema enhancement
             if arg.description is not None:
                 assert (
-                    "Provide as a JSON string matching the following schema:"
+                    "Provide a value matching the following JSON schema:"
                     not in arg.description
                 )
 
