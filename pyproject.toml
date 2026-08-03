@@ -157,6 +157,8 @@ exclude = [
     "examples/smart_home",              # needs phue
     "examples/apps/qr_server",          # needs qrcode
     "examples/providers/sqlite",        # needs aiosqlite
+    "examples/fastmcp_config_demo",     # needs pyautogui, Pillow
+    "examples/screenshot.py",           # needs pyautogui, Pillow
     "examples/memory.py",               # needs asyncpg, numpy, pydantic_ai, pgvector
     "examples/get_file.py",             # needs aiohttp
 ]
@@ -165,9 +167,8 @@ exclude = [
 python-version = "3.10"
 
 [tool.ty.analysis]
-# prefab_ui is the apps SDK; PIL is an optional runtime dependency used only
-# inside example tool bodies (screenshot demos) and is not installed here.
-replace-imports-with-any = ["prefab_ui.**", "PIL", "PIL.**"]
+# prefab_ui is the apps SDK and is not installed here.
+replace-imports-with-any = ["prefab_ui.**"]
 
 [tool.ty.rules]
 division-by-zero = "warn"
