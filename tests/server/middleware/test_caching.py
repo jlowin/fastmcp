@@ -249,6 +249,36 @@ class TestResponseCachingMiddleware:
             ),
         )
 
+    async def test_empty_tool_list_is_cached(self):
+        middleware = ResponseCachingMiddleware()
+        context = MagicMock()
+        call_next = AsyncMock(return_value=[])
+
+        assert await middleware.on_list_tools(context, call_next) == []
+        assert await middleware.on_list_tools(context, call_next) == []
+
+        call_next.assert_awaited_once()
+
+    async def test_empty_resource_list_is_cached(self):
+        middleware = ResponseCachingMiddleware()
+        context = MagicMock()
+        call_next = AsyncMock(return_value=[])
+
+        assert await middleware.on_list_resources(context, call_next) == []
+        assert await middleware.on_list_resources(context, call_next) == []
+
+        call_next.assert_awaited_once()
+
+    async def test_empty_prompt_list_is_cached(self):
+        middleware = ResponseCachingMiddleware()
+        context = MagicMock()
+        call_next = AsyncMock(return_value=[])
+
+        assert await middleware.on_list_prompts(context, call_next) == []
+        assert await middleware.on_list_prompts(context, call_next) == []
+
+        call_next.assert_awaited_once()
+
     @pytest.mark.parametrize(
         ("tool_name", "included_tools", "excluded_tools", "result"),
         [

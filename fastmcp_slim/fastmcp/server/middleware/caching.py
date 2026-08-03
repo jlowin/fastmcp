@@ -354,7 +354,8 @@ class ResponseCachingMiddleware(Middleware):
 
         cache_key: str = _get_auth_partition_key()
 
-        if cached_value := await self._list_tools_cache.get(key=cache_key):
+        cached_value = await self._list_tools_cache.get(key=cache_key)
+        if cached_value is not None:
             return cached_value
 
         tools: Sequence[Tool] = await call_next(context)
@@ -383,7 +384,8 @@ class ResponseCachingMiddleware(Middleware):
 
         cache_key: str = _get_auth_partition_key()
 
-        if cached_value := await self._list_resources_cache.get(key=cache_key):
+        cached_value = await self._list_resources_cache.get(key=cache_key)
+        if cached_value is not None:
             return cached_value
 
         resources: Sequence[Resource] = await call_next(context)
@@ -414,7 +416,8 @@ class ResponseCachingMiddleware(Middleware):
 
         cache_key: str = _get_auth_partition_key()
 
-        if cached_value := await self._list_prompts_cache.get(key=cache_key):
+        cached_value = await self._list_prompts_cache.get(key=cache_key)
+        if cached_value is not None:
             return cached_value
 
         prompts: Sequence[Prompt] = await call_next(context)
