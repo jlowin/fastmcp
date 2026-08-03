@@ -37,6 +37,11 @@ inputs:
     required: false
     default: ""
 
+  extra-allowed-tools:
+    description: "Additional comma-separated tools to append to allowed-tools"
+    required: false
+    default: ""
+
   model:
     description: "Model to use for Claude"
     required: false
