@@ -1,6 +1,7 @@
 """A middleware for response caching."""
 
 import hashlib
+import json
 from collections.abc import Sequence
 from logging import Logger
 from typing import Any, TypedDict
@@ -593,13 +594,23 @@ class ResponseCachingMiddleware(Middleware):
 
 
 def _get_arguments_str(arguments: dict[str, Any] | None) -> str:
-    """Get a string representation of the arguments."""
+    """Get a canonical string representation of the arguments.
+
+    Keys are sorted at every level so that arguments that differ only in the order the
+    client sent them produce the same string, and therefore the same cache key. JSON
+    object member order carries no meaning, and arguments are frequently model-generated,
+    so the same logical call can arrive with its keys in any order.
+    """
 
     if arguments is None:
         return "null"
 
     try:
-        return pydantic_core.to_json(value=arguments, fallback=str).decode()
+        return json.dumps(
+            pydantic_core.to_jsonable_python(arguments, fallback=str),
+            sort_keys=True,
+            default=str,
+        )
 
     except TypeError:
         return repr(arguments)

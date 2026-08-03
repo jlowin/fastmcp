@@ -4,6 +4,7 @@ import sys
 import tempfile
 import warnings
 from pathlib import Path
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import mcp_types
@@ -284,6 +285,56 @@ class TestResponseCachingMiddleware:
         )
         assert middleware1._matches_tool_cache_settings(tool_name=tool_name) is result
 
+    @pytest.mark.parametrize(
+        ("first", "second"),
+        [
+            ({"a": 5, "b": 3}, {"b": 3, "a": 5}),
+            ({"q": {"x": 1, "y": 2}}, {"q": {"y": 2, "x": 1}}),
+            ({"l": [{"x": 1, "y": 2}]}, {"l": [{"y": 2, "x": 1}]}),
+        ],
+        ids=["top level", "nested dict", "dict inside a list"],
+    )
+    def test_cache_keys_ignore_argument_order(
+        self, first: dict[str, Any], second: dict[str, Any]
+    ):
+        """Arguments that differ only in key order share a cache key.
+
+        JSON object member order carries no meaning and arguments are often
+        model-generated, so the same logical call can arrive in any order. Nesting is
+        covered too: normalizing only the top level would still miss.
+        """
+        assert first == second
+
+        assert _make_call_tool_cache_key(
+            mcp_types.CallToolRequestParams(name="tool", arguments=first)
+        ) == _make_call_tool_cache_key(
+            mcp_types.CallToolRequestParams(name="tool", arguments=second)
+        )
+
+    def test_get_prompt_cache_key_ignores_argument_order(self):
+        """`prompts/get` shares the same key builder helper, so it behaves the same.
+
+        Prompt arguments are string-valued, hence the separate case.
+        """
+        assert _make_get_prompt_cache_key(
+            mcp_types.GetPromptRequestParams(
+                name="prompt", arguments={"a": "5", "b": "3"}
+            )
+        ) == _make_get_prompt_cache_key(
+            mcp_types.GetPromptRequestParams(
+                name="prompt", arguments={"b": "3", "a": "5"}
+            )
+        )
+
+    def test_cache_keys_still_distinguish_different_arguments(self):
+        """Order-insensitivity must not collapse genuinely different arguments."""
+        swapped_values = _make_call_tool_cache_key(
+            mcp_types.CallToolRequestParams(name="tool", arguments={"a": 5, "b": 3})
+        ) != _make_call_tool_cache_key(
+            mcp_types.CallToolRequestParams(name="tool", arguments={"a": 3, "b": 5})
+        )
+        assert swapped_values
+
 
 @pytest.mark.skipif(
     sys.platform == "win32",
@@ -423,6 +474,24 @@ class TestResponseCachingMiddlewareIntegration:
                 "add", {"a": 5, "b": 3}
             )
             assert call_tool_result_one == call_tool_result_two
+
+    async def test_call_tool_with_reordered_arguments_hits_the_cache(
+        self,
+        caching_server: FastMCP,
+        tracking_calculator: TrackingCalculator,
+    ):
+        """The same arguments sent in a different key order are one cache entry."""
+        tracking_calculator.add_tools(fastmcp=caching_server)
+
+        async with Client[FastMCPTransport](transport=caching_server) as client:
+            first: CallToolResult = await client.call_tool("add", {"a": 5, "b": 3})
+            assert tracking_calculator.add_calls == 1
+
+            second: CallToolResult = await client.call_tool("add", {"b": 3, "a": 5})
+            assert tracking_calculator.add_calls == 1, (
+                "reordered arguments re-executed the tool instead of hitting the cache"
+            )
+            assert first == second
 
     async def test_call_tool_very_large_value(
         self,
