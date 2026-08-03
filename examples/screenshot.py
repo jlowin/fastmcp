@@ -24,7 +24,7 @@ def take_screenshot() -> Image:
     Take a screenshot of the user's screen and return it as an image. Use
     this tool anytime the user wants you to look at something they're doing.
     """
-    import pyautogui
+    import pyautogui  # ty: ignore[unresolved-import]
 
     buffer = io.BytesIO()
 

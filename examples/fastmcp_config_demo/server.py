@@ -23,7 +23,7 @@ def take_screenshot() -> Image:
 
     Use this tool anytime the user wants you to look at something on their screen.
     """
-    import pyautogui
+    import pyautogui  # ty: ignore[unresolved-import]
 
     buffer = io.BytesIO()
 
@@ -41,7 +41,7 @@ def analyze_colors() -> dict:
 
     Returns a dictionary with color statistics from the screen.
     """
-    import pyautogui
+    import pyautogui  # ty: ignore[unresolved-import]
     from PIL import Image as PILImage
 
     screenshot = pyautogui.screenshot()

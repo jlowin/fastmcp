@@ -43,12 +43,7 @@ from typing_extensions import Self, override
 from fastmcp import _install_hints
 
 if TYPE_CHECKING:
-    from fastmcp.client.transports import (
-        ClientTransport,
-        SSETransport,
-        StdioTransport,
-        StreamableHttpTransport,
-    )
+    from fastmcp.client.transports import ClientTransport
 
 
 def infer_transport_type_from_url(
@@ -209,7 +204,7 @@ class StdioMCPServer(BaseModel):
 
     model_config = ConfigDict(extra="allow")  # Preserve unknown fields
 
-    def to_transport(self) -> StdioTransport:
+    def to_transport(self) -> ClientTransport:
         from fastmcp.client.transports import StdioTransport
 
         return StdioTransport(
@@ -261,7 +256,7 @@ class RemoteMCPServer(BaseModel):
         extra="allow", arbitrary_types_allowed=True
     )  # Preserve unknown fields
 
-    def to_transport(self) -> StreamableHttpTransport | SSETransport:
+    def to_transport(self) -> ClientTransport:
         from fastmcp.client.transports import (
             SSETransport,
             StreamableHttpTransport,
