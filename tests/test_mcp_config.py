@@ -96,7 +96,7 @@ class InMemoryStdioMCPServer(StdioMCPServer):
     mcp: FastMCP
     command: str = "in-memory"
 
-    def to_transport(self) -> FastMCPTransport:
+    def to_transport(self) -> FastMCPTransport:  # ty: ignore[invalid-method-override]
         return FastMCPTransport(mcp=self.mcp)
 
 

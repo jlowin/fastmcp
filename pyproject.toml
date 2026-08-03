@@ -169,6 +169,14 @@ python-version = "3.10"
 # inside example tool bodies (screenshot demos) and is not installed here.
 replace-imports-with-any = ["prefab_ui.**", "PIL", "PIL.**"]
 
+[[tool.ty.overrides]]
+include = ["fastmcp_slim/fastmcp/mcp_config.py"]
+
+[tool.ty.overrides.rules]
+# ty 0.0.61 does not emit the multiple-inheritance diagnostics suppressed in
+# this file, while newer versions do.
+unused-ignore-comment = "ignore"
+
 [tool.ty.rules]
 division-by-zero = "warn"
 possibly-missing-attribute = "warn"

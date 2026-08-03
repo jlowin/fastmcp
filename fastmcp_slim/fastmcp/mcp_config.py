@@ -45,7 +45,6 @@ from fastmcp import _install_hints
 if TYPE_CHECKING:
     from fastmcp.client.transports import (
         ClientTransport,
-        FastMCPTransport,
         SSETransport,
         StdioTransport,
         StreamableHttpTransport,
@@ -154,7 +153,7 @@ class _TransformingMCPServerMixin(BaseModel):
 
         return wrapped_mcp_server, transport
 
-    def to_transport(self) -> FastMCPTransport:
+    def to_transport(self) -> ClientTransport:
         """Get the transport for the transforming MCP server."""
         try:
             from fastmcp.client.transports import FastMCPTransport
@@ -210,7 +209,7 @@ class StdioMCPServer(BaseModel):
 
     model_config = ConfigDict(extra="allow")  # Preserve unknown fields
 
-    def to_transport(self) -> StdioTransport | FastMCPTransport:
+    def to_transport(self) -> StdioTransport:
         from fastmcp.client.transports import StdioTransport
 
         return StdioTransport(
@@ -222,7 +221,9 @@ class StdioMCPServer(BaseModel):
         )
 
 
-class TransformingStdioMCPServer(_TransformingMCPServerMixin, StdioMCPServer):
+class TransformingStdioMCPServer(  # ty: ignore[invalid-method-override]
+    _TransformingMCPServerMixin, StdioMCPServer
+):
     """A Stdio server with tool transforms."""
 
 
@@ -262,9 +263,7 @@ class RemoteMCPServer(BaseModel):
         extra="allow", arbitrary_types_allowed=True
     )  # Preserve unknown fields
 
-    def to_transport(
-        self,
-    ) -> StreamableHttpTransport | SSETransport | FastMCPTransport:
+    def to_transport(self) -> StreamableHttpTransport | SSETransport:
         from fastmcp.client.transports import (
             SSETransport,
             StreamableHttpTransport,
@@ -291,7 +290,9 @@ class RemoteMCPServer(BaseModel):
             )
 
 
-class TransformingRemoteMCPServer(_TransformingMCPServerMixin, RemoteMCPServer):
+class TransformingRemoteMCPServer(  # ty: ignore[invalid-method-override]
+    _TransformingMCPServerMixin, RemoteMCPServer
+):
     """A Remote server with tool transforms."""
 
 
