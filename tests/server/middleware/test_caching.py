@@ -3,6 +3,7 @@
 import sys
 import tempfile
 import warnings
+from collections.abc import Sequence
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
@@ -40,7 +41,11 @@ from fastmcp.server.middleware.caching import (
     _make_get_prompt_cache_key,
     _make_read_resource_cache_key,
 )
-from fastmcp.server.middleware.middleware import CallNext, MiddlewareContext
+from fastmcp.server.middleware.middleware import (
+    CallNext,
+    Middleware,
+    MiddlewareContext,
+)
 from fastmcp.tools.base import Tool, ToolResult
 from fastmcp.utilities.tasks import TaskConfig
 
@@ -902,3 +907,83 @@ class TestAuthAwareCaching:
             assert {p.name for p in prompts} == {"public_prompt"}
         finally:
             auth_context_var.reset(tok)
+
+
+class CountingDownstream(Middleware):
+    """Counts the list calls that get past the caching middleware, i.e. cache misses."""
+
+    def __init__(self) -> None:
+        self.list_calls = 0
+
+    async def on_list_tools(
+        self,
+        context: MiddlewareContext[mcp_types.ListToolsRequest],
+        call_next: CallNext[mcp_types.ListToolsRequest, Sequence[Tool]],
+    ) -> Sequence[Tool]:
+        self.list_calls += 1
+        return await call_next(context)
+
+    async def on_list_resources(
+        self,
+        context: MiddlewareContext[mcp_types.ListResourcesRequest],
+        call_next: CallNext[mcp_types.ListResourcesRequest, Sequence[Resource]],
+    ) -> Sequence[Resource]:
+        self.list_calls += 1
+        return await call_next(context)
+
+    async def on_list_prompts(
+        self,
+        context: MiddlewareContext[mcp_types.ListPromptsRequest],
+        call_next: CallNext[mcp_types.ListPromptsRequest, Sequence[Prompt]],
+    ) -> Sequence[Prompt]:
+        self.list_calls += 1
+        return await call_next(context)
+
+
+class TestEmptyListCaching:
+    """An empty list is a cached result, not a cache miss.
+
+    Regression tests for issue #4733: the list hooks tested the cached value for
+    truthiness, so a server - or a per-user filtered view - with nothing to list
+    re-ran the listing on every single request and never served a cache hit.
+    """
+
+    @pytest.mark.parametrize("operation", ["tools", "resources", "prompts"])
+    async def test_empty_list_is_served_from_cache(self, operation: str):
+        counter = CountingDownstream()
+        mcp_server = FastMCP("test", middleware=[ResponseCachingMiddleware(), counter])
+
+        list_operation = getattr(mcp_server, f"list_{operation}")
+        for _ in range(3):
+            assert len(await list_operation()) == 0
+
+        assert counter.list_calls == 1
+
+    async def test_empty_filtered_view_is_served_from_cache(self):
+        from mcp.server.auth.middleware.auth_context import auth_context_var
+        from mcp.server.auth.middleware.bearer_auth import AuthenticatedUser
+
+        from fastmcp.server.auth import AccessToken, require_scopes
+
+        counter = CountingDownstream()
+        mcp_server = FastMCP("test", middleware=[ResponseCachingMiddleware(), counter])
+
+        @mcp_server.tool(auth=require_scopes("admin"))
+        def admin_only() -> str:
+            return "ok"
+
+        token = AccessToken(
+            token="token-read",
+            client_id="test-client",
+            scopes=["read"],
+            expires_at=None,
+            claims={},
+        )
+        tok = auth_context_var.set(AuthenticatedUser(token))
+        try:
+            for _ in range(3):
+                assert len(await mcp_server.list_tools()) == 0
+        finally:
+            auth_context_var.reset(tok)
+
+        assert counter.list_calls == 1
