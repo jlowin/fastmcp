@@ -290,8 +290,9 @@ class GoogleProvider(OAuthProxy):
             require_authorization_consent: Whether to require user consent before authorizing clients (default True).
                 When True, users see a consent screen before being redirected to Google.
                 When False, authorization proceeds directly without user confirmation.
-                When "external", the built-in consent screen is skipped but no warning is
-                logged, indicating that consent is handled externally (e.g. by Google's own consent).
+                When "external", authorization follows the same direct path as False,
+                but the warning is suppressed as an operator acknowledgment that
+                equivalent protections are enforced externally.
                 SECURITY WARNING: Only set to False for local development or testing environments.
             extra_authorize_params: Additional parameters to forward to Google's authorization endpoint.
                 By default, GoogleProvider sets {"access_type": "offline", "prompt": "consent"} to ensure

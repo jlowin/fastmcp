@@ -397,8 +397,10 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
                   redirect_uri) in the same browser. Cross-site navigations are
                   still prompted to block AS-in-the-middle attacks. Lower UX
                   friction, but weaker protection than True.
-                - "external": skip the built-in consent screen; consent is handled
-                  externally (e.g. by the upstream IdP or a custom login page).
+                - "external": follow the same authorization path as False, but
+                  suppress the warning as an operator acknowledgment that equivalent
+                  consent and transaction-binding protections are enforced externally.
+                  FastMCP does not provide or verify those external protections.
                 - False: skip consent entirely. SECURITY WARNING: only set to
                   False for local development or testing environments.
             consent_csp_policy: Content Security Policy for the consent page.
