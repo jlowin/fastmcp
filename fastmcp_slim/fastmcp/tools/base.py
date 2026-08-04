@@ -83,9 +83,31 @@ def resolve_serialize_by_alias(value: Any) -> bool:
     return True if configured is None else configured
 
 
+def to_jsonable_by_alias(
+    value: Any, *, fallback: Callable[[Any], Any] | None = None
+) -> Any:
+    """Convert *value* to JSON-compatible types, honoring alias configuration.
+
+    ``by_alias`` applies to an entire payload, so a model nested in a dict or
+    list would be serialized with the container's setting rather than its own
+    ``serialize_by_alias`` config. Recursing through plain containers lets every
+    model resolve its own setting.
+    """
+    if isinstance(value, dict):
+        return {
+            key: to_jsonable_by_alias(item, fallback=fallback)
+            for key, item in value.items()
+        }
+    if isinstance(value, list | tuple):
+        return [to_jsonable_by_alias(item, fallback=fallback) for item in value]
+    return pydantic_core.to_jsonable_python(
+        value, by_alias=resolve_serialize_by_alias(value), fallback=fallback
+    )
+
+
 def default_serializer(data: Any) -> str:
     return pydantic_core.to_json(
-        data, fallback=str, by_alias=resolve_serialize_by_alias(data)
+        to_jsonable_by_alias(data, fallback=str), fallback=str
     ).decode()
 
 
@@ -133,10 +155,7 @@ class ToolResult(BaseModel):
                 )
 
             try:
-                structured_content = pydantic_core.to_jsonable_python(
-                    value=structured_content,
-                    by_alias=resolve_serialize_by_alias(structured_content),
-                )
+                structured_content = to_jsonable_by_alias(structured_content)
             except pydantic_core.PydanticSerializationError as e:
                 logger.error(
                     f"Could not serialize structured content. If this is unexpected, set your tool's output_schema to None to disable automatic serialization: {e}"
@@ -404,9 +423,7 @@ class Tool(FastMCPComponent):
             return ToolResult(content=content)
 
         try:
-            structured = pydantic_core.to_jsonable_python(
-                raw_value, by_alias=resolve_serialize_by_alias(raw_value)
-            )
+            structured = to_jsonable_by_alias(raw_value)
         except (pydantic_core.PydanticSerializationError, UnicodeDecodeError):
             return ToolResult(content=content)
 
