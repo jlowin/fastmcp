@@ -147,9 +147,13 @@ def _strip_input_required(tp: Any) -> Any:
 
 
 def _unwrap_model(tp: Any) -> type[BaseModel] | None:
-    """Unwrap ``Annotated`` and return the underlying Pydantic model, if any."""
-    if get_origin(tp) is Annotated:
-        return _unwrap_model(get_args(tp)[0])
+    """Unwrap ``Annotated``, unions and containers to find a Pydantic model."""
+    if args := get_args(tp):
+        for arg in args:
+            model = _unwrap_model(arg)
+            if model is not None:
+                return model
+        return None
     if isinstance(tp, type) and issubclass(tp, BaseModel):
         return tp
     return None
@@ -158,39 +162,23 @@ def _unwrap_model(tp: Any) -> type[BaseModel] | None:
 def _resolve_output_by_alias(tp: Any) -> bool:
     """Resolve ``by_alias`` for the output schema of return type *tp*.
 
-    Unwraps ``Annotated`` and ``Optional``/``Union`` wrappers to find the
-    underlying Pydantic model so the generated schema honors the model's
+    Unwraps ``Annotated``, ``Optional``/``Union`` and container wrappers to find
+    the underlying Pydantic model so the generated schema honors the model's
     ``serialize_by_alias`` config — keeping it consistent with how the runtime
-    result is serialized. Containers (``list[Model]`` etc.) are not unwrapped:
-    their schema keeps the default, matching the runtime path which only
-    special-cases a directly-returned model.
+    result is serialized.
 
     Known limitation: a single schema is generated with one ``by_alias`` value,
-    while the runtime resolves the alias mode per returned value. They cannot
-    diverge for a plain single-model return, but a union return can produce more
-    than one runtime alias mode that no single schema can describe:
+    while the runtime resolves the alias mode per serialized model. Distinct
+    models with *conflicting* ``serialize_by_alias`` (e.g. ``A | B`` where ``A``
+    opts out but ``B`` opts in) produce more than one runtime alias mode that no
+    single schema can describe.
 
-    - distinct models with *conflicting* ``serialize_by_alias`` (e.g. ``A | B``
-      where ``A`` opts out but ``B`` opts in), and
-    - a model arm alongside a container arm (e.g. ``Model | list[Model]``):
-      a directly-returned model honors its config, but a returned ``list`` is
-      serialized with the default alias mode, so the two variants disagree.
-
-    Pydantic's schema generator does not consult per-model ``serialize_by_alias``
-    and the runtime does not recurse into containers, so honoring every variant
-    would require per-arm schema assembly. This is an accepted edge; single-model
-    returns and unions whose arms all resolve to the same mode are consistent.
+    Pydantic's schema generator does not consult per-model ``serialize_by_alias``,
+    so honoring every variant would require per-arm schema assembly. This is an
+    accepted edge; returns whose models all resolve to the same mode agree.
     """
-    origin = get_origin(tp)
-    if origin is Annotated:
-        return _resolve_output_by_alias(get_args(tp)[0])
-    if origin is Union or origin is types.UnionType:
-        for arg in get_args(tp):
-            model = _unwrap_model(arg)
-            if model is not None:
-                return resolve_serialize_by_alias(model)
-        return True
-    return resolve_serialize_by_alias(tp)
+    model = _unwrap_model(tp)
+    return True if model is None else resolve_serialize_by_alias(model)
 
 
 T = TypeVarExt("T", default=Any)
