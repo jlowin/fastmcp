@@ -4,6 +4,7 @@ import sys
 import tempfile
 import warnings
 from pathlib import Path
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import mcp_types
@@ -284,6 +285,42 @@ class TestResponseCachingMiddleware:
         )
         assert middleware1._matches_tool_cache_settings(tool_name=tool_name) is result
 
+    @pytest.mark.parametrize(
+        ("first", "second"),
+        [
+            ({"a": 5, "b": 3}, {"b": 3, "a": 5}),
+            ({"q": {"x": 1, "y": 2}}, {"q": {"y": 2, "x": 1}}),
+            ({"items": [{"x": 1, "y": 2}]}, {"items": [{"y": 2, "x": 1}]}),
+        ],
+        ids=["top level", "nested dict", "dict inside a list"],
+    )
+    def test_call_tool_cache_key_ignores_argument_order(
+        self, first: dict[str, Any], second: dict[str, Any]
+    ):
+        assert _make_call_tool_cache_key(
+            mcp_types.CallToolRequestParams(name="tool", arguments=first)
+        ) == _make_call_tool_cache_key(
+            mcp_types.CallToolRequestParams(name="tool", arguments=second)
+        )
+
+    def test_get_prompt_cache_key_ignores_argument_order(self):
+        assert _make_get_prompt_cache_key(
+            mcp_types.GetPromptRequestParams(
+                name="prompt", arguments={"a": "5", "b": "3"}
+            )
+        ) == _make_get_prompt_cache_key(
+            mcp_types.GetPromptRequestParams(
+                name="prompt", arguments={"b": "3", "a": "5"}
+            )
+        )
+
+    def test_call_tool_cache_key_distinguishes_arguments(self):
+        assert _make_call_tool_cache_key(
+            mcp_types.CallToolRequestParams(name="tool", arguments={"a": 5, "b": 3})
+        ) != _make_call_tool_cache_key(
+            mcp_types.CallToolRequestParams(name="tool", arguments={"a": 3, "b": 5})
+        )
+
 
 @pytest.mark.skipif(
     sys.platform == "win32",
@@ -423,6 +460,18 @@ class TestResponseCachingMiddlewareIntegration:
                 "add", {"a": 5, "b": 3}
             )
             assert call_tool_result_one == call_tool_result_two
+
+    async def test_call_tool_with_reordered_arguments_hits_cache(
+        self,
+        caching_server: FastMCP,
+        tracking_calculator: TrackingCalculator,
+    ):
+        async with Client[FastMCPTransport](transport=caching_server) as client:
+            first = await client.call_tool("add", {"a": 5, "b": 3})
+            second = await client.call_tool("add", {"b": 3, "a": 5})
+
+        assert first == second
+        assert tracking_calculator.add_calls == 1
 
     async def test_call_tool_very_large_value(
         self,

@@ -27,7 +27,7 @@ from starlette.types import ASGIApp, Lifespan, Receive, Scope, Send
 
 from fastmcp.server.auth import AuthProvider
 from fastmcp.server.auth.middleware import RequireAuthMiddleware
-from fastmcp.server.event_store import SessionScopedEventStore
+from fastmcp.server.session_scoped_event_store import SessionScopedEventStore
 from fastmcp.utilities.logging import get_logger
 
 if TYPE_CHECKING:
