@@ -553,9 +553,10 @@ class TestProxyMode:
     predicting whether the HTTP client would route a request through a proxy -- a strategy
     that broke three times chasing different NO_PROXY forms (port-qualified, IPv6,
     scheme-qualified) -- it reads the proxy URL directly from the environment and
-    hands it to httpx explicitly with trust_env=False, so the request is provably
-    routed through that proxy rather than predicted to be. NO_PROXY is therefore not
-    evaluated in this mode. The scheme (HTTPS) and host checks still apply.
+    hands it to httpx explicitly, so the request is provably routed through that
+    proxy rather than predicted to be. NO_PROXY is therefore not evaluated, while
+    trust_env remains enabled for environment-provided CA trust. The scheme (HTTPS)
+    and host checks still apply.
     """
 
     @pytest.fixture(autouse=True)
@@ -642,14 +643,16 @@ class TestProxyMode:
         mock_client_class.assert_not_called()
 
     async def test_https_proxy_used_explicitly(self, monkeypatch):
-        """HTTPS_PROXY is passed to httpx explicitly with trust_env disabled, and a
-        single request goes to the original hostname URL — not an IP literal.
+        """HTTPS_PROXY is passed to httpx explicitly while CA environment handling
+        remains enabled, and a single request goes to the original hostname URL — not
+        an IP literal.
 
-        This is the property the whole redesign rests on: with an explicit proxy=
-        and trust_env=False, httpx has no environment-based routing decision left
-        to make differently than assumed.
+        This is the property the whole redesign rests on: an explicit proxy= fixes
+        httpx's proxy map without consulting NO_PROXY, while trust_env=True preserves
+        SSL_CERT_FILE and SSL_CERT_DIR handling.
         """
         monkeypatch.setenv("HTTPS_PROXY", "http://proxy.internal:3128")
+        monkeypatch.setenv("SSL_CERT_FILE", "/corporate-ca.pem")
         mock_client = _mock_httpx_client()
         with (
             temporary_settings(ssrf_trust_proxy=True),
@@ -663,7 +666,7 @@ class TestProxyMode:
 
         client_kwargs = mock_client_class.call_args[1]
         assert client_kwargs["proxy"] == "http://proxy.internal:3128"
-        assert client_kwargs["trust_env"] is False
+        assert client_kwargs["trust_env"] is True
 
         # A single request to the original hostname URL — not an IP literal.
         assert mock_client.stream.call_count == 1
@@ -693,7 +696,7 @@ class TestProxyMode:
         assert content == b"ok"
         client_kwargs = mock_client_class.call_args[1]
         assert client_kwargs["proxy"] == "http://all-proxy.internal:3128"
-        assert client_kwargs["trust_env"] is False
+        assert client_kwargs["trust_env"] is True
 
     async def test_https_proxy_preferred_over_all_proxy(self, monkeypatch):
         """When both are set, HTTPS_PROXY takes priority."""
@@ -730,7 +733,7 @@ class TestProxyMode:
         assert content == b"ok"
         client_kwargs = mock_client_class.call_args[1]
         assert client_kwargs["proxy"] == "http://proxy.internal:3128"
-        assert client_kwargs["trust_env"] is False
+        assert client_kwargs["trust_env"] is True
 
     async def test_fetch_preserves_request_headers_but_drops_host(self, monkeypatch):
         """Caller headers pass through, but a caller-supplied Host is dropped."""
@@ -802,7 +805,7 @@ class TestProxyMode:
         assert content == b"ok"
         client_kwargs = mock_client_class.call_args[1]
         assert client_kwargs["proxy"] == "http://proxy.internal:3128"
-        assert client_kwargs["trust_env"] is False
+        assert client_kwargs["trust_env"] is True
         assert mock_client.stream.call_args[0][1] == "https://example.com/api"
 
     async def test_default_mode_still_resolves_and_pins(self):
