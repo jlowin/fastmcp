@@ -378,6 +378,60 @@ class TestSerializeByAlias:
 
         assert result.structured_content == {"id": "1", "inner": {"inner_id": "2"}}
 
+    async def test_model_in_returned_dict_respects_config(self):
+        """A model nested in a returned dict honors its own config.
+
+        Regression: by_alias applies to the whole payload, so a model inside a
+        container was serialized with the container's default of emitting
+        aliases instead of its own serialize_by_alias config.
+        """
+
+        class Biofile(BaseModel):
+            model_config = ConfigDict(serialize_by_alias=False)
+            id: str = Field(alias="_id")
+
+        class Aliased(BaseModel):
+            id: str = Field(alias="_id")
+
+        mcp = FastMCP()
+
+        @mcp.tool
+        def get_biofile() -> dict:
+            return {"biofile": Biofile(_id="1"), "aliased": Aliased(_id="2")}
+
+        async with Client(mcp) as client:
+            result = await client.call_tool("get_biofile", {})
+
+        assert result.structured_content == {
+            "biofile": {"id": "1"},
+            "aliased": {"_id": "2"},
+        }
+        assert json.loads(result.content[0].text) == result.structured_content  # type: ignore[union-attr]
+
+    async def test_list_return_stays_consistent(self):
+        """A list[Model] return serializes and describes itself the same way."""
+
+        class Biofile(BaseModel):
+            model_config = ConfigDict(serialize_by_alias=False)
+            id: str = Field(alias="_id")
+
+        mcp = FastMCP()
+
+        @mcp.tool
+        def get_biofiles() -> list[Biofile]:
+            return [Biofile(_id="1")]
+
+        async with Client(mcp) as client:
+            tools = {t.name: t for t in await client.list_tools()}
+            # client-side validation raises if the schema and content disagree
+            result = await client.call_tool("get_biofiles", {})
+
+        item_schema = tools["get_biofiles"].output_schema["properties"]["result"][
+            "items"
+        ]  # type: ignore[index]
+        assert set(item_schema["properties"]) == {"id"}
+        assert result.structured_content == {"result": [{"id": "1"}]}
+
     async def test_annotated_optional_return_stays_consistent(self):
         """Annotated[Model, ...] | None resolves the model inside the union arm.
 
