@@ -1,3 +1,5 @@
+[![MCP Toplist](https://mcptoplist.com/badge/mcp.so%2Ffastmcp%2Fjlowin.svg)](https://mcptoplist.com/server/mcp.so%2Ffastmcp%2Fjlowin)
+
 <div align="center">
 
 <!-- omit in toc -->
