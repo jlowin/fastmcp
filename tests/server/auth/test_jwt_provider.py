@@ -760,7 +760,7 @@ class TestBearerTokenJWKS:
         assert access_token.claims.get("iss") == issuer
         assert access_token.claims.get("aud") == audience
 
-    async def test_jwks_skips_unsupported_key_types(
+    async def test_jwks_skips_unusable_keys(
         self,
         rsa_key_pair: RSAKeyPair,
         jwks_provider: JWTVerifier,
@@ -768,20 +768,19 @@ class TestBearerTokenJWKS:
         httpx_mock: HTTPXMock,
         mock_dns,
     ):
-        """An unsupported key type must not poison the whole key set - #4515."""
-        unsupported_key = cast(
+        """An unusable key must not poison the whole key set - #4515."""
+        malformed_key = cast(
             "JWKData",
             {
-                "kty": "oct",
-                "kid": "oct-key",
+                "kty": "RSA",
+                "kid": "malformed-key",
                 "use": "sig",
-                "k": "c2VjcmV0",
             },
         )
         mock_jwks_data["keys"][0]["kid"] = "test-key-1"
-        # Unsupported key FIRST, so an unguarded conversion loop would
+        # Malformed key FIRST, so an unguarded conversion loop would
         # abort before reaching the RSA key the token needs
-        mock_jwks_data["keys"].insert(0, unsupported_key)
+        mock_jwks_data["keys"].insert(0, malformed_key)
         httpx_mock.add_response(json=mock_jwks_data)
 
         token = rsa_key_pair.create_token(
@@ -821,35 +820,34 @@ class TestBearerTokenJWKS:
         assert access_token is not None
         assert access_token.client_id == "test-user"
 
-    async def test_jwks_with_only_unsupported_keys_rejects_cleanly(
+    async def test_jwks_with_only_unusable_keys_rejects_cleanly(
         self,
         rsa_key_pair: RSAKeyPair,
         jwks_provider: JWTVerifier,
         httpx_mock: HTTPXMock,
         mock_dns,
     ):
-        """If every key in the JWKS is unsupported, verification fails
+        """If every key in the JWKS is unusable, verification fails
         cleanly (returns None) rather than crashing - #4515."""
-        unsupported_only = {
+        unusable_only = {
             "keys": [
                 cast(
                     "JWKData",
                     {
-                        "kty": "oct",
-                        "kid": "oct-key",
+                        "kty": "RSA",
+                        "kid": "malformed-key",
                         "use": "sig",
-                        "k": "c2VjcmV0",
                     },
                 )
             ]
         }
-        httpx_mock.add_response(json=unsupported_only)
+        httpx_mock.add_response(json=unusable_only)
 
         token = rsa_key_pair.create_token(
             subject="test-user",
             issuer="https://test.example.com",
             audience="https://api.example.com",
-            kid="oct-key",
+            kid="malformed-key",
         )
 
         access_token = await jwks_provider.load_access_token(token)
