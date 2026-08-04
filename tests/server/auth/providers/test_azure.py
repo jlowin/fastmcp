@@ -66,7 +66,7 @@ class TestAzureProvider:
         assert provider._redirect_path == "/auth/callback"
         # Azure provider defaults are set but we can't easily verify them without accessing internals
 
-    def test_domain_compatible_consent_cookies(self, memory_storage: MemoryStore):
+    def test_explicit_consent_cookie_domain(self, memory_storage: MemoryStore):
         provider = AzureProvider(
             client_id="test_client",
             client_secret="test_secret",
@@ -75,12 +75,13 @@ class TestAzureProvider:
             required_scopes=["read"],
             jwt_signing_key="test-secret",
             client_storage=memory_storage,
-            consent_cookie_policy="domain-compatible",
+            consent_cookie_domain="myserver.com",
         )
 
         assert (
             provider._cookie_name("MCP_CONSENT_STATE") == "__Secure-MCP_CONSENT_STATE"
         )
+        assert provider._consent_cookie_domain == "myserver.com"
 
     def test_offline_access_automatically_included(self, memory_storage: MemoryStore):
         """Test that offline_access is automatically added to get refresh tokens."""

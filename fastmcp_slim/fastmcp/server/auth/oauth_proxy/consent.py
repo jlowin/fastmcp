@@ -76,7 +76,7 @@ class ConsentMixin:
     def _cookie_name(self: OAuthProxy, base_name: str) -> str:
         """Return secure cookie name for HTTPS, fallback for HTTP development."""
         if self._is_https:
-            if self._consent_cookie_policy == "domain-compatible":
+            if self._consent_cookie_domain is not None:
                 return f"__Secure-{base_name}"
             return f"__Host-{base_name}"
         return f"__{base_name}"
@@ -178,6 +178,7 @@ class ConsentMixin:
             httponly=True,
             samesite="lax",
             path="/",
+            domain=self._consent_cookie_domain,
         )
 
     def _read_consent_bindings(self: OAuthProxy, request: Request) -> dict[str, str]:
@@ -220,6 +221,7 @@ class ConsentMixin:
                 httponly=True,
                 samesite="lax",
                 path="/",
+                domain=self._consent_cookie_domain,
             )
             return
         payload_bytes = json.dumps(bindings, separators=(",", ":")).encode()
@@ -233,6 +235,7 @@ class ConsentMixin:
             httponly=True,
             samesite="lax",
             path="/",
+            domain=self._consent_cookie_domain,
         )
 
     def _set_consent_binding_cookie(

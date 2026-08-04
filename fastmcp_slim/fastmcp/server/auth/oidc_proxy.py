@@ -19,7 +19,7 @@ from typing_extensions import Self
 
 from fastmcp.server.auth import TokenVerifier
 from fastmcp.server.auth.identity_assertion import IdentityAssertion
-from fastmcp.server.auth.oauth_proxy import ConsentCookiePolicy, OAuthProxy
+from fastmcp.server.auth.oauth_proxy import OAuthProxy
 from fastmcp.server.auth.oauth_proxy.models import UpstreamTokenSet
 from fastmcp.server.auth.providers.jwt import JWTVerifier
 from fastmcp.utilities.logging import get_logger
@@ -234,7 +234,7 @@ class OIDCProxy(OAuthProxy):
         token_endpoint_auth_method: str | None = None,
         # Consent screen configuration
         require_authorization_consent: bool | Literal["remember", "external"] = True,
-        consent_cookie_policy: ConsentCookiePolicy = "host-only",
+        consent_cookie_domain: str | None = None,
         consent_csp_policy: str | None = None,
         forward_resource: bool = True,
         # Extra parameters
@@ -311,11 +311,11 @@ class OIDCProxy(OAuthProxy):
                 but the warning is suppressed as an operator acknowledgment that
                 equivalent protections are enforced externally.
                 SECURITY WARNING: Only set to False for local development or testing environments.
-            consent_cookie_policy: Cookie scope policy for the consent flow.
-                ``"host-only"`` (default) uses ``__Host-`` cookies on HTTPS.
-                ``"domain-compatible"`` uses ``__Secure-`` cookies for hosting
-                layers that add a ``Domain`` attribute, weakening browser-enforced
-                host isolation while retaining signed, secure cookies.
+            consent_cookie_domain: Explicit domain for consent cookies. By default,
+                FastMCP uses host-only ``__Host-`` cookies on HTTPS. Set this only
+                for hosting layers that add a ``Domain`` attribute. The value must
+                exactly match the hostname in ``base_url`` and causes ``__Secure-``
+                cookies to be used, allowing child subdomains to receive them.
             consent_csp_policy: Content Security Policy for the consent page.
                 If None (default), uses the built-in CSP policy with appropriate directives.
                 If empty string "", disables CSP entirely (no meta tag is rendered).
@@ -436,7 +436,7 @@ class OIDCProxy(OAuthProxy):
             "jwt_signing_key": jwt_signing_key,
             "token_endpoint_auth_method": token_endpoint_auth_method,
             "require_authorization_consent": require_authorization_consent,
-            "consent_cookie_policy": consent_cookie_policy,
+            "consent_cookie_domain": consent_cookie_domain,
             "consent_csp_policy": consent_csp_policy,
             "forward_resource": forward_resource,
             "fallback_access_token_expiry_seconds": fallback_access_token_expiry_seconds,

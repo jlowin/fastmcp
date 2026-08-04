@@ -489,7 +489,7 @@ class TestOIDCProxyInitialization:
             call_args = mock_get.call_args
             assert call_args[1]["timeout_seconds"] == 12
 
-    def test_domain_compatible_consent_cookies(self, valid_oidc_configuration_dict):
+    def test_explicit_consent_cookie_domain(self, valid_oidc_configuration_dict):
         with patch(
             "fastmcp.server.auth.oidc_proxy.OIDCConfiguration.get_oidc_configuration"
         ) as mock_get:
@@ -504,13 +504,14 @@ class TestOIDCProxyInitialization:
                 client_secret=TEST_CLIENT_SECRET,
                 base_url=TEST_BASE_URL,
                 jwt_signing_key="test-secret",
-                consent_cookie_policy="domain-compatible",
+                consent_cookie_domain="example.com",
             )
 
             validate_proxy(mock_get, proxy, oidc_config)
             assert (
                 proxy._cookie_name("MCP_CONSENT_STATE") == "__Secure-MCP_CONSENT_STATE"
             )
+            assert proxy._consent_cookie_domain == "example.com"
 
     def test_token_verifier_initialization(self, valid_oidc_configuration_dict):
         """Test token verifier initialization."""

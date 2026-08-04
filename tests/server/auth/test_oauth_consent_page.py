@@ -65,8 +65,8 @@ def oauth_proxy_https_remember():
 
 
 @pytest.fixture
-def oauth_proxy_https_domain_compatible():
-    """OAuthProxy using __Secure- cookies for platforms that add Domain."""
+def oauth_proxy_https_with_cookie_domain():
+    """OAuthProxy using an explicit cookie domain for platform compatibility."""
     return OAuthProxy(
         upstream_authorization_endpoint="https://github.com/login/oauth/authorize",
         upstream_token_endpoint="https://github.com/login/oauth/access_token",
@@ -76,7 +76,7 @@ def oauth_proxy_https_domain_compatible():
         base_url="https://myserver.example",
         client_storage=MemoryStore(),
         jwt_signing_key="test-secret",
-        consent_cookie_policy="domain-compatible",
+        consent_cookie_domain="myserver.example",
     )
 
 
@@ -116,11 +116,11 @@ def _extract_csrf(html: str) -> str | None:
     return m.group(1) if m else None
 
 
-class TestConsentCookiePolicy:
-    def test_invalid_policy_is_rejected(self):
+class TestConsentCookieDomain:
+    def test_parent_domain_is_rejected(self):
         with pytest.raises(
             ValueError,
-            match="consent_cookie_policy must be 'host-only' or 'domain-compatible'",
+            match="consent_cookie_domain must exactly match the hostname in base_url",
         ):
             OAuthProxy(
                 upstream_authorization_endpoint="https://github.com/login/oauth/authorize",
@@ -131,20 +131,36 @@ class TestConsentCookiePolicy:
                 base_url="https://myserver.example",
                 client_storage=MemoryStore(),
                 jwt_signing_key="test-secret",
-                consent_cookie_policy="invalid",  # ty: ignore[invalid-argument-type]
+                consent_cookie_domain="example",
             )
 
-    async def test_domain_compatible_policy_completes_consent_with_secure_cookies(
-        self, oauth_proxy_https_domain_compatible
+    def test_domain_requires_https(self):
+        with pytest.raises(
+            ValueError, match="consent_cookie_domain requires an HTTPS base_url"
+        ):
+            OAuthProxy(
+                upstream_authorization_endpoint="https://github.com/login/oauth/authorize",
+                upstream_token_endpoint="https://github.com/login/oauth/access_token",
+                upstream_client_id="client-id",
+                upstream_client_secret="client-secret",
+                token_verifier=_Verifier(),
+                base_url="http://myserver.example",
+                client_storage=MemoryStore(),
+                jwt_signing_key="test-secret",
+                consent_cookie_domain="myserver.example",
+            )
+
+    async def test_explicit_domain_completes_consent_with_secure_cookies(
+        self, oauth_proxy_https_with_cookie_domain
     ):
         txn_id, _ = await _start_flow(
-            oauth_proxy_https_domain_compatible,
-            "domain-compatible-client",
+            oauth_proxy_https_with_cookie_domain,
+            "explicit-domain-client",
             "http://localhost:6000/callback",
         )
-        app = Starlette(routes=oauth_proxy_https_domain_compatible.get_routes())
+        app = Starlette(routes=oauth_proxy_https_with_cookie_domain.get_routes())
 
-        with TestClient(app) as client:
+        with TestClient(app, base_url="https://myserver.example") as client:
             consent = client.get(f"/consent?txn_id={txn_id}")
             csrf = _extract_csrf(consent.text)
             assert csrf
@@ -154,9 +170,8 @@ class TestConsentCookiePolicy:
             assert "Secure" in set_cookie
             assert "HttpOnly" in set_cookie
             assert "SameSite=lax" in set_cookie
+            assert "Domain=myserver.example" in set_cookie
 
-            for key, value in consent.cookies.items():
-                client.cookies.set(key, value)
             response = client.post(
                 "/consent",
                 data={
@@ -168,25 +183,27 @@ class TestConsentCookiePolicy:
             )
 
         assert response.status_code in (302, 303)
-        assert "__Secure-MCP_CONSENT_BINDING=" in response.headers.get("set-cookie", "")
+        binding_cookie = response.headers.get("set-cookie", "")
+        assert "__Secure-MCP_CONSENT_BINDING=" in binding_cookie
+        assert "Domain=myserver.example" in binding_cookie
 
-    async def test_domain_compatible_policy_does_not_accept_host_prefix(
-        self, oauth_proxy_https_domain_compatible
+    async def test_explicit_domain_does_not_accept_host_prefix(
+        self, oauth_proxy_https_with_cookie_domain
     ):
         txn_id, _ = await _start_flow(
-            oauth_proxy_https_domain_compatible,
+            oauth_proxy_https_with_cookie_domain,
             "wrong-prefix-client",
             "http://localhost:6001/callback",
         )
-        app = Starlette(routes=oauth_proxy_https_domain_compatible.get_routes())
+        app = Starlette(routes=oauth_proxy_https_with_cookie_domain.get_routes())
 
-        with TestClient(app) as browser:
+        with TestClient(app, base_url="https://myserver.example") as browser:
             consent = browser.get(f"/consent?txn_id={txn_id}")
             csrf = _extract_csrf(consent.text)
             assert csrf
             signed_state = consent.cookies["__Secure-MCP_CONSENT_STATE"]
 
-        with TestClient(app) as browser:
+        with TestClient(app, base_url="https://myserver.example") as browser:
             browser.cookies.set("__Host-MCP_CONSENT_STATE", signed_state)
             response = browser.post(
                 "/consent",
@@ -200,9 +217,7 @@ class TestConsentCookiePolicy:
 
         assert response.status_code == 403
 
-    async def test_default_policy_does_not_accept_secure_prefix(
-        self, oauth_proxy_https
-    ):
+    async def test_default_does_not_accept_secure_prefix(self, oauth_proxy_https):
         txn_id, _ = await _start_flow(
             oauth_proxy_https,
             "default-policy-client",
@@ -230,11 +245,12 @@ class TestConsentCookiePolicy:
 
         assert response.status_code == 403
 
-    def test_default_policy_remains_host_only(self, oauth_proxy_https):
+    def test_default_remains_host_only(self, oauth_proxy_https):
         assert (
             oauth_proxy_https._cookie_name("MCP_CONSENT_STATE")
             == "__Host-MCP_CONSENT_STATE"
         )
+        assert oauth_proxy_https._consent_cookie_domain is None
 
 
 class TestConsentPageServerIcon:
