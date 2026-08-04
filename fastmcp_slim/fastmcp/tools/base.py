@@ -83,6 +83,19 @@ def resolve_serialize_by_alias(value: Any) -> bool:
     return True if configured is None else configured
 
 
+def _dump_nested_models(value: Any, fallback: Callable[[Any], Any] | None) -> Any:
+    """Serialize models found in *value*, each with its own alias setting."""
+    if isinstance(value, dict):
+        return {key: _dump_nested_models(item, fallback) for key, item in value.items()}
+    if isinstance(value, list | tuple):
+        return [_dump_nested_models(item, fallback) for item in value]
+    if isinstance(value, BaseModel):
+        return pydantic_core.to_jsonable_python(
+            value, by_alias=resolve_serialize_by_alias(value), fallback=fallback
+        )
+    return value
+
+
 def to_jsonable_by_alias(
     value: Any, *, fallback: Callable[[Any], Any] | None = None
 ) -> Any:
@@ -90,18 +103,11 @@ def to_jsonable_by_alias(
 
     ``by_alias`` applies to an entire payload, so a model nested in a dict or
     list would be serialized with the container's setting rather than its own
-    ``serialize_by_alias`` config. Recursing through plain containers lets every
-    model resolve its own setting.
+    ``serialize_by_alias`` config. Dumping those models first lets each one
+    resolve its own setting.
     """
-    if isinstance(value, dict):
-        return {
-            key: to_jsonable_by_alias(item, fallback=fallback)
-            for key, item in value.items()
-        }
-    if isinstance(value, list | tuple):
-        return [to_jsonable_by_alias(item, fallback=fallback) for item in value]
     return pydantic_core.to_jsonable_python(
-        value, by_alias=resolve_serialize_by_alias(value), fallback=fallback
+        _dump_nested_models(value, fallback), fallback=fallback
     )
 
 
