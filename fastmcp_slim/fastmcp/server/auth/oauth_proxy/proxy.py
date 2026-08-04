@@ -119,6 +119,8 @@ from fastmcp.utilities.logging import get_logger
 
 logger = get_logger(__name__)
 
+ConsentCookiePolicy = Literal["host-only", "domain-compatible"]
+
 _REFRESH_LOCK_CACHE_SIZE = 10_000
 
 #: SEP-837: the client's declared `application_type`, recovered from the raw DCR
@@ -332,6 +334,7 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
         jwt_signing_key: str | bytes | None = None,
         # Consent screen configuration
         require_authorization_consent: bool | Literal["remember", "external"] = True,
+        consent_cookie_policy: ConsentCookiePolicy = "host-only",
         consent_csp_policy: str | None = None,
         # Token expiry fallback
         fallback_access_token_expiry_seconds: int | None = None,
@@ -403,6 +406,13 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
                   FastMCP does not provide or verify those external protections.
                 - False: skip consent entirely. SECURITY WARNING: only set to
                   False for local development or testing environments.
+            consent_cookie_policy: Cookie scope policy for the consent flow.
+                ``"host-only"`` (default) uses ``__Host-`` cookies on HTTPS,
+                which browsers reject if a hosting layer adds a ``Domain``
+                attribute. ``"domain-compatible"`` uses ``__Secure-`` cookies
+                instead so those rewrites remain valid, at the cost of allowing
+                the cookies to be scoped to sibling subdomains. Cookie signing,
+                ``Secure``, ``HttpOnly``, and ``SameSite=Lax`` remain enabled.
             consent_csp_policy: Content Security Policy for the consent page.
                 If None (default), uses the built-in CSP policy with appropriate directives.
                 If empty string "", disables CSP entirely (no meta tag is rendered).
@@ -517,7 +527,18 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
         self._require_authorization_consent: bool | Literal["remember", "external"] = (
             require_authorization_consent
         )
+        if consent_cookie_policy not in ("host-only", "domain-compatible"):
+            raise ValueError(
+                "consent_cookie_policy must be 'host-only' or 'domain-compatible'"
+            )
+        self._consent_cookie_policy: ConsentCookiePolicy = consent_cookie_policy
         self._consent_csp_policy: str | None = consent_csp_policy
+        if consent_cookie_policy == "domain-compatible":
+            logger.warning(
+                "Domain-compatible consent cookies use __Secure- instead of "
+                "__Host-; this permits Domain rewrites but weakens browser-enforced "
+                "host isolation."
+            )
         if require_authorization_consent == "external":
             logger.info(
                 "Built-in consent screen disabled; consent is handled externally."

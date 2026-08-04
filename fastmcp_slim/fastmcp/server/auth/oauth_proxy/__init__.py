@@ -7,8 +7,9 @@ This package provides OAuth proxy functionality split across multiple modules:
 - proxy: Main OAuthProxy class
 """
 
-from fastmcp.server.auth.oauth_proxy.proxy import OAuthProxy
+from fastmcp.server.auth.oauth_proxy.proxy import ConsentCookiePolicy, OAuthProxy
 
 __all__ = [
+    "ConsentCookiePolicy",
     "OAuthProxy",
 ]

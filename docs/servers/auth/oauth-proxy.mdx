@@ -342,6 +342,26 @@ auth = OAuthProxy(..., client_storage=MemoryStore())
   </Warning>
 </ParamField>
 
+<ParamField body="consent_cookie_policy" type='Literal["host-only", "domain-compatible"]' default='"host-only"'>
+  Controls the browser-enforced scope of the signed cookies used by FastMCP's consent flow.
+
+  - `"host-only"` (default) uses the `__Host-` prefix on HTTPS. This is the strongest policy because browsers reject a `Domain` attribute and prevent sibling subdomains from setting the cookie.
+  - `"domain-compatible"` uses the `__Secure-` prefix on HTTPS. Use this only when a hosting layer, such as Azure Functions, adds a `Domain` attribute to response cookies. Cookie signing, `Secure`, `HttpOnly`, and `SameSite=Lax` remain enabled, but browser-enforced host isolation is lost.
+
+  ```python
+  from fastmcp.server.auth.providers.azure import AzureProvider
+
+  auth = AzureProvider(
+      ...,
+      consent_cookie_policy="domain-compatible",
+  )
+  ```
+
+  <Warning>
+    Prefer the default `"host-only"` policy. The compatibility policy allows consent cookies to be scoped to sibling subdomains and should only be enabled when the deployment platform makes `__Host-` cookies unusable.
+  </Warning>
+</ParamField>
+
 <ParamField body="consent_csp_policy" type="str | None" default="None">
   Content Security Policy for the consent page.
 

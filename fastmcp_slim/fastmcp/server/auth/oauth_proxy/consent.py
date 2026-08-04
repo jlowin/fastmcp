@@ -76,6 +76,8 @@ class ConsentMixin:
     def _cookie_name(self: OAuthProxy, base_name: str) -> str:
         """Return secure cookie name for HTTPS, fallback for HTTP development."""
         if self._is_https:
+            if self._consent_cookie_policy == "domain-compatible":
+                return f"__Secure-{base_name}"
             return f"__Host-{base_name}"
         return f"__{base_name}"
 
@@ -129,9 +131,8 @@ class ConsentMixin:
         """Decode and verify a signed base64-encoded JSON list from cookie. Returns [] if missing/invalid."""
         secure_name = self._cookie_name(base_name)
         raw = request.cookies.get(secure_name)
-        # Only fall back to the non-__Host- name over plain HTTP. On HTTPS,
-        # __Host- enforces host-only scope; accepting the weaker name would
-        # let a sibling-subdomain attacker inject a domain-scoped cookie.
+        # Only fall back to the unprefixed development name over plain HTTP.
+        # On HTTPS, accept exactly the prefix selected by the configured policy.
         if not raw and not self._is_https:
             raw = request.cookies.get(f"__{base_name}")
         if not raw:
@@ -186,9 +187,8 @@ class ConsentMixin:
         """
         cookie_name = self._cookie_name("MCP_CONSENT_BINDING")
         raw = request.cookies.get(cookie_name)
-        # Only fall back to the non-__Host- name over plain HTTP. On HTTPS,
-        # __Host- enforces host-only scope; accepting the weaker name would
-        # bypass that guarantee.
+        # Only fall back to the unprefixed development name over plain HTTP.
+        # On HTTPS, accept exactly the prefix selected by the configured policy.
         if not raw and not self._is_https:
             raw = request.cookies.get("__MCP_CONSENT_BINDING")
         if not raw:

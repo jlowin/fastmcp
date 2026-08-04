@@ -15,7 +15,7 @@ from key_value.aio.protocols import AsyncKeyValue
 
 from fastmcp.dependencies import Dependency
 from fastmcp.server.auth.auth import MultiAuth
-from fastmcp.server.auth.oauth_proxy import OAuthProxy
+from fastmcp.server.auth.oauth_proxy import ConsentCookiePolicy, OAuthProxy
 from fastmcp.server.auth.providers.jwt import JWTVerifier
 from fastmcp.utilities.auth import decode_jwt_payload, parse_scopes
 from fastmcp.utilities.logging import get_logger
@@ -113,6 +113,7 @@ class AzureProvider(OAuthProxy):
         client_storage: AsyncKeyValue | None = None,
         jwt_signing_key: str | bytes | None = None,
         require_authorization_consent: bool | Literal["remember", "external"] = True,
+        consent_cookie_policy: ConsentCookiePolicy = "host-only",
         consent_csp_policy: str | None = None,
         forward_resource: bool = True,
         fallback_refresh_token_expiry_seconds: int | None = None,
@@ -177,6 +178,12 @@ class AzureProvider(OAuthProxy):
                 but the warning is suppressed as an operator acknowledgment that
                 equivalent protections are enforced externally.
                 SECURITY WARNING: Only set to False for local development or testing environments.
+            consent_cookie_policy: Cookie scope policy for the consent flow.
+                ``"host-only"`` (default) uses ``__Host-`` cookies on HTTPS.
+                ``"domain-compatible"`` uses ``__Secure-`` cookies for hosting
+                layers such as Azure Functions that add a ``Domain`` attribute,
+                weakening browser-enforced host isolation while retaining signed,
+                secure cookies.
             http_client: Optional httpx2.AsyncClient for connection pooling in JWKS fetches.
                 When provided, the client is reused for JWT key fetches and the caller
                 is responsible for its lifecycle. When None (default), a fresh client is created per fetch.
@@ -273,6 +280,7 @@ class AzureProvider(OAuthProxy):
             client_storage=client_storage,
             jwt_signing_key=jwt_signing_key,
             require_authorization_consent=require_authorization_consent,
+            consent_cookie_policy=consent_cookie_policy,
             consent_csp_policy=consent_csp_policy,
             forward_resource=forward_resource,
             fallback_refresh_token_expiry_seconds=fallback_refresh_token_expiry_seconds,
