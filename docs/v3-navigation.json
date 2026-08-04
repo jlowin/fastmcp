@@ -209,6 +209,7 @@
                 "v3/integrations/google",
                 "v3/integrations/huggingface",
                 "v3/integrations/keycloak",
+                "v3/integrations/mcpbundles",
                 "v3/integrations/oci",
                 "v3/integrations/permit",
                 "v3/integrations/propelauth",

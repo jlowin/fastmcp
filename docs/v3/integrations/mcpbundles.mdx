@@ -1,0 +1,81 @@
+---
+title: MCPBundles 🤝 FastMCP
+sidebarTitle: MCPBundles
+description: Secure your FastMCP server with MCPBundles Connect Auth
+icon: shield-check
+---
+
+import { VersionBadge } from "/snippets/version-badge.mdx"
+
+<VersionBadge version="3.0.0" />
+
+Use [MCPBundles Connect Auth](https://www.mcpbundles.com/docs/integrations/mcp-connect-auth) with FastMCP via the [Remote OAuth](/servers/auth/remote-oauth) pattern: MCPBundles runs MCP-client OAuth (DCR, PKCE, federation) while your FastMCP server validates access tokens on your origin.
+
+### Prerequisites
+
+Before you begin:
+
+1. [Publish your MCP server](https://www.mcpbundles.com/docs/how-to/publishing-mcp-servers) on MCPBundles and enable **MCPBundles MCP client authentication**.
+2. Set your federation **sign-in URL** in the maintainer dashboard and store the **federation secret** on your web app (not on the MCP server).
+3. Have your FastMCP server's public **origin URL** ready (for example `https://mcp.example.com/`).
+
+### Step 1: Configure environment
+
+In your FastMCP project's `.env`:
+
+```sh
+MCPBUNDLES_LISTING_SLUG=my-published-listing
+BASE_URL=https://mcp.example.com/
+# Optional: additional scopes tokens must have
+# MCPBUNDLES_REQUIRED_SCOPES=read,write
+```
+
+### Step 2: Add auth to FastMCP server
+
+```python server.py
+import os
+
+from fastmcp import FastMCP
+from fastmcp.server.auth.providers.mcpbundles import McpbundlesConnectProvider
+
+auth_provider = McpbundlesConnectProvider(
+    listing_slug=os.environ["MCPBUNDLES_LISTING_SLUG"],
+    base_url=os.environ["BASE_URL"],
+)
+
+mcp = FastMCP(name="My MCPBundles Protected Server", auth=auth_provider)
+
+
+@mcp.tool
+def auth_status() -> dict:
+    """Show MCPBundles Connect Auth status."""
+    return {
+        "message": "This tool requires authentication via MCPBundles Connect Auth",
+        "authenticated": True,
+        "provider": "MCPBundles",
+    }
+```
+
+<Tip>
+Clients may connect via your **vendor origin** (this server) or via the **bundle proxy URL** `https://mcp.mcpbundles.com/bundle/{slug}` without extra MCP code on your server. See the [integration guide](https://www.mcpbundles.com/docs/integrations/mcp-connect-auth) for Path A vs Path B.
+</Tip>
+
+## Testing
+
+Start the server and connect with any MCP client (Cursor, Claude, mcp-inspector). For a smoke check against a live listing:
+
+```sh
+mcpbundles connect doctor --listing my-published-listing --surface origin
+```
+
+Full federation, token, and protected-resource steps are documented at [MCP Connect Auth for published MCP servers](https://www.mcpbundles.com/docs/integrations/mcp-connect-auth).
+
+## Capabilities
+
+**Remote OAuth / RS pattern:** FastMCP validates ES256 JWTs from the MCPBundles tenant authorization server and forwards authorization-server metadata from your origin.
+
+**Dual audiences:** Tokens may target your origin resource URL or the MCPBundles bundle proxy URL for the same listing.
+
+**Federation:** End-user sign-in happens on your existing web app; MCPBundles handles DCR, authorize, token, and MCP client quirks.
+
+For setup details, federation `complete` API, and ops boundaries, see [https://www.mcpbundles.com/docs/integrations/mcp-connect-auth](https://www.mcpbundles.com/docs/integrations/mcp-connect-auth).
