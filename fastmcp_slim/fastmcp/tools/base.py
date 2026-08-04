@@ -84,10 +84,15 @@ def resolve_serialize_by_alias(value: Any) -> bool:
 
 
 def _dump_nested_models(value: Any, fallback: Callable[[Any], Any] | None) -> Any:
-    """Serialize models found in *value*, each with its own alias setting."""
+    """Serialize models found in *value*, each with its own alias setting.
+
+    Recurses through the same containers ``_resolve_output_by_alias`` unwraps.
+    If the two disagree, the output schema describes one alias mode while the
+    result emits the other and clients reject the structured content.
+    """
     if isinstance(value, dict):
         return {key: _dump_nested_models(item, fallback) for key, item in value.items()}
-    if isinstance(value, list | tuple):
+    if isinstance(value, list | tuple | set | frozenset):
         return [_dump_nested_models(item, fallback) for item in value]
     if isinstance(value, BaseModel):
         return pydantic_core.to_jsonable_python(
@@ -101,8 +106,8 @@ def to_jsonable_by_alias(
 ) -> Any:
     """Convert *value* to JSON-compatible types, honoring alias configuration.
 
-    ``by_alias`` applies to an entire payload, so a model nested in a dict or
-    list would be serialized with the container's setting rather than its own
+    ``by_alias`` applies to an entire payload, so a model nested in a container
+    would be serialized with the container's setting rather than its own
     ``serialize_by_alias`` config. Dumping those models first lets each one
     resolve its own setting.
     """

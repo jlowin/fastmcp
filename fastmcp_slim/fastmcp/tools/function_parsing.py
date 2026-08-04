@@ -147,7 +147,13 @@ def _strip_input_required(tp: Any) -> Any:
 
 
 def _unwrap_model(tp: Any) -> type[BaseModel] | None:
-    """Unwrap ``Annotated``, unions and containers to find a Pydantic model."""
+    """Unwrap ``Annotated``, unions and containers to find a Pydantic model.
+
+    Only the annotated type of an ``Annotated`` is searched, so metadata that
+    happens to be a model class is not mistaken for the returned value.
+    """
+    if get_origin(tp) is Annotated:
+        return _unwrap_model(get_args(tp)[0])
     if args := get_args(tp):
         for arg in args:
             model = _unwrap_model(arg)

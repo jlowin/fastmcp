@@ -432,6 +432,30 @@ class TestSerializeByAlias:
         assert set(item_schema["properties"]) == {"id"}
         assert result.structured_content == {"result": [{"id": "1"}]}
 
+    async def test_set_return_stays_consistent(self):
+        """A set[Model] return serializes and describes itself the same way."""
+
+        class Biofile(BaseModel):
+            model_config = ConfigDict(serialize_by_alias=False, frozen=True)
+            id: str = Field(alias="_id")
+
+        mcp = FastMCP()
+
+        @mcp.tool
+        def get_biofiles() -> set[Biofile]:
+            return {Biofile(_id="1")}
+
+        async with Client(mcp) as client:
+            tools = {t.name: t for t in await client.list_tools()}
+            # client-side validation raises if the schema and content disagree
+            result = await client.call_tool("get_biofiles", {})
+
+        item_schema = tools["get_biofiles"].output_schema["properties"]["result"][
+            "items"
+        ]  # type: ignore[index]
+        assert set(item_schema["properties"]) == {"id"}
+        assert result.structured_content == {"result": [{"id": "1"}]}
+
     async def test_annotated_optional_return_stays_consistent(self):
         """Annotated[Model, ...] | None resolves the model inside the union arm.
 
