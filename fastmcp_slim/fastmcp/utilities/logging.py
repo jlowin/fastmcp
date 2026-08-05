@@ -1,7 +1,9 @@
 """Logging utilities for FastMCP."""
 
 import contextlib
+import importlib.util
 import logging
+from pathlib import Path
 from typing import Any, Literal, cast
 
 from rich.console import Console
@@ -9,6 +11,17 @@ from rich.logging import RichHandler
 from typing_extensions import override
 
 import fastmcp
+
+
+def _get_package_path(package: str) -> str | None:
+    """Return a package directory without importing the package."""
+    try:
+        spec = importlib.util.find_spec(package)
+    except ImportError:
+        return None
+    if spec is None or spec.origin is None:
+        return None
+    return str(Path(spec.origin).parent)
 
 
 def get_logger(name: str) -> logging.Logger:
@@ -83,14 +96,11 @@ def configure_logging(
     # no path or level name to maximize width available for the traceback
     # suppress framework frames and limit the number of frames to 3
 
-    import pydantic
-
-    try:
-        import mcp
-    except ImportError:
-        tracebacks_suppress = [fastmcp, pydantic]
-    else:
-        tracebacks_suppress = [fastmcp, mcp, pydantic]
+    tracebacks_suppress = [
+        package_path
+        for package in ("fastmcp", "mcp", "pydantic")
+        if (package_path := _get_package_path(package)) is not None
+    ]
 
     # Build traceback kwargs with defaults that can be overridden
     traceback_kwargs = {
