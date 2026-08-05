@@ -1,5 +1,7 @@
 """Tests for the EventStore implementation."""
 
+import asyncio
+
 import pytest
 from mcp.server.streamable_http import EventMessage
 from mcp_types import JSONRPCRequest
@@ -258,6 +260,49 @@ class TestEventStore:
         await event_store.store_event("stream-1", msg)
         await event_store.replay_events_after(event_id, callback)
         assert len(replayed) == 1
+
+
+class TestConcurrentStoreEvent:
+    async def test_concurrent_stores_on_one_stream(self, monkeypatch):
+        """Concurrent stores must not lose events or evict the same ID twice.
+
+        A live session stores events from more than one task (the SSE writer and
+        the message router), so the stream's event list is read and written
+        concurrently. Interleaved, each task appends only its own ID to the list
+        it read, and both evict the same expired IDs -- the second delete is the
+        one that raised `FileNotFoundError` on a file-backed store.
+        """
+        event_store = EventStore(max_events_per_stream=2)
+
+        stream_get = event_store._stream_store.get
+        event_delete = event_store._event_store.delete
+        deleted: list[str] = []
+
+        async def yielding_get(**kwargs):
+            # Suspend between the read and the write so the tasks interleave.
+            stream_data = await stream_get(**kwargs)
+            await asyncio.sleep(0)
+            return stream_data
+
+        async def recording_delete(**kwargs):
+            deleted.append(kwargs["key"])
+            return await event_delete(**kwargs)
+
+        monkeypatch.setattr(event_store._stream_store, "get", yielding_get)
+        monkeypatch.setattr(event_store._event_store, "delete", recording_delete)
+
+        message = JSONRPCRequest(jsonrpc="2.0", method="test", id=1)
+        event_ids = await asyncio.gather(
+            *(event_store.store_event("stream-1", message) for _ in range(5))
+        )
+
+        stream_data = await stream_get(key="stream-1")
+        assert stream_data is not None
+        # The two most recent events are retained; every other ID was evicted
+        # exactly once, and no ID vanished without being evicted.
+        assert len(stream_data.event_ids) == 2
+        assert sorted(stream_data.event_ids + deleted) == sorted(event_ids)
+        assert len(deleted) == len(set(deleted))
 
 
 class TestEventStoreIntegration:

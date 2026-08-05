@@ -8,6 +8,7 @@ AsyncKeyValue protocol, allowing users to configure any compatible backend
 
 from __future__ import annotations
 
+import asyncio
 from uuid import uuid4
 
 from key_value.aio.adapters.pydantic import PydanticAdapter
@@ -84,6 +85,11 @@ class EventStore(SDKEventStore):
         self._storage: AsyncKeyValue = storage or MemoryStore()
         self._max_events_per_stream = max_events_per_stream
         self._ttl = ttl
+        # Serializes the read-modify-write of every stream's event list. One lock
+        # for the whole store rather than one per stream: the critical section is
+        # two short key-value calls, and per-stream locks would need their own
+        # eviction to avoid growing with every session.
+        self._stream_lock = asyncio.Lock()
 
         # PydanticAdapter for type-safe storage (following OAuth proxy pattern)
         self._event_store: PydanticAdapter[EventEntry] = PydanticAdapter[EventEntry](
@@ -121,22 +127,27 @@ class EventStore(SDKEventStore):
         )
         await self._event_store.put(key=event_id, value=entry, ttl=self._ttl)
 
-        # Update stream's event list
-        stream_data = await self._stream_store.get(key=stream_id)
-        event_ids = stream_data.event_ids if stream_data else []
-        event_ids.append(event_id)
+        # Update stream's event list. A session stores events from more than one
+        # task -- the SSE writer and the message router both do -- so this
+        # read-modify-write has to be serialized. Interleaved, each task reads the
+        # same list, appends only its own ID, and the later write drops the other
+        # event entirely while both tasks evict the same expired IDs.
+        async with self._stream_lock:
+            stream_data = await self._stream_store.get(key=stream_id)
+            event_ids = stream_data.event_ids if stream_data else []
+            event_ids.append(event_id)
 
-        # Trim to max events (delete old events)
-        if len(event_ids) > self._max_events_per_stream:
-            for old_id in event_ids[: -self._max_events_per_stream]:
-                await self._event_store.delete(key=old_id)
-            event_ids = event_ids[-self._max_events_per_stream :]
+            # Trim to max events (delete old events)
+            if len(event_ids) > self._max_events_per_stream:
+                for old_id in event_ids[: -self._max_events_per_stream]:
+                    await self._event_store.delete(key=old_id)
+                event_ids = event_ids[-self._max_events_per_stream :]
 
-        await self._stream_store.put(
-            key=stream_id,
-            value=StreamEventList(event_ids=event_ids),
-            ttl=self._ttl,
-        )
+            await self._stream_store.put(
+                key=stream_id,
+                value=StreamEventList(event_ids=event_ids),
+                ttl=self._ttl,
+            )
 
         return event_id
 
