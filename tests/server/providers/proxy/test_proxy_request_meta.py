@@ -59,9 +59,11 @@ def _recording_backend(seen: dict[str, _RecordedRequest]) -> FastMCP:
     return backend
 
 
-def _proxy(backend: FastMCP, *, backend_mode: str) -> FastMCPProxy:
+def _proxy(
+    backend: FastMCP, *, backend_mode: str, client_class: type[Client]
+) -> FastMCPProxy:
     return FastMCPProxy(
-        client_factory=lambda: ProxyClient(
+        client_factory=lambda: client_class(
             backend,
             mode=backend_mode,
             client_info=BACKEND_INFO,
@@ -89,6 +91,10 @@ def _assert_backend_connection_meta(record: _RecordedRequest, modern: bool) -> N
     assert FRONT_EXTENSION_ID not in capabilities.get("extensions", {})
 
 
+# Every allowed ClientFactoryT shape must be hop-safe, not just ProxyClient:
+# a plain Client backend runs the SDK's stock ClientSession rather than the
+# proxy's session class, so it exercises the copy-site sanitization alone.
+@pytest.mark.parametrize("client_class", [ProxyClient, Client])
 @pytest.mark.parametrize(
     ("front_mode", "backend_mode", "backend_is_modern"),
     [
@@ -102,9 +108,12 @@ async def test_forwarded_tool_meta_stays_hop_safe(
     front_mode: str,
     backend_mode: str,
     backend_is_modern: bool,
+    client_class: type[Client],
 ):
     seen: dict[str, _RecordedRequest] = {}
-    proxy = _proxy(_recording_backend(seen), backend_mode=backend_mode)
+    proxy = _proxy(
+        _recording_backend(seen), backend_mode=backend_mode, client_class=client_class
+    )
 
     async with Client(
         proxy,

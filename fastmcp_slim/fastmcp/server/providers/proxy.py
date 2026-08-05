@@ -18,13 +18,10 @@ import anyio
 import httpx2
 import mcp_types
 from mcp import ClientSession
-from mcp.client.session import ReceiveResultT
 from mcp.server.connection import Connection
 from mcp.server.context import ServerRequestContext
-from mcp.shared.dispatcher import ProgressFnT
 from mcp.shared.exceptions import MCPError
 from mcp.shared.inbound import x_mcp_header_map
-from mcp.shared.message import ClientMessageMetadata
 from mcp_types import (
     METHOD_NOT_FOUND,
     BlobResourceContents,
@@ -32,7 +29,6 @@ from mcp_types import (
     TextResourceContents,
 )
 from mcp_types.version import MODERN_PROTOCOL_VERSIONS
-from pydantic import TypeAdapter
 from pydantic.networks import AnyUrl
 
 from fastmcp.client.client import Client, SDKServer, _connection_failure
@@ -78,60 +74,15 @@ logger = get_logger(__name__)
 ClientFactoryT = Callable[[], Client] | Callable[[], Awaitable[Client]]
 
 
-# Request `_meta` keys that describe one negotiated MCP connection. A proxy
-# must never copy them from its frontend connection onto its backend
-# connection: the modern stamp in `ClientSession.send_request` rewrites them
-# from this session's own negotiated state, and a handshake-era backend must
-# not receive them at all.
-_CONNECTION_META_KEYS = frozenset(
-    {
-        mcp_types.PROTOCOL_VERSION_META_KEY,
-        mcp_types.CLIENT_INFO_META_KEY,
-        mcp_types.CLIENT_CAPABILITIES_META_KEY,
-    }
-)
-
-
 class _ForwardingClientSession(ClientSession):
-    """A session that owns proxy-specific behavior at the backend boundary.
+    """A session that does not enforce the backend's declared output schema.
 
-    Connection-owned request metadata (protocol version, client identity,
-    client capabilities) is dropped before sending, never forwarded from the
-    frontend connection; on a modern backend the session's own stamp rebuilds
-    it, and on a handshake backend it stays absent. Progress, tracing, task,
-    and application metadata pass through untouched.
-
-    Tool results are relayed without enforcing the backend's advertised
-    output schema; that validation belongs to the client that ultimately
-    consumes the result, and enforcing it mid-path turns a backend's schema
-    bug into a proxy error that hides the real response.
+    `ClientSession.call_tool` normally validates a tool's structured content
+    against the output schema the backend advertised, raising if they disagree.
+    That check belongs to whoever consumes the result. A proxy only relays it,
+    and the end client runs the same check for itself, so enforcing it mid-path
+    turns a backend's schema bug into a proxy error and hides the real response.
     """
-
-    async def send_request(
-        self,
-        request: mcp_types.ClientRequest | mcp_types.Request[Any, Any],
-        result_type: type[ReceiveResultT] | TypeAdapter[ReceiveResultT],
-        request_read_timeout_seconds: float | None = None,
-        metadata: ClientMessageMetadata | None = None,
-        progress_callback: ProgressFnT | None = None,
-    ) -> ReceiveResultT:
-        params = request.params
-        if isinstance(params, mcp_types.RequestParams) and params.meta:
-            forwarded = {
-                key: value
-                for key, value in params.meta.items()
-                if key not in _CONNECTION_META_KEYS
-            }
-            request = request.model_copy(
-                update={"params": params.model_copy(update={"meta": forwarded or None})}
-            )
-        return await super().send_request(
-            request,
-            result_type,
-            request_read_timeout_seconds=request_read_timeout_seconds,
-            metadata=metadata,
-            progress_callback=progress_callback,
-        )
 
     async def validate_tool_result(
         self, name: str, result: mcp_types.CallToolResult
@@ -139,10 +90,9 @@ class _ForwardingClientSession(ClientSession):
         return None
 
 
-# Settings every proxy-backend connection uses: strip connection-owned request
-# metadata at the boundary, relay results without policing the backend's
-# output schema, and forward the caller's authorization header upstream
-# (appropriate for a proxy, where credentials are meant to propagate).
+# Settings every proxy-backend connection uses: relay results without policing
+# the backend's output schema, and forward the caller's authorization header
+# upstream (appropriate for a proxy, where credentials are meant to propagate).
 PROXY_TRANSPORT_OPTIONS = TransportOptions(
     session_class=_ForwardingClientSession,
     forward_incoming_headers=True,
@@ -178,6 +128,37 @@ def _proxy_upstream_error(error: Exception) -> MCPError:
         code=mcp_types.INTERNAL_ERROR,
         message=str(_connection_failure(error)),
     )
+
+
+# Request `_meta` keys that describe one negotiated MCP connection. They never
+# cross the proxy: a modern backend session stamps its own negotiated values on
+# every request, and a handshake-era backend must not receive them at all.
+_CONNECTION_META_KEYS = frozenset(
+    {
+        mcp_types.PROTOCOL_VERSION_META_KEY,
+        mcp_types.CLIENT_INFO_META_KEY,
+        mcp_types.CLIENT_CAPABILITIES_META_KEY,
+    }
+)
+
+
+def _forwardable_request_meta(ctx: Context | None) -> dict[str, Any] | None:
+    """Frontend request metadata that may cross onto the backend connection.
+
+    This is the proxy's one sanctioned read of the inbound request's `_meta`:
+    progress tokens, tracing, task, and application metadata pass through,
+    while connection-owned keys (`_CONNECTION_META_KEYS`) are dropped because
+    they describe the frontend connection, not the backend one.
+    """
+    request_context = ctx.request_context if ctx is not None else None
+    if request_context is None or not request_context.meta:
+        return None
+    forwarded = {
+        key: value
+        for key, value in request_context.meta.items()
+        if key not in _CONNECTION_META_KEYS
+    }
+    return forwarded or None
 
 
 async def _relay_read_resource(
@@ -361,15 +342,11 @@ class ProxyTool(Tool):
             async with client:
                 ctx = context or get_context()
                 _stash_proxy_request_context(client, ctx)
-                # Forward the inbound request's `_meta` block (trace context,
-                # version, etc.) to the backend. In SDK v2 the request context
-                # exposes the lifted `_meta` dict directly; task submission is a
-                # first-class params field rather than context state, so there
-                # is no separate task-metadata injection here.
-                req_ctx = ctx.request_context
-                meta: dict[str, Any] | None = (
-                    dict(req_ctx.meta) if req_ctx is not None and req_ctx.meta else None
-                )
+                # Forward the inbound request's hop-safe `_meta` (trace
+                # context, progress token, etc.) to the backend. Task
+                # submission is a first-class params field rather than context
+                # state, so there is no separate task-metadata injection here.
+                meta = _forwardable_request_meta(ctx)
 
                 if client.protocol_version in MODERN_PROTOCOL_VERSIONS:
                     # Modern backend: call the session directly (not
