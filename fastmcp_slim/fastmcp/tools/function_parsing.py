@@ -164,6 +164,15 @@ class _ToolOutputSchemaGenerator(GenerateJsonSchema):
         finally:
             self.by_alias = previous_by_alias
 
+    def dataclass_schema(self, schema: core_schema.DataclassSchema) -> JsonSchemaValue:
+        previous_by_alias = self.by_alias
+        configured = (schema.get("config") or {}).get("serialize_by_alias")
+        self.by_alias = False if configured is None else configured
+        try:
+            return super().dataclass_schema(schema)
+        finally:
+            self.by_alias = previous_by_alias
+
 
 T = TypeVarExt("T", default=Any)
 
@@ -424,6 +433,7 @@ class ParsedFunction:
                 type_adapter = get_cached_typeadapter(clean_output_type)
                 base_schema = type_adapter.json_schema(
                     mode="serialization",
+                    by_alias=False,
                     schema_generator=_ToolOutputSchemaGenerator,
                 )
 
@@ -437,6 +447,7 @@ class ParsedFunction:
                     wrapped_adapter = get_cached_typeadapter(wrapped_type)
                     output_schema = wrapped_adapter.json_schema(
                         mode="serialization",
+                        by_alias=False,
                         schema_generator=_ToolOutputSchemaGenerator,
                     )
                     output_schema["x-fastmcp-wrap-result"] = True

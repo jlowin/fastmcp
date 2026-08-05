@@ -5,6 +5,8 @@ from typing import Annotated, Any
 import pytest
 from mcp_types import CallToolResult, TextContent
 from pydantic import BaseModel, ConfigDict, Field
+from pydantic.dataclasses import dataclass as pydantic_dataclass
+from typing_extensions import TypedDict
 
 from fastmcp import Client, FastMCP
 from fastmcp.tools.base import Tool, ToolResult
@@ -436,6 +438,67 @@ class TestSerializeByAlias:
             "named": {"value": "named"},
             "aliased": {"aliasedValue": "aliased"},
         }
+
+    async def test_dataclass_uses_pydantic_alias_default(self):
+        """A dataclass schema uses field names when aliases are not enabled."""
+
+        @dataclass
+        class Output:
+            value: Annotated[str, Field(serialization_alias="dataValue")]
+
+        mcp = FastMCP()
+
+        @mcp.tool
+        def get_output() -> Output:
+            return Output(value="data")
+
+        async with Client(mcp) as client:
+            tools = {tool.name: tool for tool in await client.list_tools()}
+            result = await client.call_tool("get_output", {})
+
+        assert set(tools["get_output"].output_schema["properties"]) == {"value"}  # type: ignore[index]
+        assert result.structured_content == {"value": "data"}
+
+    async def test_pydantic_dataclass_can_enable_aliases(self):
+        """A Pydantic dataclass can opt in to serialization aliases."""
+
+        @pydantic_dataclass(config=ConfigDict(serialize_by_alias=True))
+        class Output:
+            value: Annotated[str, Field(serialization_alias="dataValue")]
+
+        mcp = FastMCP()
+
+        @mcp.tool
+        def get_output() -> Output:
+            return Output(value="data")
+
+        async with Client(mcp) as client:
+            tools = {tool.name: tool for tool in await client.list_tools()}
+            result = await client.call_tool("get_output", {})
+
+        assert set(tools["get_output"].output_schema["properties"]) == {  # type: ignore[index]
+            "dataValue"
+        }
+        assert result.structured_content == {"dataValue": "data"}
+
+    async def test_typed_dict_uses_pydantic_alias_default(self):
+        """A TypedDict schema uses the field names emitted by Pydantic."""
+
+        class Output(TypedDict):
+            value: Annotated[str, Field(serialization_alias="dataValue")]
+
+        mcp = FastMCP()
+
+        @mcp.tool
+        def get_output() -> Output:
+            return {"value": "data"}
+
+        async with Client(mcp) as client:
+            tools = {tool.name: tool for tool in await client.list_tools()}
+            result = await client.call_tool("get_output", {})
+
+        assert set(tools["get_output"].output_schema["properties"]) == {"value"}  # type: ignore[index]
+        assert result.structured_content == {"value": "data"}
 
     async def test_serialize_by_alias_true_uses_alias(self):
         """serialize_by_alias=True emits aliases."""
