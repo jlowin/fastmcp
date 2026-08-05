@@ -1,0 +1,52 @@
+{
+  "description": "Golden Connect Auth ES256 access token for cross-framework provider tests.",
+  "issuer": "https://api.example.test/connect-auth/tenants/golden-demo/",
+  "origin_resource": "https://mcp.example.test/mcp",
+  "bundle_proxy_resource": "https://mcp.mcpbundles.test/bundle/golden-demo",
+  "expected": {
+    "user_id": "user-golden-001",
+    "organization_id": "org-golden-001",
+    "email": "builder@example.test",
+    "roles": [
+      "admin",
+      "editor"
+    ],
+    "client_id": "mcp-client-cursor-abc",
+    "scopes": [
+      "read",
+      "write"
+    ]
+  },
+  "claims": {
+    "sub": "user-golden-001",
+    "client_id": "mcp-client-cursor-abc",
+    "organization_id": "org-golden-001",
+    "email": "builder@example.test",
+    "roles": [
+      "admin",
+      "editor"
+    ],
+    "scope": "read write",
+    "iss": "https://api.example.test/connect-auth/tenants/golden-demo/",
+    "aud": [
+      "https://mcp.example.test/mcp",
+      "https://mcp.mcpbundles.test/bundle/golden-demo"
+    ],
+    "iat": 1700000000,
+    "exp": 4102444800
+  },
+  "jwks": {
+    "keys": [
+      {
+        "crv": "P-256",
+        "x": "U73XGcvDNmRgleYIT9jBoma0GelDv8KyekMOeJ91H2Q",
+        "y": "chQya938YoYktWjEmezuVNWpJsG-J4CRVBR0hKbiI0w",
+        "kty": "EC",
+        "kid": "golden-connect-auth-key",
+        "alg": "ES256",
+        "use": "sig"
+      }
+    ]
+  },
+  "token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJFUzI1NiIsImtpZCI6ImdvbGRlbi1jb25uZWN0LWF1dGgta2V5In0.eyJzdWIiOiJ1c2VyLWdvbGRlbi0wMDEiLCJjbGllbnRfaWQiOiJtY3AtY2xpZW50LWN1cnNvci1hYmMiLCJvcmdhbml6YXRpb25faWQiOiJvcmctZ29sZGVuLTAwMSIsImVtYWlsIjoiYnVpbGRlckBleGFtcGxlLnRlc3QiLCJyb2xlcyI6WyJhZG1pbiIsImVkaXRvciJdLCJzY29wZSI6InJlYWQgd3JpdGUiLCJpc3MiOiJodHRwczovL2FwaS5leGFtcGxlLnRlc3QvY29ubmVjdC1hdXRoL3RlbmFudHMvZ29sZGVuLWRlbW8vIiwiYXVkIjpbImh0dHBzOi8vbWNwLmV4YW1wbGUudGVzdC9tY3AiLCJodHRwczovL21jcC5tY3BidW5kbGVzLnRlc3QvYnVuZGxlL2dvbGRlbi1kZW1vIl0sImlhdCI6MTcwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwfQ.YbGFJrLS_3jGroLjk3lzSGrZM7Cqjl-EiXQBJpgNrM9sxShEu7jo4mWErkjTo9V9fHjOPG0yACh8Eg9J4alLIQ"
+}

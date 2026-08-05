@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TypedDict
+from typing import Any, TypedDict
 
 import httpx2
 from pydantic import AnyHttpUrl
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 
-from fastmcp.server.auth import RemoteAuthProvider, TokenVerifier
+from fastmcp.server.auth import AccessToken, RemoteAuthProvider, TokenVerifier
 from fastmcp.server.auth.providers.jwt import JWTVerifier
 from fastmcp.utilities.auth import parse_scopes
 from fastmcp.utilities.logging import get_logger
@@ -20,6 +20,50 @@ logger = get_logger(__name__)
 INTEGRATION_DOC_URL = "https://www.mcpbundles.com/docs/integrations/mcp-connect-auth"
 DEFAULT_PUBLIC_CONFIG_BASE_URL = "https://api.mcpbundles.com"
 DEFAULT_HTTP_TIMEOUT = 10.0
+
+
+def connect_auth_callback_identity(access_token: AccessToken) -> dict[str, Any]:
+    """Build the canonical Connect Auth tool callback shape from a verified token.
+
+    Matches the mcp-use ``get-user-info`` example: identity on ``user``, OAuth
+    metadata on ``auth``. See the MCPBundles integration guide § Tool callback
+    identity.
+    """
+    claims = access_token.claims
+    organization_id = claims.get("organization_id")
+    email = claims.get("email")
+    roles_raw = claims.get("roles")
+    roles: list[str] = []
+    if isinstance(roles_raw, list):
+        roles = [role for role in roles_raw if isinstance(role, str)]
+
+    audience = claims.get("aud")
+    resource: str | None = None
+    if isinstance(audience, str):
+        resource = audience
+    elif isinstance(audience, list) and audience:
+        first = audience[0]
+        if isinstance(first, str):
+            resource = first
+
+    subject = access_token.subject
+    if not subject and isinstance(claims.get("sub"), str):
+        subject = claims["sub"]
+
+    return {
+        "user": {
+            "id": subject or "",
+            "organizationId": organization_id if isinstance(organization_id, str) else None,
+            "email": email if isinstance(email, str) and email else None,
+            "roles": roles,
+        },
+        "auth": {
+            "clientId": access_token.client_id,
+            "scopes": list(access_token.scopes or []),
+            "expiresAt": access_token.expires_at,
+            "resource": resource,
+        },
+    }
 
 
 class PublicConfig(TypedDict, total=False):
@@ -148,6 +192,44 @@ def fetch_public_config(
 PublicConfigFetcher = Callable[..., PublicConfig]
 
 
+class McpbundlesJWTVerifier(JWTVerifier):
+    """JWT verifier with one JWKS refresh when a token references an unknown ``kid``.
+
+    MCPBundles tenant signing keys rotate in place while cached JWKS may still
+    hold the previous key. Refresh once before failing lookup.
+
+    Connect Auth always mints ``client_id`` separately from ``sub``. This verifier
+    does not fall back ``client_id`` to ``sub`` (unlike the generic ``JWTVerifier``).
+    """
+
+    async def _get_jwks_key(self, kid: str | None) -> str:
+        try:
+            return await super()._get_jwks_key(kid)
+        except ValueError as exc:
+            message = str(exc)
+            if kid and "not found in JWKS" in message:
+                self._jwks_cache_time = 0.0
+                return await super()._get_jwks_key(kid)
+            raise
+
+    async def load_access_token(self, token: str) -> AccessToken | None:
+        access_token = await super().load_access_token(token)
+        if access_token is None:
+            return None
+
+        claims = access_token.claims
+        raw_client_id = claims.get("client_id") or claims.get("azp")
+        if not isinstance(raw_client_id, str) or not raw_client_id.strip():
+            self.logger.debug(
+                "Bearer token rejected: Connect Auth token missing client_id claim"
+            )
+            return None
+
+        if access_token.client_id != raw_client_id:
+            return access_token.model_copy(update={"client_id": raw_client_id})
+        return access_token
+
+
 class McpbundlesConnectProvider(RemoteAuthProvider):
     """MCPBundles Connect Auth resource server provider for FastMCP.
 
@@ -214,7 +296,7 @@ class McpbundlesConnectProvider(RemoteAuthProvider):
         ]
 
         if token_verifier is None:
-            token_verifier = JWTVerifier(
+            token_verifier = McpbundlesJWTVerifier(
                 jwks_uri=jwks_url(self.public_config_base_url, listing_slug),
                 issuer=issuer,
                 algorithm="ES256",

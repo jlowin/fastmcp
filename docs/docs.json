@@ -295,6 +295,7 @@
                       "integrations/google",
                       "integrations/huggingface",
                       "integrations/keycloak",
+                      "integrations/mcpbundles",
                       "integrations/oci",
                       "integrations/permit",
                       "integrations/propelauth",
