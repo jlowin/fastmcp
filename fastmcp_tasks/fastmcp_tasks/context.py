@@ -16,6 +16,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from fastmcp_tasks.encryption import SnapshotDecryptionError, snapshot_codec
 from fastmcp_tasks.keys import (
     leg_number_from_key,
     parse_task_key,
@@ -226,10 +227,20 @@ class TaskContextSnapshot:
         task_id: str,
         ttl_seconds: int,
     ) -> None:
-        """Store this snapshot as a single Redis key."""
+        """Store this snapshot as a single Redis key.
+
+        The stored value is encrypted when a ``FASTMCP_ENCRYPTION_KEY`` is
+        configured: this payload carries the caller's bearer token and headers,
+        and a distributed backend keeps it where the backend's operators can
+        read it (#4747).
+        """
         key = docket.key(f"{task_redis_prefix(task_scope)}:{task_id}:snapshot")
+        codec = snapshot_codec()
+        payload = self.to_json()
+        if codec is not None:
+            payload = codec.encode(payload)
         async with docket.redis() as redis:
-            await redis.set(key, self.to_json(), ex=ttl_seconds)
+            await redis.set(key, payload, ex=ttl_seconds)
 
 
 # Cache keyed by task_id so stale entries from previous tasks in the same
@@ -285,6 +296,11 @@ async def restore_task_snapshot(key: str = TaskKey()) -> None:
     backend work transparently (#3897).  Failures are non-fatal: the task
     still runs, and sync helpers return ``None`` as they would have before
     the snapshot was captured.
+
+    A snapshot that will not decrypt is the one exception. When the deployment
+    configured an encryption key, an unreadable snapshot means the caller cannot
+    be recovered, so the task fails rather than running under no identity at all
+    (#4747).
     """
     try:
         parts = parse_task_key(key)
@@ -313,12 +329,26 @@ async def restore_task_snapshot(key: str = TaskKey()) -> None:
             )
         if raw is None:
             return
+        codec = snapshot_codec()
+        if codec is not None:
+            raw = codec.decode(raw)
         snapshot = TaskContextSnapshot.from_json(raw)
         _remember_snapshot(task_id, snapshot)
         # Restore the ambient request context (auth token, headers) so core's
         # get_access_token()/get_http_headers() see the submitting caller inside
         # the worker, exactly as a normal request would.
         _apply_snapshot_to_context(snapshot)
+    except SnapshotDecryptionError:
+        # Docket reports this to the client as a generic dependency-resolution
+        # failure, so name the cause here. A key mismatch across servers and
+        # workers is the likely reason and is not guessable from the wire error.
+        _logger.error(
+            "Failed to decrypt the task snapshot for %s. Every server and worker "
+            "on this queue must share the same FASTMCP_ENCRYPTION_KEY. The task "
+            "will fail rather than run without the submitting caller's identity.",
+            key,
+        )
+        raise
     except Exception:
         _logger.warning("Failed to restore task snapshot for %s", key, exc_info=True)
 

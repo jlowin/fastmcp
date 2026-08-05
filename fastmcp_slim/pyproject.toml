@@ -92,6 +92,10 @@ openai = ["openai>=1.102.0"]
 server = [
     "fastmcp-slim[mcp]=={{ version }}",
     "authlib>=1.6.11",
+    # Fernet and the HKDF/PBKDF2 key derivation behind FASTMCP_ENCRYPTION_KEY and
+    # the OAuth proxy's storage encryption. Previously reached only through
+    # authlib.
+    "cryptography>=43.0.0",
     "cyclopts>=4.0.0",
     "griffelib>=2.0.0",
     "jsonref>=1.1.0",

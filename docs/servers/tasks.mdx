@@ -193,6 +193,28 @@ mcp.add_extension(TasksExtension(url="redis://localhost:6379/0"))
 - **Fast**: Single-digit millisecond task pickup latency
 - **Scalable**: Add workers to distribute load across processes or machines
 
+### Credentials at Rest
+
+A background task runs long after the request that submitted it has ended, but it still needs to know who asked for the work. FastMCP captures that identity at submission time in a **task context snapshot**: the caller's access token and every inbound HTTP header, including `Authorization`. The worker restores the snapshot before the tool body runs, so `get_access_token()` and `get_http_headers()` return the submitting caller.
+
+That snapshot lives in the backend for the task's TTL. With `memory://` it never leaves the process. With Redis or Valkey it is a stored value, and by default it is stored as plaintext JSON. A `rediss://` URL encrypts the connection, not the data the backend holds. Anyone who can read the backend can read the tokens.
+
+Set `FASTMCP_ENCRYPTION_KEY` to encrypt the snapshot before it is written:
+
+```bash
+export FASTMCP_ENCRYPTION_KEY=$(python -c "import secrets; print(secrets.token_urlsafe(32))")
+```
+
+<Warning>
+Every server and worker on the same queue must set the same key. The process that restores a snapshot is rarely the one that captured it, and a worker with the wrong key cannot recover the caller.
+</Warning>
+
+With a key configured, restore **fails closed**: a worker that cannot decrypt a snapshot fails the task instead of running the tool with no identity. This matters for a tool whose behavior depends on the caller: running it as an anonymous user is worse than not running it. The failure is reported to the client as a task error, and the server log names the key mismatch.
+
+Two consequences of failing closed are worth planning for. Tasks submitted before the key was set fail when a worker with the key picks them up, so drain the queue before you roll a key out. Rotating a key does the same to tasks in flight under the old one.
+
+The key protects the snapshot only. Tool arguments and any answers a task gathers through [mid-task input](#gathering-input-mid-task) are still stored as plaintext, so treat the backend as sensitive regardless.
+
 ## Workers
 
 Every FastMCP server with task-enabled tools automatically starts an **embedded worker**. You do not need to start a separate worker process for tasks to execute.
