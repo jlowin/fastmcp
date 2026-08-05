@@ -192,53 +192,55 @@ async with Client(proxy) as client:
 
 Skipping the check also avoids a `tools/list` round trip to the backend on every proxied call, since validation would need the backend's schemas and a proxy builds a fresh connection per request.
 
-### Protocol Era Mirroring
+### Protocol Policy
 
 <VersionBadge version="4.0.0" />
 
-A proxy is a server on its front and a client on its back, and the two MCP protocol eras have mutually exclusive interaction models on a single session. On the handshake era (≤2025-11-25) the backend can push server-initiated requests — sampling, elicitation, roots — which the proxy forwards to your client. On the modern era (2026-07-28) those pushes are gone; a backend guard tool instead returns an input request that the proxy relays back as a result. A single proxy session speaks one era, so the whole chain has to agree end-to-end.
+A proxy is a server on its front and a client on its back. Its `protocol_policy` controls whether those two connections negotiate together:
 
-By default the proxy relays the era: whatever era your client negotiates on the front, the proxy negotiates the same era on its backend connection, per request. A handshake client reaches a handshake backend, so server-initiated forwarding works; a modern client reaches a modern backend, so a guard tool's input request round-trips. Different clients hitting the same proxy each get a backend session in their own era — the eras never cross.
+- `"mirror"` constrains each backend connection to the active frontend connection's protocol era. Use this when modern guard results or handshake-era server-initiated requests must work end to end.
+- `"independent"` leaves the backend client's configured `mode` in control. Use this when an upstream server supports only one era or should negotiate without regard to the frontend.
+
+`create_proxy()` preserves its established defaults. A raw URL, path, config, transport, or `FastMCP` target mirrors when no `mode` is supplied. Passing a configured `Client` or an explicit `mode` uses independent negotiation.
 
 ```python
 from fastmcp import Client
 from fastmcp.server import create_proxy
 
-# No mode: the backend mirrors each client's negotiated era.
-proxy = create_proxy("backend_server.py")
+# Compatibility default: each backend connection mirrors its frontend.
+mirroring_proxy = create_proxy("backend_server.py")
 
-# A handshake client gets a handshake backend (push-forwarding works).
-async with Client(proxy, mode="legacy") as client:
-    ...
-
-# A modern client gets a modern backend (guard tools round-trip).
-async with Client(proxy, mode="auto") as client:
-    ...
-```
-
-Passing an explicit `mode` pins the backend to one era regardless of the client:
-
-```python
-# Always negotiate the modern era upstream, whatever the client speaks.
-proxy = create_proxy("backend_server.py", mode="auto")
-```
-
-Pinning breaks the end-to-end era agreement, so reserve it for a backend that only speaks one era. When the client's era and the pinned backend era disagree on a feature — a modern client asking for a guard round-trip against a handshake-pinned backend, say — the mismatch surfaces through the normal era gates rather than silently degrading. Mirroring applies to proxies created from a target the proxy connects itself (a URL, path, config, or `FastMCP` instance); when you hand `create_proxy` an already-configured `Client`, that client carries its own mode and mirroring does not override it.
-
-A multi-server configuration adds a hop: FastMCP mounts one proxy per configured server onto a router, and your client talks to that router rather than to any backend directly. The era carries through the whole depth, so each real backend negotiates the era your client did — not just the router in front of them.
-
-```python
-proxy = create_proxy(
-    {
-        "mcpServers": {
-            "weather": {"url": "https://weather.example.com/mcp"},
-            "calendar": {"url": "https://calendar.example.com/mcp"},
-        }
-    }
+# The backend negotiates independently using mode="auto".
+independent_proxy = create_proxy(
+    "backend_server.py",
+    mode="auto",
+    protocol_policy="independent",
 )
+
+async with Client(mirroring_proxy, mode="legacy") as client:
+    ...  # the backend uses the handshake era
+
+async with Client(mirroring_proxy, mode="auto") as client:
+    ...  # the backend uses the modern era
 ```
 
-A modern client here reaches both `weather` and `calendar` on modern sessions, so a guard tool on either one round-trips end to end. An explicit `mode` pins every backend in the configuration, the same way it pins a single one.
+For lower-level composition, the policy lives directly on `ProxyProvider`:
+
+```python
+from fastmcp import FastMCP
+from fastmcp.server.providers.proxy import ProxyClient, ProxyProvider
+
+provider = ProxyProvider(
+    lambda: ProxyClient("backend_server.py", mode="auto"),
+    protocol_policy="independent",
+)
+
+proxy = FastMCP("Proxy", providers=[provider])
+```
+
+Request metadata follows the same connection boundary. Progress tokens, tracing, task state, and application or vendor metadata pass through the proxy. Connection-owned protocol version, client identity, and client capabilities never copy from the frontend connection: a modern backend session writes its own negotiated values, while a legacy backend omits those modern fields.
+
+For multi-server configurations, mirroring carries through the composite router to each real backend. Independent policy leaves every configured backend client's mode in control.
 
 ## Configuration-Based Proxies
 

@@ -148,21 +148,10 @@ async def proxy_server(fastmcp_server: FastMCP):
     A proxy server that forwards interactions with the proxy client to the given fastmcp server.
 
     `ProxyClient(fastmcp_server)` defaults to `mode="legacy"` (see
-    `TestProxyClientEraDefault` above — a directly-constructed `ProxyClient`
-    always pins the handshake era, independent of `create_proxy`'s era
-    mirroring). Every test below that forwards a tool call through this
-    fixture (not just a listing) needs its front `Client` pinned to
-    `mode="legacy"` too, for either or both of two reasons:
-
-    - The test's subject is itself a handshake-only feature (roots / sampling
-      / elicitation push, logging, progress): the modern era has no
-      back-channel for server-initiated requests at all, so these forwarding
-      paths cannot exist there.
-    - Even for subjects that work on both eras, a modern front's request
-      `_meta` carries reserved modern-envelope keys that `ProxyTool.run`'s
-      legacy-backend path forwards verbatim onto this legacy-locked backend
-      session, which the backend server then rejects as a protocol
-      violation.
+    `TestProxyClientEraDefault` above). Tests exercising handshake-only roots,
+    sampling, elicitation, logging, or progress pin the frontend to the same
+    era because those server-initiated interactions do not exist on modern
+    connections.
     """
     return create_proxy(ProxyClient(fastmcp_server))
 
