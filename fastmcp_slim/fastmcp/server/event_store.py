@@ -89,6 +89,13 @@ class EventStore(SDKEventStore):
         # for the whole store rather than one per stream: the critical section is
         # two short key-value calls, and per-stream locks would need their own
         # eviction to avoid growing with every session.
+        #
+        # An in-process lock is enough because a stream list only ever has
+        # in-process writers: every transport gets its own SessionScopedEventStore
+        # with a random per-session prefix, so no two servers sharing one backend
+        # address the same stream key. Coordinating across processes would need a
+        # compare-and-swap or transactional update, which AsyncKeyValue does not
+        # expose -- it offers only get/put/delete/ttl.
         self._stream_lock = asyncio.Lock()
 
         # PydanticAdapter for type-safe storage (following OAuth proxy pattern)
