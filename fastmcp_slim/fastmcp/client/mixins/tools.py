@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import mcp_types
 from mcp.client.caching import CacheMode
@@ -13,9 +13,9 @@ if TYPE_CHECKING:
 
     from fastmcp.client.client import CallToolResult, Client
 from fastmcp.client.progress import ProgressHandler
-from fastmcp.client.request_meta import prepare_request_meta
 from fastmcp.client.telemetry import client_span
 from fastmcp.exceptions import ToolError
+from fastmcp.telemetry import inject_trace_context
 from fastmcp.utilities.json_schema_type import json_schema_to_type
 from fastmcp.utilities.logging import get_logger
 from fastmcp.utilities.timeout import normalize_timeout_to_seconds
@@ -176,7 +176,14 @@ class ClientToolsMixin:
         ) as span:
             logger.debug(f"[{self.name}] called call_tool: {name}")
 
-            request_meta = prepare_request_meta(meta)
+            # Inject trace context into meta for propagation to server.
+            # SDK v2: request `_meta` is `RequestParamsMeta` (a TypedDict), not
+            # the old `RequestParams.Meta` nested model.
+            propagated_meta = inject_trace_context(meta)
+            request_meta = cast(
+                "mcp_types.RequestParamsMeta | None",
+                propagated_meta if propagated_meta else None,
+            )
 
             read_timeout_seconds = normalize_timeout_to_seconds(timeout)
             progress_callback = progress_handler or self._progress_handler

@@ -168,9 +168,11 @@ def fastmcp_server():
 async def proxy_server(fastmcp_server):
     """Fixture that creates a FastMCP proxy server.
 
-    Passing an already-constructed `ProxyClient` as the target keeps that
-    client's independent `mode="legacy"` configuration rather than applying
-    `create_proxy`'s default mirroring policy for raw targets.
+    Passing an already-constructed `ProxyClient` as the target (rather than a
+    raw `FastMCP`/URL/etc.) means `create_proxy` reuses that client as-is
+    instead of building one through the era-mirroring factory — so this
+    backend stays pinned to `ProxyClient`'s own default of `mode="legacy"`
+    regardless of what era the front client negotiates.
     """
     return create_proxy(ProxyClient(transport=FastMCPTransport(fastmcp_server)))
 
@@ -1239,8 +1241,10 @@ class TestProxyOutputSchemaEnforcement:
 
     async def _call_without_validating(self, server: FastMCP, tool: str):
         """Call through a client that does not enforce the schema itself."""
-        # This direct ProxyProvider factory keeps ProxyClient's independent
-        # handshake-era default rather than applying create_proxy mirroring.
+        # This proxy's backend is built via `ProxyProvider(lambda: ProxyClient(...))`
+        # directly rather than through `create_proxy`'s era-mirroring factory, so it
+        # stays pinned to `ProxyClient`'s own default of `mode="legacy"` regardless
+        # of the front era (see the `proxy_server` fixture docstring above).
         client = Client(server, mode="legacy")
         client._transport_options = TransportOptions(
             session_class=_ForwardingClientSession
@@ -1409,9 +1413,12 @@ class TestProxyForwardingAppliesToEveryBackendClient:
     async def _forwarded(
         self, server: FastMCP, tool: str = "status", mode: str = "auto"
     ):
-        # `mode` follows the proxy backend's era. A multi-server config mounts a
-        # StatefulProxyClient per configured server leg, whose explicit legacy
-        # mode remains independent of the outer frontend connection.
+        # `mode` follows the proxy backend's era: a plain Client or single-server
+        # config connects the backend directly, so it mirrors the front's auto
+        # era. A multi-server config instead mounts a router with a
+        # StatefulProxyClient per configured server leg — an already-constructed
+        # ProxyClient subclass, same as the `proxy_server` fixture above, pinned
+        # to `mode="legacy"` regardless of the front.
         client = Client(server, mode=mode)
         client._transport_options = TransportOptions(
             session_class=_ForwardingClientSession

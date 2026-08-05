@@ -12,7 +12,7 @@ import inspect
 import time
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import replace
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import anyio
 import httpx2
@@ -38,7 +38,6 @@ from pydantic.networks import AnyUrl
 from fastmcp.client.client import Client, SDKServer, _connection_failure
 from fastmcp.client.elicitation import ElicitResult, create_elicitation_callback
 from fastmcp.client.logging import LogMessage, create_log_callback
-from fastmcp.client.request_meta import prepare_request_meta
 from fastmcp.client.roots import RootsList, create_roots_callback
 from fastmcp.client.sampling import create_sampling_callback
 from fastmcp.client.telemetry import client_span
@@ -61,6 +60,7 @@ from fastmcp.server.middleware import CallNext, Middleware, MiddlewareContext
 from fastmcp.server.providers.aggregate import ProviderErrorStrategy
 from fastmcp.server.providers.base import Provider
 from fastmcp.server.server import FastMCP
+from fastmcp.telemetry import inject_trace_context
 from fastmcp.tools.base import InputRequiredToolResult, Tool, ToolResult
 from fastmcp.utilities.components import FastMCPComponent, get_fastmcp_metadata
 from fastmcp.utilities.logging import get_logger
@@ -76,16 +76,35 @@ logger = get_logger(__name__)
 
 # Type alias for client factory functions
 ClientFactoryT = Callable[[], Client] | Callable[[], Awaitable[Client]]
-ProxyProtocolPolicy = Literal["independent", "mirror"]
+
+
+# Request `_meta` keys that describe one negotiated MCP connection. A proxy
+# must never copy them from its frontend connection onto its backend
+# connection: the modern stamp in `ClientSession.send_request` rewrites them
+# from this session's own negotiated state, and a handshake-era backend must
+# not receive them at all.
+_CONNECTION_META_KEYS = frozenset(
+    {
+        mcp_types.PROTOCOL_VERSION_META_KEY,
+        mcp_types.CLIENT_INFO_META_KEY,
+        mcp_types.CLIENT_CAPABILITIES_META_KEY,
+    }
+)
 
 
 class _ForwardingClientSession(ClientSession):
     """A session that owns proxy-specific behavior at the backend boundary.
 
-    Connection-owned request metadata is rebuilt for this backend connection,
-    never copied from the frontend. Tool results are relayed without enforcing
-    the backend's advertised output schema; validation belongs to the client
-    that ultimately consumes the result.
+    Connection-owned request metadata (protocol version, client identity,
+    client capabilities) is dropped before sending, never forwarded from the
+    frontend connection; on a modern backend the session's own stamp rebuilds
+    it, and on a handshake backend it stays absent. Progress, tracing, task,
+    and application metadata pass through untouched.
+
+    Tool results are relayed without enforcing the backend's advertised
+    output schema; that validation belongs to the client that ultimately
+    consumes the result, and enforcing it mid-path turns a backend's schema
+    bug into a proxy error that hides the real response.
     """
 
     async def send_request(
@@ -98,12 +117,13 @@ class _ForwardingClientSession(ClientSession):
     ) -> ReceiveResultT:
         params = request.params
         if isinstance(params, mcp_types.RequestParams) and params.meta:
+            forwarded = {
+                key: value
+                for key, value in params.meta.items()
+                if key not in _CONNECTION_META_KEYS
+            }
             request = request.model_copy(
-                update={
-                    "params": params.model_copy(
-                        update={"meta": prepare_request_meta(dict(params.meta))}
-                    )
-                }
+                update={"params": params.model_copy(update={"meta": forwarded or None})}
             )
         return await super().send_request(
             request,
@@ -119,9 +139,10 @@ class _ForwardingClientSession(ClientSession):
         return None
 
 
-# Settings every proxy-backend connection uses: translate request metadata at
-# the connection boundary, relay results without policing the backend's output
-# schema, and forward the caller's authorization header upstream.
+# Settings every proxy-backend connection uses: strip connection-owned request
+# metadata at the boundary, relay results without policing the backend's
+# output schema, and forward the caller's authorization header upstream
+# (appropriate for a proxy, where credentials are meant to propagate).
 PROXY_TRANSPORT_OPTIONS = TransportOptions(
     session_class=_ForwardingClientSession,
     forward_incoming_headers=True,
@@ -159,13 +180,6 @@ def _proxy_upstream_error(error: Exception) -> MCPError:
     )
 
 
-def _proxy_request_meta(ctx: Context | None) -> dict[str, Any] | None:
-    """Copy end-to-end metadata from the active frontend request."""
-    if ctx is None or (request_context := ctx.request_context) is None:
-        return None
-    return dict(request_context.meta) if request_context.meta else None
-
-
 async def _relay_read_resource(
     client: Client, uri: str, ctx: Context | None
 ) -> (
@@ -180,16 +194,14 @@ async def _relay_read_resource(
     proxy has no back-channel to the real user, so driving it fails outright.
     The inbound request's continuation state travels down so the backend guard
     sees the client's answers on its own `ctx.input_responses`. Trace context
-    still propagates through the shared outbound metadata boundary used by both
-    the high-level client and these direct session calls.
+    still propagates: the SDK's JSON-RPC dispatcher injects it on every outgoing
+    request (SEP-414), below whichever client layer issued the call.
     """
-    meta = _proxy_request_meta(ctx)
     if client.protocol_version not in MODERN_PROTOCOL_VERSIONS:
-        return await client.read_resource(uri, meta=meta)
+        return await client.read_resource(uri)
     result = await client._await_with_session_monitoring(
         client.session.read_resource(
             uri,
-            meta=prepare_request_meta(meta),
             input_responses=ctx.input_responses if ctx else None,
             request_state=ctx.request_state if ctx else None,
             allow_input_required=True,
@@ -248,9 +260,10 @@ class ProxyInitializeMiddleware(Middleware):
                 # Entering the context already ran connect-time negotiation.
                 # `initialize()` returns the handshake result on a legacy backend,
                 # but raises on a modern (server/discover) backend, which has no
-                # InitializeResult. That mismatch only arises when independent
-                # backend negotiation selects a different era than this legacy
-                # front (the mirroring policy keeps the two in lockstep). Skip the
+                # InitializeResult. That mismatch only arises when an explicit
+                # `mode=` pins the backend to a different era than this legacy
+                # front (the era-mirroring default keeps the two in lockstep, so
+                # a legacy front always reaches a legacy backend here). Skip the
                 # handshake-only call when the backend negotiated the modern era.
                 if client.protocol_version not in MODERN_PROTOCOL_VERSIONS:
                     await client.initialize()
@@ -348,9 +361,15 @@ class ProxyTool(Tool):
             async with client:
                 ctx = context or get_context()
                 _stash_proxy_request_context(client, ctx)
-                # Task submission is a first-class params field rather than
-                # context state, so there is no separate task-metadata injection.
-                meta = _proxy_request_meta(ctx)
+                # Forward the inbound request's `_meta` block (trace context,
+                # version, etc.) to the backend. In SDK v2 the request context
+                # exposes the lifted `_meta` dict directly; task submission is a
+                # first-class params field rather than context state, so there
+                # is no separate task-metadata injection here.
+                req_ctx = ctx.request_context
+                meta: dict[str, Any] | None = (
+                    dict(req_ctx.meta) if req_ctx is not None and req_ctx.meta else None
+                )
 
                 if client.protocol_version in MODERN_PROTOCOL_VERSIONS:
                     # Modern backend: call the session directly (not
@@ -361,7 +380,10 @@ class ProxyTool(Tool):
                     # round. Forward the inbound request's continuation state
                     # down so the backend guard tool sees the client's answers
                     # on its own `ctx.input_responses` / `ctx.request_state`.
-                    request_meta = prepare_request_meta(meta)
+                    request_meta = cast(
+                        "mcp_types.RequestParamsMeta | None",
+                        inject_trace_context(meta) or None,
+                    )
                     # SEP-2243: a modern backend rejects a `tools/call` whose
                     # `x-mcp-header` argument is not mirrored into an `Mcp-Param-*`
                     # header. The SDK client emits those headers only for tools it
@@ -732,7 +754,6 @@ class ProxyPrompt(Prompt):
             ctx = get_context()
             async with client:
                 _stash_proxy_request_context(client, ctx)
-                meta = _proxy_request_meta(ctx)
                 if client.protocol_version in MODERN_PROTOCOL_VERSIONS:
                     # See `_relay_read_resource`: surface a backend guard's ask
                     # instead of trying to answer it inside the proxy.
@@ -740,7 +761,6 @@ class ProxyPrompt(Prompt):
                         client.session.get_prompt(
                             backend_name,
                             arguments,
-                            meta=prepare_request_meta(meta),
                             input_responses=ctx.input_responses if ctx else None,
                             request_state=ctx.request_state if ctx else None,
                             allow_input_required=True,
@@ -750,7 +770,7 @@ class ProxyPrompt(Prompt):
                         return InputRequiredPromptResult(raw)
                     result = raw
                 else:
-                    result = await client.get_prompt(backend_name, arguments, meta=meta)
+                    result = await client.get_prompt(backend_name, arguments)
             # Convert GetPromptResult to PromptResult, preserving meta from result
             # (not the static prompt meta which includes fastmcp tags)
             # Convert PromptMessages to Messages
@@ -830,7 +850,6 @@ class ProxyProvider(Provider):
         self,
         client_factory: ClientFactoryT,
         cache_ttl: float | None = None,
-        protocol_policy: ProxyProtocolPolicy = "independent",
     ):
         """Initialize a ProxyProvider.
 
@@ -841,14 +860,9 @@ class ProxyProvider(Provider):
             cache_ttl: How long (in seconds) to cache component lists for
                       individual lookups.  Defaults to 300.  Set to 0 to
                       disable caching.
-            protocol_policy: Whether backend connections negotiate independently
-                or mirror the active frontend connection's protocol era.
         """
         super().__init__()
-        if protocol_policy not in ("independent", "mirror"):
-            raise ValueError(f"Unknown proxy protocol policy: {protocol_policy!r}")
         self.client_factory = client_factory
-        self.protocol_policy: ProxyProtocolPolicy = protocol_policy
         self._cache_ttl = cache_ttl if cache_ttl is not None else _DEFAULT_CACHE_TTL
         self._tools_cache: _CacheEntry[Tool] | None = None
         self._resources_cache: _CacheEntry[Resource] | None = None
@@ -856,36 +870,10 @@ class ProxyProvider(Provider):
         self._prompts_cache: _CacheEntry[Prompt] | None = None
 
     async def _get_client(self) -> Client:
-        """Construct a backend client and apply this provider's protocol policy."""
+        """Gets a client instance by calling the sync or async factory."""
         client = self.client_factory()
         if inspect.isawaitable(client):
             client = cast(Client, await client)
-
-        if (
-            self.protocol_policy == "mirror"
-            and (request_context := fastmcp_request_ctx.get()) is not None
-        ):
-            backend_mode = (
-                request_context.protocol_version
-                if request_context.protocol_version in MODERN_PROTOCOL_VERSIONS
-                else "legacy"
-            )
-            if client.is_connected():
-                backend_is_modern = client.protocol_version in MODERN_PROTOCOL_VERSIONS
-                front_is_modern = (
-                    request_context.protocol_version in MODERN_PROTOCOL_VERSIONS
-                )
-                if backend_is_modern != front_is_modern:
-                    raise ValueError(
-                        "A connected proxy backend cannot mirror a frontend "
-                        "connection from a different protocol era"
-                    )
-            else:
-                client.mode = backend_mode
-                client._transport_options = replace(
-                    client._transport_options or PROXY_TRANSPORT_OPTIONS,
-                    backend_mode=backend_mode,
-                )
         return client
 
     # -------------------------------------------------------------------------
@@ -899,7 +887,7 @@ class ProxyProvider(Provider):
             async with client:
                 mcp_tools = await client.list_tools()
                 tools = [
-                    ProxyTool.from_mcp_tool(self._get_client, t) for t in mcp_tools
+                    ProxyTool.from_mcp_tool(self.client_factory, t) for t in mcp_tools
                 ]
         except MCPError as e:
             if e.error.code == METHOD_NOT_FOUND:
@@ -985,7 +973,7 @@ class ProxyProvider(Provider):
             async with client:
                 mcp_resources = await client.list_resources()
                 resources = [
-                    ProxyResource.from_mcp_resource(self._get_client, r)
+                    ProxyResource.from_mcp_resource(self.client_factory, r)
                     for r in mcp_resources
                 ]
         except MCPError as e:
@@ -1024,7 +1012,7 @@ class ProxyProvider(Provider):
             async with client:
                 mcp_templates = await client.list_resource_templates()
                 templates = [
-                    ProxyTemplate.from_mcp_template(self._get_client, t)
+                    ProxyTemplate.from_mcp_template(self.client_factory, t)
                     for t in mcp_templates
                 ]
         except MCPError as e:
@@ -1063,7 +1051,7 @@ class ProxyProvider(Provider):
             async with client:
                 mcp_prompts = await client.list_prompts()
                 prompts = [
-                    ProxyPrompt.from_mcp_prompt(self._get_client, p)
+                    ProxyPrompt.from_mcp_prompt(self.client_factory, p)
                     for p in mcp_prompts
                 ]
         except MCPError as e:
@@ -1111,6 +1099,38 @@ class ProxyProvider(Provider):
 # -----------------------------------------------------------------------------
 # Factory Functions
 # -----------------------------------------------------------------------------
+
+
+def _mirror_front_era_mode() -> str | None:
+    """Return the backend connect ``mode`` that mirrors the front connection's era.
+
+    A proxy is a server on its front and a client on its back. The two protocol
+    eras have mutually exclusive interaction models on a single session, so the
+    whole chain must speak one era end-to-end: a modern front must reach a modern
+    backend (a guard tool's `InputRequiredResult` round-trips), and a handshake
+    front must reach a handshake backend (server-initiated sampling / elicitation
+    / roots push-forwarding works). Rather than pin its own era, the proxy speaks
+    on its back whatever era was negotiated on its front.
+
+    Reads the negotiated protocol version from the active front request context:
+
+    - modern front → that exact version, so the backend negotiates the same era
+      (pinning the version rather than ``"auto"`` makes the eras truly match).
+    - handshake front → ``"legacy"``.
+    - no request context (e.g. proxy construction before any request) → ``None``,
+      leaving the factory's configured default mode in place.
+    """
+    try:
+        ctx = get_context()
+    except RuntimeError:
+        return None
+    rc = ctx.request_context
+    if rc is None:
+        return None
+    version = rc.protocol_version
+    if version in MODERN_PROTOCOL_VERSIONS:
+        return version
+    return "legacy"
 
 
 def _create_client_factory(
@@ -1188,18 +1208,40 @@ def _create_client_factory(
 
         return fresh_client_factory
     else:
-        # The factory only constructs clients. ProxyProvider applies any
-        # frontend-dependent protocol policy after calling it.
-        client_kwargs: dict[str, Any] = {"mode": mode} if mode is not None else {}
+        # target is not a Client, so it's compatible with ProxyClient.__init__.
+        #
+        # With no explicit mode, the backend MIRRORS the front connection's
+        # negotiated era per request (see `_mirror_front_era_mode`): a fresh
+        # client is built for each request and its mode is set from the front
+        # era, so the whole chain speaks one era end-to-end. Because every
+        # request gets its own client whose mode is derived at call time, front
+        # connections of different eras never share a backend session — there is
+        # no era to bleed across the (metadata-only) provider caches.
+        #
+        # An explicit mode pins the backend era regardless of the front. This
+        # breaks era-consistency and is only appropriate when the backend speaks
+        # a single era; the mismatch surfaces through the normal era gates.
+        explicit_mode = mode is not None
+        client_kwargs: dict[str, Any] = {"mode": mode} if explicit_mode else {}
         base_client = ProxyClient(cast(Any, target), **client_kwargs)
 
         def proxy_client_factory() -> Client:
             fresh = base_client.new()
-            if mode is not None:
-                # Carry an explicitly configured mode through a multi-server
-                # MCPConfig router to its real backend legs.
+            backend_mode = mode
+            if not explicit_mode:
+                backend_mode = _mirror_front_era_mode()
+                if backend_mode is not None:
+                    fresh.mode = backend_mode
+            if backend_mode is not None:
+                # A multi-server MCPConfig target reaches its real backends
+                # through proxies mounted on a composite router, so setting the
+                # era on this client alone would stop at the router. Carry the
+                # era down to those backend legs too (see
+                # `TransportOptions.backend_mode`), resolved here — at the
+                # moment a client is built for this request — so it tracks the
+                # front era rather than whatever was true at construction.
                 fresh._transport_options = replace(
-                    PROXY_TRANSPORT_OPTIONS, backend_mode=mode
+                    PROXY_TRANSPORT_OPTIONS, backend_mode=backend_mode
                 )
             return fresh
 
@@ -1234,7 +1276,6 @@ class FastMCPProxy(FastMCP):
         self,
         *,
         client_factory: ClientFactoryT,
-        protocol_policy: ProxyProtocolPolicy = "independent",
         provider_error_strategy: ProviderErrorStrategy = "warn",
         **kwargs,
     ):
@@ -1247,8 +1288,6 @@ class FastMCPProxy(FastMCP):
             client_factory: A callable that returns a Client instance when called.
                            This gives you full control over session creation and reuse.
                            Can be either a synchronous or asynchronous function.
-            protocol_policy: Whether backend connections negotiate independently
-                or mirror the active frontend connection's protocol era.
             provider_error_strategy: How provider errors should affect aggregate
                 operations. Defaults to ``"warn"`` for compatibility; use
                 ``"raise"`` when the proxy should surface upstream failures.
@@ -1257,22 +1296,17 @@ class FastMCPProxy(FastMCP):
         super().__init__(**kwargs)
         self.provider_error_strategy = provider_error_strategy
         self.client_factory = client_factory
-        self._proxy_provider = ProxyProvider(
-            client_factory, protocol_policy=protocol_policy
-        )
-        provider: Provider = self._proxy_provider
+        provider: Provider = ProxyProvider(client_factory)
         self.add_provider(provider)
         self.middleware.append(ProxyInitializeMiddleware(self))
         self._setup_proxy_ping_handler()
         self._setup_proxy_discover_handler()
 
-    @property
-    def protocol_policy(self) -> ProxyProtocolPolicy:
-        """The backend negotiation policy owned by this proxy's provider."""
-        return self._proxy_provider.protocol_policy
-
     async def _get_client(self) -> Client:
-        return await self._proxy_provider._get_client()
+        client = self.client_factory()
+        if inspect.isawaitable(client):
+            client = cast(Client, await client)
+        return client
 
     def _setup_proxy_ping_handler(self) -> None:
         async def ping_remote(
@@ -1323,7 +1357,7 @@ class FastMCPProxy(FastMCP):
             if client.is_connected():
                 result.instructions = client.session.instructions
                 return result
-            # The mirroring policy pins a modern backend to an exact version, and a
+            # Era mirroring pins a modern backend to an exact version, and a
             # pinned version adopts a synthesized `DiscoverResult` instead of
             # probing the wire — so the pinned client would report no
             # instructions at all. Instructions are metadata with no
@@ -1562,16 +1596,17 @@ class ProxyClient(Client[ClientTransportT]):
         # ProxyClient itself defaults to the handshake era when constructed
         # directly: a single proxy session can only be one era, and handshake
         # keeps the server-initiated push forwarding (sampling / elicitation /
-        # roots, via the handlers installed below) that proxies rely on. For a
-        # non-Client target, create_proxy normally configures its ProxyProvider
-        # to mirror the front connection's negotiated era onto this client per
-        # request. An explicit `mode=` keeps backend negotiation independent
-        # unless the caller explicitly selects mirroring. The eras are mutually
-        # exclusive per session.
+        # roots, via the handlers installed below) that proxies rely on. When a
+        # proxy is created from a non-Client target (`create_proxy(target)` /
+        # `_create_client_factory`) with no explicit mode, the factory instead
+        # MIRRORS the front connection's negotiated era onto this client per
+        # request, so the whole chain speaks one era end-to-end. An explicit
+        # `mode=` (e.g. `create_proxy(target, mode="auto")`) pins the era and
+        # overrides mirroring. The eras are mutually exclusive per session.
         #
         # The handshake default is pinned explicitly rather than inherited from
-        # `Client`, whose own default is `"auto"`: provider mirroring only
-        # applies when there is a front request, so this is the fallback for a
+        # `Client`, whose own default is `"auto"`: mirroring only applies when
+        # there is a front request to mirror, so this is the fallback for a
         # directly-constructed ProxyClient, and it must not drift with the
         # client default.
         kwargs.setdefault("mode", "legacy")

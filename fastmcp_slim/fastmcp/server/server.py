@@ -108,7 +108,7 @@ if TYPE_CHECKING:
     from fastmcp.server.providers.openapi import ComponentFn as OpenAPIComponentFn
     from fastmcp.server.providers.openapi import RouteMap
     from fastmcp.server.providers.openapi import RouteMapFn as OpenAPIRouteMapFn
-    from fastmcp.server.providers.proxy import FastMCPProxy, ProxyProtocolPolicy
+    from fastmcp.server.providers.proxy import FastMCPProxy
 
 logger = get_logger(__name__)
 
@@ -2529,7 +2529,6 @@ def create_proxy(
     ),
     *,
     mode: str | None = None,
-    protocol_policy: ProxyProtocolPolicy | None = None,
     **settings: Any,
 ) -> FastMCPProxy:
     """Create a FastMCP proxy server for the given target.
@@ -2545,14 +2544,17 @@ def create_proxy(
             - A URL string or AnyUrl
             - A Path to a server script
             - An MCPConfig or dict
-        mode: Protocol-era negotiation for auto-created proxy clients. An
-            explicit mode preserves the existing independent behavior unless
-            ``protocol_policy="mirror"`` is also specified. Ignored when
+        mode: Protocol-era negotiation for auto-created proxy clients (a
+            non-Client target). By default (``None``) the backend MIRRORS the
+            front connection's negotiated era per request, so the whole chain
+            speaks one era end-to-end: a modern front reaches a modern backend
+            (a guard tool's `InputRequiredResult` (SEP-2322) round-trips) and a
+            handshake front reaches a handshake backend (server-initiated
+            sampling / elicitation / roots push-forwarding works). Pass an
+            explicit mode (e.g. ``"auto"`` or a version string) to pin the
+            backend era regardless of the front; this overrides mirroring and is
+            appropriate when the backend only speaks one era. Ignored when
             `target` is already a `Client` (which carries its own mode).
-        protocol_policy: Whether backend connections negotiate independently or
-            mirror the active frontend connection's protocol era. By default,
-            auto-created clients mirror when no explicit ``mode`` is supplied;
-            configured ``Client`` targets and explicit modes remain independent.
         **settings: Additional settings passed to FastMCPProxy (name, etc.)
 
     Returns:
@@ -2569,22 +2571,13 @@ def create_proxy(
         proxy = create_proxy(other_server)
         ```
     """
-    from fastmcp.client import Client as FastMCPClient
     from fastmcp.server.providers.proxy import (
         FastMCPProxy,
         _create_client_factory,
     )
 
-    if protocol_policy is None:
-        protocol_policy = (
-            "independent"
-            if isinstance(target, FastMCPClient) or mode is not None
-            else "mirror"
-        )
-
     client_factory = _create_client_factory(target, mode=mode)
     return FastMCPProxy(
         client_factory=client_factory,
-        protocol_policy=protocol_policy,
         **settings,
     )

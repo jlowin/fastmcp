@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import mcp_types
 from mcp.client.caching import CacheMode
@@ -11,8 +11,8 @@ from pydantic import AnyUrl
 if TYPE_CHECKING:
     from fastmcp.client.client import Client
 
-from fastmcp.client.request_meta import prepare_request_meta
 from fastmcp.client.telemetry import client_span
+from fastmcp.telemetry import inject_trace_context
 from fastmcp.utilities.logging import get_logger
 
 logger = get_logger(__name__)
@@ -242,7 +242,9 @@ class ClientResourcesMixin:
         ):
             logger.debug(f"[{self.name}] called read_resource: {uri}")
 
-            request_meta = prepare_request_meta(meta)
+            # Inject trace context into meta for propagation to server
+            propagated_meta = inject_trace_context(meta)
+            request_meta = cast("mcp_types.RequestParamsMeta | None", propagated_meta)
 
             async def _retry(
                 input_responses: mcp_types.InputResponses | None,
