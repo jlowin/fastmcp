@@ -3,6 +3,7 @@
 import pytest
 
 from fastmcp import Client, FastMCP, FastMCPDeprecationWarning
+from fastmcp.exceptions import ToolError
 
 httpx = pytest.importorskip("httpx", reason="legacy httpx not installed")
 
@@ -57,3 +58,22 @@ async def test_legacy_client_warns_and_remains_usable() -> None:
             result = await mcp_client.call_tool("list_items", {})
 
     assert result.structured_content == {"items": ["a", "b"]}
+
+
+async def test_legacy_client_preserves_http_error_details() -> None:
+    def handler(request: "httpx.Request") -> "httpx.Response":
+        return httpx.Response(404, json={"detail": "items not found"})
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(
+        transport=transport,
+        base_url="https://api.example.com",
+    ) as client:
+        with pytest.warns(FastMCPDeprecationWarning):
+            server = FastMCP.from_openapi(SPEC, client=client)
+
+        async with Client(server) as mcp_client:
+            with pytest.raises(ToolError, match="HTTP error 404") as exc_info:
+                await mcp_client.call_tool("list_items", {})
+
+    assert "items not found" in str(exc_info.value)

@@ -58,6 +58,21 @@ logger = get_logger(__name__)
 _DEFAULT_MIME_TYPE = "application/json"
 
 
+def _raise_for_status(response: httpx2.Response) -> None:
+    """Raise an OpenAPI-formatted error without relying on client exception types."""
+    if 200 <= response.status_code < 300:
+        return
+
+    error_message = f"HTTP error {response.status_code}: {response.reason_phrase}"
+    try:
+        error_data = response.json()
+        error_message += f" - {error_data}"
+    except (json.JSONDecodeError, ValueError):
+        if response.text:
+            error_message += f" - {response.text}"
+    raise ValueError(error_message)
+
+
 def _extract_mime_type_from_route(route: HTTPRoute) -> str:
     """Extract the primary MIME type from an HTTPRoute's response definitions.
 
@@ -202,7 +217,7 @@ class OpenAPITool(Tool):
             )
 
             response = await self._client.send(request)
-            response.raise_for_status()
+            _raise_for_status(response)
 
             # Try to parse as JSON first
             try:
@@ -228,18 +243,6 @@ class OpenAPITool(Tool):
                 return ToolResult(structured_content=structured_output)
             except json.JSONDecodeError:
                 return ToolResult(content=response.text)
-
-        except httpx2.HTTPStatusError as e:
-            error_message = (
-                f"HTTP error {e.response.status_code}: {e.response.reason_phrase}"
-            )
-            try:
-                error_data = e.response.json()
-                error_message += f" - {error_data}"
-            except (json.JSONDecodeError, ValueError):
-                if e.response.text:
-                    error_message += f" - {e.response.text}"
-            raise ValueError(error_message) from e
 
         except httpx2.TimeoutException as e:
             raise ValueError(f"HTTP request timed out ({type(e).__name__})") from e
@@ -303,7 +306,7 @@ class OpenAPIResource(Resource):
                 request.headers.update(mcp_headers)
 
             response = await self._client.send(request)
-            response.raise_for_status()
+            _raise_for_status(response)
 
             content_type = response.headers.get("content-type", "").lower()
 
@@ -330,18 +333,6 @@ class OpenAPIResource(Resource):
                         )
                     ]
                 )
-
-        except httpx2.HTTPStatusError as e:
-            error_message = (
-                f"HTTP error {e.response.status_code}: {e.response.reason_phrase}"
-            )
-            try:
-                error_data = e.response.json()
-                error_message += f" - {error_data}"
-            except (json.JSONDecodeError, ValueError):
-                if e.response.text:
-                    error_message += f" - {e.response.text}"
-            raise ValueError(error_message) from e
 
         except httpx2.TimeoutException as e:
             raise ValueError(f"HTTP request timed out ({type(e).__name__})") from e
