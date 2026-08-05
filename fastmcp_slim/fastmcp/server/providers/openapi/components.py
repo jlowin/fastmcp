@@ -18,6 +18,7 @@ from fastmcp.resources import (
 )
 from fastmcp.server.dependencies import get_http_headers
 from fastmcp.tools.base import Tool, ToolResult
+from fastmcp.utilities.exceptions import is_request_error, is_timeout_error
 from fastmcp.utilities.logging import get_logger
 from fastmcp.utilities.openapi import HTTPRoute
 from fastmcp.utilities.openapi.director import RequestDirector
@@ -71,6 +72,21 @@ def _raise_for_status(response: httpx2.Response) -> None:
         if response.text:
             error_message += f" - {response.text}"
     raise ValueError(error_message)
+
+
+async def _send_request(
+    client: httpx2.AsyncClient,
+    request: httpx2.Request,
+) -> httpx2.Response:
+    """Send a request while preserving transitional legacy-client errors."""
+    try:
+        return await client.send(request)
+    except Exception as exc:
+        if is_timeout_error(exc):
+            raise ValueError(f"HTTP request timed out ({type(exc).__name__})") from exc
+        if is_request_error(exc):
+            raise ValueError(f"Request error ({type(exc).__name__}): {exc!s}") from exc
+        raise
 
 
 def _extract_mime_type_from_route(route: HTTPRoute) -> str:
@@ -216,7 +232,7 @@ class OpenAPITool(Tool):
                 f"run - sending request; headers: {_redact_headers(request.headers)}"
             )
 
-            response = await self._client.send(request)
+            response = await _send_request(self._client, request)
             _raise_for_status(response)
 
             # Try to parse as JSON first
@@ -244,11 +260,11 @@ class OpenAPITool(Tool):
             except json.JSONDecodeError:
                 return ToolResult(content=response.text)
 
-        except httpx2.TimeoutException as e:
-            raise ValueError(f"HTTP request timed out ({type(e).__name__})") from e
+        except httpx2.TimeoutException as exc:
+            raise ValueError(f"HTTP request timed out ({type(exc).__name__})") from exc
 
-        except httpx2.RequestError as e:
-            raise ValueError(f"Request error ({type(e).__name__}): {e!s}") from e
+        except httpx2.RequestError as exc:
+            raise ValueError(f"Request error ({type(exc).__name__}): {exc!s}") from exc
 
 
 class OpenAPIResource(Resource):
@@ -305,7 +321,7 @@ class OpenAPIResource(Resource):
             if mcp_headers:
                 request.headers.update(mcp_headers)
 
-            response = await self._client.send(request)
+            response = await _send_request(self._client, request)
             _raise_for_status(response)
 
             content_type = response.headers.get("content-type", "").lower()
@@ -334,11 +350,11 @@ class OpenAPIResource(Resource):
                     ]
                 )
 
-        except httpx2.TimeoutException as e:
-            raise ValueError(f"HTTP request timed out ({type(e).__name__})") from e
+        except httpx2.TimeoutException as exc:
+            raise ValueError(f"HTTP request timed out ({type(exc).__name__})") from exc
 
-        except httpx2.RequestError as e:
-            raise ValueError(f"Request error ({type(e).__name__}): {e!s}") from e
+        except httpx2.RequestError as exc:
+            raise ValueError(f"Request error ({type(exc).__name__}): {exc!s}") from exc
 
 
 def _path_argument_name(route: HTTPRoute, parameter_name: str) -> str:

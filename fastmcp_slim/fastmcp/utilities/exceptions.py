@@ -8,6 +8,43 @@ from mcp import MCPError
 import fastmcp
 
 
+def _is_legacy_httpx_exception(exc: BaseException, exception_type: str) -> bool:
+    """Check a legacy-httpx exception without importing the legacy package."""
+    return any(
+        cls.__module__.partition(".")[0] == "httpx" and cls.__name__ == exception_type
+        for cls in type(exc).__mro__
+    )
+
+
+def is_http_status_error(exc: BaseException) -> bool:
+    """Return whether an exception is an httpx2 or legacy-httpx status error."""
+    return isinstance(exc, httpx2.HTTPStatusError) or _is_legacy_httpx_exception(
+        exc, "HTTPStatusError"
+    )
+
+
+def get_http_status_code(exc: BaseException) -> int | None:
+    """Return the response status code from a recognized HTTP status error."""
+    if not is_http_status_error(exc):
+        return None
+    status_code = getattr(getattr(exc, "response", None), "status_code", None)
+    return status_code if isinstance(status_code, int) else None
+
+
+def is_timeout_error(exc: BaseException) -> bool:
+    """Return whether an exception is an httpx2 or legacy-httpx timeout."""
+    return isinstance(exc, httpx2.TimeoutException) or _is_legacy_httpx_exception(
+        exc, "TimeoutException"
+    )
+
+
+def is_request_error(exc: BaseException) -> bool:
+    """Return whether an exception is an httpx2 or legacy-httpx request error."""
+    return isinstance(exc, httpx2.RequestError) or _is_legacy_httpx_exception(
+        exc, "RequestError"
+    )
+
+
 def iter_exc(group: BaseExceptionGroup):
     for exc in group.exceptions:
         if isinstance(exc, BaseExceptionGroup):
