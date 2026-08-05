@@ -161,6 +161,19 @@ def _forwardable_request_meta(ctx: Context | None) -> dict[str, Any] | None:
     return forwarded or None
 
 
+def _session_request_meta(
+    meta: dict[str, Any] | None,
+) -> mcp_types.RequestParamsMeta | None:
+    """Adapt forwardable metadata for a direct backend-session call.
+
+    Direct session calls bypass the high-level client mixins, so trace context
+    is injected here, matching what the mixins do on the legacy client paths.
+    """
+    return cast(
+        "mcp_types.RequestParamsMeta | None", inject_trace_context(meta) or None
+    )
+
+
 async def _relay_read_resource(
     client: Client, uri: str, ctx: Context | None
 ) -> (
@@ -174,15 +187,15 @@ async def _relay_read_resource(
     to forward, instead of the high-level client trying to answer it here — the
     proxy has no back-channel to the real user, so driving it fails outright.
     The inbound request's continuation state travels down so the backend guard
-    sees the client's answers on its own `ctx.input_responses`. Trace context
-    still propagates: the SDK's JSON-RPC dispatcher injects it on every outgoing
-    request (SEP-414), below whichever client layer issued the call.
+    sees the client's answers on its own `ctx.input_responses`.
     """
+    meta = _forwardable_request_meta(ctx)
     if client.protocol_version not in MODERN_PROTOCOL_VERSIONS:
-        return await client.read_resource(uri)
+        return await client.read_resource(uri, meta=meta)
     result = await client._await_with_session_monitoring(
         client.session.read_resource(
             uri,
+            meta=_session_request_meta(meta),
             input_responses=ctx.input_responses if ctx else None,
             request_state=ctx.request_state if ctx else None,
             allow_input_required=True,
@@ -357,10 +370,7 @@ class ProxyTool(Tool):
                     # round. Forward the inbound request's continuation state
                     # down so the backend guard tool sees the client's answers
                     # on its own `ctx.input_responses` / `ctx.request_state`.
-                    request_meta = cast(
-                        "mcp_types.RequestParamsMeta | None",
-                        inject_trace_context(meta) or None,
-                    )
+                    request_meta = _session_request_meta(meta)
                     # SEP-2243: a modern backend rejects a `tools/call` whose
                     # `x-mcp-header` argument is not mirrored into an `Mcp-Param-*`
                     # header. The SDK client emits those headers only for tools it
@@ -731,6 +741,7 @@ class ProxyPrompt(Prompt):
             ctx = get_context()
             async with client:
                 _stash_proxy_request_context(client, ctx)
+                meta = _forwardable_request_meta(ctx)
                 if client.protocol_version in MODERN_PROTOCOL_VERSIONS:
                     # See `_relay_read_resource`: surface a backend guard's ask
                     # instead of trying to answer it inside the proxy.
@@ -738,6 +749,7 @@ class ProxyPrompt(Prompt):
                         client.session.get_prompt(
                             backend_name,
                             arguments,
+                            meta=_session_request_meta(meta),
                             input_responses=ctx.input_responses if ctx else None,
                             request_state=ctx.request_state if ctx else None,
                             allow_input_required=True,
@@ -747,7 +759,7 @@ class ProxyPrompt(Prompt):
                         return InputRequiredPromptResult(raw)
                     result = raw
                 else:
-                    result = await client.get_prompt(backend_name, arguments)
+                    result = await client.get_prompt(backend_name, arguments, meta=meta)
             # Convert GetPromptResult to PromptResult, preserving meta from result
             # (not the static prompt meta which includes fastmcp tags)
             # Convert PromptMessages to Messages

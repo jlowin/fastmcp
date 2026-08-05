@@ -46,14 +46,32 @@ class _FrontendExtension(ClientExtension):
 def _recording_backend(seen: dict[str, _RecordedRequest]) -> FastMCP:
     backend = FastMCP("metadata-backend")
 
-    @backend.tool
-    def inspect_tool(ctx: Context) -> str:
+    def record(operation: str, ctx: Context) -> None:
         request_context = ctx.request_context
         assert request_context is not None
-        seen["tool"] = _RecordedRequest(
+        seen[operation] = _RecordedRequest(
             protocol_version=request_context.protocol_version,
             meta=dict(request_context.meta or {}),
         )
+
+    @backend.tool
+    def inspect_tool(ctx: Context) -> str:
+        record("tool", ctx)
+        return "ok"
+
+    @backend.resource("data://metadata")
+    def inspect_resource(ctx: Context) -> str:
+        record("resource", ctx)
+        return "ok"
+
+    @backend.resource("data://items/{item_id}")
+    def inspect_template(item_id: str, ctx: Context) -> str:
+        record("template", ctx)
+        return "ok"
+
+    @backend.prompt
+    def inspect_prompt(ctx: Context) -> str:
+        record("prompt", ctx)
         return "ok"
 
     return backend
@@ -133,4 +151,41 @@ async def test_forwarded_tool_meta_stays_hop_safe(
     assert (record.protocol_version in MODERN_PROTOCOL_VERSIONS) is backend_is_modern
     assert isinstance(record.meta["progressToken"], str | int)
     assert record.meta["example.com/vendor"] == {"request": "kept"}
+    _assert_backend_connection_meta(record, backend_is_modern)
+
+
+@pytest.mark.parametrize("client_class", [ProxyClient, Client])
+@pytest.mark.parametrize(
+    ("backend_mode", "backend_is_modern"),
+    [("auto", True), ("legacy", False)],
+)
+@pytest.mark.parametrize("operation", ["resource", "template", "prompt"])
+async def test_non_tool_requests_forward_hop_safe_metadata(
+    operation: str,
+    backend_mode: str,
+    backend_is_modern: bool,
+    client_class: type[Client],
+):
+    seen: dict[str, _RecordedRequest] = {}
+    proxy = _proxy(
+        _recording_backend(seen), backend_mode=backend_mode, client_class=client_class
+    )
+    meta = {"example.com/vendor": {"operation": operation}}
+
+    async with Client(
+        proxy,
+        mode="auto",
+        client_info=FRONT_INFO,
+        extensions=[_FrontendExtension()],
+    ) as client:
+        if operation == "resource":
+            await client.read_resource("data://metadata", meta=meta)
+        elif operation == "template":
+            await client.read_resource("data://items/42", meta=meta)
+        else:
+            await client.get_prompt("inspect_prompt", meta=meta)
+
+    record = seen[operation]
+    assert (record.protocol_version in MODERN_PROTOCOL_VERSIONS) is backend_is_modern
+    assert record.meta["example.com/vendor"] == {"operation": operation}
     _assert_backend_connection_meta(record, backend_is_modern)
