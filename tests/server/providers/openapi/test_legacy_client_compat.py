@@ -78,9 +78,9 @@ async def test_tool_call_with_legacy_client_succeeds():
 async def test_tool_http_error_keeps_openapi_formatting_with_legacy_client():
     """A legacy client's HTTP error still gets the integration's message format.
 
-    The handler raises legacy ``httpx.HTTPStatusError``; the catch tuples must
-    recognize it so the error carries the formatted status + body rather than a
-    generic failure.
+    The handler raises legacy ``httpx.HTTPStatusError``; the error classifier
+    must recognize it so the error carries the formatted status + body rather
+    than a generic failure.
     """
 
     def handler(request: "httpx.Request") -> "httpx.Response":
@@ -102,6 +102,21 @@ async def test_tool_request_error_keeps_openapi_formatting_with_legacy_client():
     async with _legacy_client(handler) as client:
         async with Client(_server(client)) as mcp_client:
             with pytest.raises(ToolError, match="Request error"):
+                await mcp_client.call_tool("list_items", {})
+
+
+async def test_tool_timeout_keeps_openapi_formatting_with_legacy_client():
+    """A legacy client's timeout maps to the formatted timeout error."""
+
+    class UserTimeout(httpx.ReadTimeout):
+        pass
+
+    def handler(request: "httpx.Request") -> "httpx.Response":
+        raise UserTimeout("upstream timed out", request=request)
+
+    async with _legacy_client(handler) as client:
+        async with Client(_server(client)) as mcp_client:
+            with pytest.raises(ToolError, match="HTTP request timed out"):
                 await mcp_client.call_tool("list_items", {})
 
 

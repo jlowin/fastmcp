@@ -19,9 +19,9 @@ from fastmcp.resources import (
 from fastmcp.server.dependencies import get_http_headers
 from fastmcp.tools.base import Tool, ToolResult
 from fastmcp.utilities.exceptions import (
-    HTTP_STATUS_ERRORS,
-    REQUEST_ERRORS,
-    TIMEOUT_ERRORS,
+    is_http_status_error,
+    is_request_error,
+    is_timeout_error,
 )
 from fastmcp.utilities.logging import get_logger
 from fastmcp.utilities.openapi import HTTPRoute
@@ -61,6 +61,30 @@ logger = get_logger(__name__)
 
 # Default MIME type when no response content type can be inferred
 _DEFAULT_MIME_TYPE = "application/json"
+
+
+def _convert_httpx_error(exc: Exception) -> ValueError | None:
+    if is_http_status_error(exc):
+        status_error = cast("httpx2.HTTPStatusError", exc)
+        error_message = (
+            f"HTTP error {status_error.response.status_code}: "
+            f"{status_error.response.reason_phrase}"
+        )
+        try:
+            error_data = status_error.response.json()
+            error_message += f" - {error_data}"
+        except (json.JSONDecodeError, ValueError):
+            if status_error.response.text:
+                error_message += f" - {status_error.response.text}"
+        return ValueError(error_message)
+
+    if is_timeout_error(exc):
+        return ValueError(f"HTTP request timed out ({type(exc).__name__})")
+
+    if is_request_error(exc):
+        return ValueError(f"Request error ({type(exc).__name__}): {exc!s}")
+
+    return None
 
 
 def _extract_mime_type_from_route(route: HTTPRoute) -> str:
@@ -238,25 +262,11 @@ class OpenAPITool(Tool):
             except json.JSONDecodeError:
                 return ToolResult(content=response.text)
 
-        except HTTP_STATUS_ERRORS as e:
-            status_error = cast("httpx2.HTTPStatusError", e)
-            error_message = (
-                f"HTTP error {status_error.response.status_code}: "
-                f"{status_error.response.reason_phrase}"
-            )
-            try:
-                error_data = status_error.response.json()
-                error_message += f" - {error_data}"
-            except (json.JSONDecodeError, ValueError):
-                if status_error.response.text:
-                    error_message += f" - {status_error.response.text}"
-            raise ValueError(error_message) from e
-
-        except TIMEOUT_ERRORS as e:
-            raise ValueError(f"HTTP request timed out ({type(e).__name__})") from e
-
-        except REQUEST_ERRORS as e:
-            raise ValueError(f"Request error ({type(e).__name__}): {e!s}") from e
+        except Exception as e:
+            converted_error = _convert_httpx_error(e)
+            if converted_error is None:
+                raise
+            raise converted_error from e
 
 
 class OpenAPIResource(Resource):
@@ -343,25 +353,11 @@ class OpenAPIResource(Resource):
                     ]
                 )
 
-        except HTTP_STATUS_ERRORS as e:
-            status_error = cast("httpx2.HTTPStatusError", e)
-            error_message = (
-                f"HTTP error {status_error.response.status_code}: "
-                f"{status_error.response.reason_phrase}"
-            )
-            try:
-                error_data = status_error.response.json()
-                error_message += f" - {error_data}"
-            except (json.JSONDecodeError, ValueError):
-                if status_error.response.text:
-                    error_message += f" - {status_error.response.text}"
-            raise ValueError(error_message) from e
-
-        except TIMEOUT_ERRORS as e:
-            raise ValueError(f"HTTP request timed out ({type(e).__name__})") from e
-
-        except REQUEST_ERRORS as e:
-            raise ValueError(f"Request error ({type(e).__name__}): {e!s}") from e
+        except Exception as e:
+            converted_error = _convert_httpx_error(e)
+            if converted_error is None:
+                raise
+            raise converted_error from e
 
 
 def _path_argument_name(route: HTTPRoute, parameter_name: str) -> str:

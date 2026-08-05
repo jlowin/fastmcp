@@ -45,6 +45,28 @@ _BLOCKER_SCRIPT = textwrap.dedent(
     """
 )
 
+_STARTUP_SCRIPT = textwrap.dedent(
+    """
+    import sys
+
+    from fastmcp import FastMCP
+
+    server = FastMCP("Legacy httpx import guard")
+    app = server.http_app(transport="http", stateless_http=True)
+    assert app is not None
+
+    loaded = [
+        name
+        for name in sys.modules
+        if name == "httpx"
+        or name.startswith("httpx.")
+        or name == "httpcore"
+        or name.startswith("httpcore.")
+    ]
+    assert not loaded, loaded
+    """
+)
+
 
 @pytest.mark.subprocess_heavy
 def test_fastmcp_imports_without_legacy_httpx():
@@ -58,3 +80,14 @@ def test_fastmcp_imports_without_legacy_httpx():
         f"Import failed with legacy httpx blocked:\n{result.stderr}"
     )
     assert "OK" in result.stdout
+
+
+@pytest.mark.subprocess_heavy
+def test_default_http_app_does_not_load_legacy_httpx():
+    result = subprocess.run(
+        [sys.executable, "-c", _STARTUP_SCRIPT],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
