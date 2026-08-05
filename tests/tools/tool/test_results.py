@@ -200,6 +200,7 @@ class TestSerializationAlias:
         class Component(BaseModel):
             """Model with multiple validation aliases but specific serialization alias."""
 
+            model_config = ConfigDict(serialize_by_alias=True)
             component_id: str = Field(
                 validation_alias=AliasChoices("id", "componentId"),
                 serialization_alias="componentId",
@@ -243,6 +244,7 @@ class TestSerializationAlias:
         class Component(BaseModel):
             """Model with multiple validation aliases but specific serialization alias."""
 
+            model_config = ConfigDict(serialize_by_alias=True)
             component_id: str = Field(
                 validation_alias=AliasChoices("id", "componentId"),
                 serialization_alias="componentId",
@@ -312,8 +314,8 @@ class TestSerializeByAlias:
             "filepath",
         }
 
-    async def test_unset_config_preserves_alias_default(self):
-        """A model with an alias but no serialize config keeps emitting the alias."""
+    async def test_unset_config_uses_pydantic_default(self):
+        """A model with no serialize config uses Pydantic's field-name default."""
 
         class Biofile(BaseModel):
             id: str = Field(alias="_id")
@@ -329,14 +331,114 @@ class TestSerializeByAlias:
             tools = {t.name: t for t in await client.list_tools()}
             result = await client.call_tool("get_biofile", {})
 
-        assert result.structured_content == {"_id": "123", "filepath": "/p"}
+        assert result.structured_content == {"id": "123", "filepath": "/p"}
         assert set(tools["get_biofile"].output_schema["properties"]) == {  # type: ignore[index]
-            "_id",
+            "id",
             "filepath",
         }
 
+    async def test_model_in_untyped_dict_respects_config(self):
+        """A model nested in an untyped dict keeps its serialization config."""
+
+        class Biofile(BaseModel):
+            model_config = ConfigDict(serialize_by_alias=False)
+            id: str = Field(alias="_id")
+
+        mcp = FastMCP()
+
+        @mcp.tool
+        def get_biofile() -> dict:
+            return {"status": "success", "item": Biofile(_id="1")}
+
+        async with Client(mcp) as client:
+            result = await client.call_tool("get_biofile", {})
+
+        expected = {"status": "success", "item": {"id": "1"}}
+        assert result.structured_content == expected
+        assert json.loads(result.content[0].text) == expected  # type: ignore[union-attr]
+
+    async def test_model_in_typed_dict_respects_config(self):
+        """A typed dict's schema and result both use the model's field names."""
+
+        class Biofile(BaseModel):
+            model_config = ConfigDict(serialize_by_alias=False)
+            id: str = Field(alias="_id")
+
+        mcp = FastMCP()
+
+        @mcp.tool
+        def get_biofiles() -> dict[str, Biofile]:
+            return {"first": Biofile(_id="1")}
+
+        async with Client(mcp) as client:
+            tools = {tool.name: tool for tool in await client.list_tools()}
+            result = await client.call_tool("get_biofiles", {})
+
+        value_schema = tools["get_biofiles"].output_schema["additionalProperties"]  # type: ignore[index]
+        assert set(value_schema["properties"]) == {"id"}
+        assert result.structured_content == {"first": {"id": "1"}}
+
+    async def test_model_in_list_respects_config(self):
+        """A list's wrapped schema and result both use the model's field names."""
+
+        class Biofile(BaseModel):
+            model_config = ConfigDict(serialize_by_alias=False)
+            id: str = Field(alias="_id")
+
+        mcp = FastMCP()
+
+        @mcp.tool
+        def get_biofiles() -> list[Biofile]:
+            return [Biofile(_id="1")]
+
+        async with Client(mcp) as client:
+            tools = {tool.name: tool for tool in await client.list_tools()}
+            result = await client.call_tool("get_biofiles", {})
+
+        item_schema = tools["get_biofiles"].output_schema["properties"]["result"][  # type: ignore[index]
+            "items"
+        ]
+        assert set(item_schema["properties"]) == {"id"}
+        assert result.structured_content == {"result": [{"id": "1"}]}
+
+    async def test_nested_models_use_their_own_alias_configs(self):
+        """Nested models can independently enable and disable aliases."""
+
+        class NamedValue(BaseModel):
+            model_config = ConfigDict(serialize_by_alias=False)
+            value: str = Field(serialization_alias="namedValue")
+
+        class AliasedValue(BaseModel):
+            model_config = ConfigDict(serialize_by_alias=True)
+            value: str = Field(serialization_alias="aliasedValue")
+
+        class Output(BaseModel):
+            named: NamedValue
+            aliased: AliasedValue
+
+        mcp = FastMCP()
+
+        @mcp.tool
+        def get_output() -> Output:
+            return Output(
+                named=NamedValue(value="named"),
+                aliased=AliasedValue(value="aliased"),
+            )
+
+        async with Client(mcp) as client:
+            tools = {tool.name: tool for tool in await client.list_tools()}
+            result = await client.call_tool("get_output", {})
+
+        properties = tools["get_output"].output_schema["properties"]  # type: ignore[index]
+        assert set(properties["named"]["properties"]) == {"value"}
+        assert set(properties["aliased"]["properties"]) == {"aliasedValue"}
+        assert result.structured_content == {
+            "named": {"value": "named"},
+            "aliased": {"aliasedValue": "aliased"},
+        }
+
     async def test_serialize_by_alias_true_uses_alias(self):
-        """serialize_by_alias=True emits aliases, same as the default."""
+        """serialize_by_alias=True emits aliases."""
 
         class Biofile(BaseModel):
             model_config = ConfigDict(serialize_by_alias=True)

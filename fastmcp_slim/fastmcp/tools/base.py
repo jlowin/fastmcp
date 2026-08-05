@@ -20,7 +20,7 @@ from mcp_types import (
     ToolExecution,
 )
 from mcp_types import Tool as MCPTool
-from pydantic import BaseModel, Field, PrivateAttr, model_validator
+from pydantic import BaseModel, Field, PrivateAttr, TypeAdapter, model_validator
 from pydantic.json_schema import SkipJsonSchema
 
 from fastmcp.utilities.authorization import AuthCheck
@@ -48,6 +48,8 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
+_JSONABLE_ADAPTER = TypeAdapter(Any)
+
 
 def _default_title(name: str) -> str:
     """Derive a display title from a tool name.
@@ -59,34 +61,13 @@ def _default_title(name: str) -> str:
     return name.replace("_", " ").replace("-", " ").title()
 
 
-def resolve_serialize_by_alias(value: Any) -> bool:
-    """Resolve the effective ``by_alias`` setting for serializing *value*.
-
-    Pydantic's low-level serialization helpers (``to_json``,
-    ``to_jsonable_python``) default ``by_alias`` to ``True``, which silently
-    ignores a model's ``serialize_by_alias`` config. When *value* is a Pydantic
-    model we consult that config instead, falling back to ``True`` to preserve
-    FastMCP's longstanding default of emitting aliases when no preference is
-    declared.
-    """
-    if isinstance(value, type):
-        model = value if issubclass(value, BaseModel) else None
-    elif isinstance(value, BaseModel):
-        model = type(value)
-    else:
-        model = None
-
-    if model is None:
-        return True
-
-    configured = model.model_config.get("serialize_by_alias")
-    return True if configured is None else configured
-
-
 def default_serializer(data: Any) -> str:
-    return pydantic_core.to_json(
-        data, fallback=str, by_alias=resolve_serialize_by_alias(data)
-    ).decode()
+    return _JSONABLE_ADAPTER.dump_json(data, fallback=str).decode()
+
+
+def _serialize_to_jsonable(data: Any) -> Any:
+    """Serialize through Pydantic while preserving each model's configuration."""
+    return _JSONABLE_ADAPTER.dump_python(data, mode="json")
 
 
 class ToolResult(BaseModel):
@@ -133,10 +114,7 @@ class ToolResult(BaseModel):
                 )
 
             try:
-                structured_content = pydantic_core.to_jsonable_python(
-                    value=structured_content,
-                    by_alias=resolve_serialize_by_alias(structured_content),
-                )
+                structured_content = _serialize_to_jsonable(structured_content)
             except pydantic_core.PydanticSerializationError as e:
                 logger.error(
                     f"Could not serialize structured content. If this is unexpected, set your tool's output_schema to None to disable automatic serialization: {e}"
@@ -404,9 +382,7 @@ class Tool(FastMCPComponent):
             return ToolResult(content=content)
 
         try:
-            structured = pydantic_core.to_jsonable_python(
-                raw_value, by_alias=resolve_serialize_by_alias(raw_value)
-            )
+            structured = _serialize_to_jsonable(raw_value)
         except (pydantic_core.PydanticSerializationError, UnicodeDecodeError):
             return ToolResult(content=content)
 
