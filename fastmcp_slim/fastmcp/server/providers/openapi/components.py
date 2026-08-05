@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import re
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 import httpx2
 from mcp_types import ToolAnnotations
@@ -18,11 +18,6 @@ from fastmcp.resources import (
 )
 from fastmcp.server.dependencies import get_http_headers
 from fastmcp.tools.base import Tool, ToolResult
-from fastmcp.utilities.exceptions import (
-    is_http_status_error,
-    is_request_error,
-    is_timeout_error,
-)
 from fastmcp.utilities.logging import get_logger
 from fastmcp.utilities.openapi import HTTPRoute
 from fastmcp.utilities.openapi.director import RequestDirector
@@ -61,30 +56,6 @@ logger = get_logger(__name__)
 
 # Default MIME type when no response content type can be inferred
 _DEFAULT_MIME_TYPE = "application/json"
-
-
-def _convert_httpx_error(exc: Exception) -> ValueError | None:
-    if is_http_status_error(exc):
-        status_error = cast("httpx2.HTTPStatusError", exc)
-        error_message = (
-            f"HTTP error {status_error.response.status_code}: "
-            f"{status_error.response.reason_phrase}"
-        )
-        try:
-            error_data = status_error.response.json()
-            error_message += f" - {error_data}"
-        except (json.JSONDecodeError, ValueError):
-            if status_error.response.text:
-                error_message += f" - {status_error.response.text}"
-        return ValueError(error_message)
-
-    if is_timeout_error(exc):
-        return ValueError(f"HTTP request timed out ({type(exc).__name__})")
-
-    if is_request_error(exc):
-        return ValueError(f"Request error ({type(exc).__name__}): {exc!s}")
-
-    return None
 
 
 def _extract_mime_type_from_route(route: HTTPRoute) -> str:
@@ -200,12 +171,8 @@ class OpenAPITool(Tool):
             base_url = str(self._client.base_url) or "http://localhost"
             directed_request = self._director.build(self._route, arguments, base_url)
 
-            # Rebuild through the user's client so the request object comes
-            # from whichever httpx library the client belongs to (a legacy
-            # httpx.AsyncClient cannot send an httpx2.Request). Primitive
-            # values (str/bytes/tuples) cross that boundary safely; client
-            # default headers merge in with directed headers taking priority,
-            # matching the previous manual merge.
+            # Rebuild through the configured client so its default headers are
+            # merged with the directed headers taking priority.
             request = self._client.build_request(
                 method=directed_request.method,
                 url=str(directed_request.url.copy_with(query=None)),
@@ -262,11 +229,23 @@ class OpenAPITool(Tool):
             except json.JSONDecodeError:
                 return ToolResult(content=response.text)
 
-        except Exception as e:
-            converted_error = _convert_httpx_error(e)
-            if converted_error is None:
-                raise
-            raise converted_error from e
+        except httpx2.HTTPStatusError as e:
+            error_message = (
+                f"HTTP error {e.response.status_code}: {e.response.reason_phrase}"
+            )
+            try:
+                error_data = e.response.json()
+                error_message += f" - {error_data}"
+            except (json.JSONDecodeError, ValueError):
+                if e.response.text:
+                    error_message += f" - {e.response.text}"
+            raise ValueError(error_message) from e
+
+        except httpx2.TimeoutException as e:
+            raise ValueError(f"HTTP request timed out ({type(e).__name__})") from e
+
+        except httpx2.RequestError as e:
+            raise ValueError(f"Request error ({type(e).__name__}): {e!s}") from e
 
 
 class OpenAPIResource(Resource):
@@ -308,8 +287,7 @@ class OpenAPIResource(Resource):
             directed_request = self._director.build(
                 self._route, self._arguments, base_url
             )
-            # Primitive values only: a legacy httpx.AsyncClient cannot accept
-            # httpx2 URL/QueryParams/Headers objects.
+            # Build through the configured client so its defaults are applied.
             request = self._client.build_request(
                 method=directed_request.method,
                 url=str(directed_request.url.copy_with(query=None)),
@@ -353,11 +331,23 @@ class OpenAPIResource(Resource):
                     ]
                 )
 
-        except Exception as e:
-            converted_error = _convert_httpx_error(e)
-            if converted_error is None:
-                raise
-            raise converted_error from e
+        except httpx2.HTTPStatusError as e:
+            error_message = (
+                f"HTTP error {e.response.status_code}: {e.response.reason_phrase}"
+            )
+            try:
+                error_data = e.response.json()
+                error_message += f" - {error_data}"
+            except (json.JSONDecodeError, ValueError):
+                if e.response.text:
+                    error_message += f" - {e.response.text}"
+            raise ValueError(error_message) from e
+
+        except httpx2.TimeoutException as e:
+            raise ValueError(f"HTTP request timed out ({type(e).__name__})") from e
+
+        except httpx2.RequestError as e:
+            raise ValueError(f"Request error ({type(e).__name__}): {e!s}") from e
 
 
 def _path_argument_name(route: HTTPRoute, parameter_name: str) -> str:

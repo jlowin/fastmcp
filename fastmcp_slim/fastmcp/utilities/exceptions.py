@@ -8,42 +8,6 @@ from mcp import MCPError
 import fastmcp
 
 
-def _is_legacy_httpx_exception(exc: BaseException, exception_type: str) -> bool:
-    """Check a legacy-httpx exception without importing httpx on normal paths."""
-    if not any(
-        cls.__module__.partition(".")[0] == "httpx" for cls in type(exc).__mro__
-    ):
-        return False
-
-    try:
-        import httpx
-    except ImportError:
-        return False
-
-    return isinstance(exc, getattr(httpx, exception_type))
-
-
-def is_http_status_error(exc: BaseException) -> bool:
-    """Return whether an exception is an httpx2 or legacy-httpx status error."""
-    return isinstance(exc, httpx2.HTTPStatusError) or _is_legacy_httpx_exception(
-        exc, "HTTPStatusError"
-    )
-
-
-def is_timeout_error(exc: BaseException) -> bool:
-    """Return whether an exception is an httpx2 or legacy-httpx timeout."""
-    return isinstance(exc, httpx2.TimeoutException) or _is_legacy_httpx_exception(
-        exc, "TimeoutException"
-    )
-
-
-def is_request_error(exc: BaseException) -> bool:
-    """Return whether an exception is an httpx2 or legacy-httpx request error."""
-    return isinstance(exc, httpx2.RequestError) or _is_legacy_httpx_exception(
-        exc, "RequestError"
-    )
-
-
 def iter_exc(group: BaseExceptionGroup):
     for exc in group.exceptions:
         if isinstance(exc, BaseExceptionGroup):

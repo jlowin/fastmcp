@@ -6,11 +6,9 @@ masks clean-install regressions: an accidental ``import httpx`` (directly or
 via a third-party integration such as authlib's httpx client) passes CI but
 breaks any install without those extras.
 
-This test simulates the clean install by running a subprocess that blocks
-legacy httpx imports at the meta-path level, then imports the modules that
-have historically regressed. The defensive user-compat shim in
-``fastmcp.server.server`` catches ImportError by design and must keep working
-when httpx is absent.
+These tests simulate a clean install by blocking legacy httpx imports at the
+meta-path level and verify that ordinary server startup leaves both legacy
+packages unloaded.
 """
 
 import subprocess
