@@ -29,6 +29,10 @@ from mcp.shared.exceptions import MCPError
 from pydantic import ValidationError
 
 from fastmcp.apps.config import UI_EXTENSION_ID
+from fastmcp.server._negotiation import (
+    _ExtensibleDiscoverResult,
+    _ExtensibleInitializeResult,
+)
 from fastmcp.server.telemetry import seam_span
 from fastmcp.utilities.logging import get_logger
 
@@ -37,6 +41,7 @@ if TYPE_CHECKING:
     from fastmcp.server.server import FastMCP
 
 logger = get_logger(__name__)
+
 
 # The request methods that FastMCP serves through a handler adapter, each of which
 # runs the FastMCP middleware chain interior (see MCPOperationsMixin). The root
@@ -153,10 +158,11 @@ class FastMCPServerMiddleware:
 
     Dispatch shapes:
 
-    - ``initialize`` runs the *whole* FastMCP chain here (``on_message`` ->
-      ``on_request`` -> ``on_initialize``) because there is no interior handler
-      adapter for it: the SDK builds the ``InitializeResult`` directly, so this is
-      the only place ``on_initialize`` can observe it or veto with ``MCPError``.
+    - Negotiation runs the *whole* FastMCP chain here: ``initialize`` dispatches
+      through ``on_initialize`` and ``server/discover`` through ``on_discover``.
+      Neither has an interior FastMCP handler adapter, and the SDK serializes both
+      results before returning through its middleware seam, so this root adapter
+      restores the typed result before FastMCP middleware observes it.
     - The component methods (``tools/call``, ``tools/list``, ``resources/read``,
       ...) still run their FastMCP chain *interior*, in the handler adapter, where
       ``on_call_tool`` receives the typed component result and a tool exception
@@ -192,6 +198,8 @@ class FastMCPServerMiddleware:
                 return await call_next(ctx)
             if ctx.method == "initialize" and ctx.request_id is not None:
                 return await self._run_initialize_mw(fastmcp, ctx, call_next)
+            if ctx.method == "server/discover" and ctx.request_id is not None:
+                return await self._run_discover_mw(fastmcp, ctx, call_next)
             if ctx.request_id is not None and ctx.method in _INTERIOR_METHODS:
                 return await self._dispatch_component(fastmcp, ctx, call_next)
             return await self._run_outer_mw(fastmcp, ctx, call_next, _raise=None)
@@ -318,6 +326,49 @@ class FastMCPServerMiddleware:
             for var, token in reversed(tokens):
                 var.reset(token)
 
+    async def _run_discover_mw(
+        self,
+        fastmcp: FastMCP,
+        ctx: ServerRequestContext,
+        call_next: CallNext,
+    ) -> HandlerResult:
+        """Run discovery through the typed FastMCP middleware hook."""
+        from fastmcp.server.context import Context
+        from fastmcp.server.middleware.middleware import MiddlewareContext
+
+        params = ctx.params if isinstance(ctx.params, dict) else {}
+        discover_message = mcp_types.DiscoverRequest.model_validate(
+            {"method": "server/discover", "params": params}, by_name=False
+        )
+
+        async def call_original_handler(
+            _mw_ctx: MiddlewareContext,
+        ) -> mcp_types.DiscoverResult:
+            raw = await call_next(ctx)
+            if isinstance(raw, mcp_types.DiscoverResult):
+                return _ExtensibleDiscoverResult.model_validate(
+                    raw.model_dump(by_alias=True)
+                )
+            if isinstance(raw, Mapping):
+                return _ExtensibleDiscoverResult.model_validate(dict(raw))
+            raise TypeError(
+                "server/discover handler returned "
+                f"{type(raw).__name__}; expected DiscoverResult or mapping"
+            )
+
+        async with Context(fastmcp=fastmcp, session=ctx.session) as fastmcp_ctx:
+            mw_context = MiddlewareContext(
+                message=discover_message,
+                source="client",
+                type="request",
+                method="server/discover",
+                fastmcp_context=fastmcp_ctx,
+            )
+            return await fastmcp._run_middleware(
+                mw_context,
+                cast("FastMCPCallNext[Any, Any]", call_original_handler),
+            )
+
     async def _run_initialize_mw(
         self,
         fastmcp: FastMCP,
@@ -357,9 +408,11 @@ class FastMCPServerMiddleware:
             nonlocal captured_result, call_next_completed
             raw = await call_next(ctx)
             if isinstance(raw, mcp_types.InitializeResult):
-                captured_result = raw
+                captured_result = _ExtensibleInitializeResult.model_validate(
+                    raw.model_dump(by_alias=True)
+                )
             elif isinstance(raw, Mapping):
-                captured_result = mcp_types.InitializeResult.model_validate(dict(raw))
+                captured_result = _ExtensibleInitializeResult.model_validate(dict(raw))
             call_next_completed = True
             return captured_result if raw is not None else None
 

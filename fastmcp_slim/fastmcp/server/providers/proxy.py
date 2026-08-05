@@ -50,9 +50,12 @@ from fastmcp.resources.base import (
     ResourceResult,
 )
 from fastmcp.resources.template import expand_uri_template
+from fastmcp.server._negotiation import (
+    _ExtensibleDiscoverResult,
+    _ExtensibleInitializeResult,
+)
 from fastmcp.server.context import Context
 from fastmcp.server.dependencies import fastmcp_request_ctx, get_context
-from fastmcp.server.middleware import CallNext, Middleware, MiddlewareContext
 from fastmcp.server.providers.aggregate import ProviderErrorStrategy
 from fastmcp.server.providers.base import Provider
 from fastmcp.server.server import FastMCP
@@ -66,7 +69,13 @@ from fastmcp.utilities.versions import VersionSpec, version_sort_key
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from mcp.client.session import ReceiveResultT
+    from mcp.shared.dispatcher import ProgressFnT
+    from mcp.shared.message import ClientMessageMetadata
+    from pydantic import TypeAdapter
+
     from fastmcp.client.transports import ClientTransport
+    from fastmcp.server.middleware.proxy import ProxyIdentity
 
 logger = get_logger(__name__)
 
@@ -75,14 +84,55 @@ ClientFactoryT = Callable[[], Client] | Callable[[], Awaitable[Client]]
 
 
 class _ForwardingClientSession(ClientSession):
-    """A session that does not enforce the backend's declared output schema.
+    """A proxy session that relays backend results without consuming them.
 
-    `ClientSession.call_tool` normally validates a tool's structured content
-    against the output schema the backend advertised, raising if they disagree.
-    That check belongs to whoever consumes the result. A proxy only relays it,
-    and the end client runs the same check for itself, so enforcing it mid-path
-    turns a backend's schema bug into a proxy error and hides the real response.
+    Tool results skip output-schema validation because the end client performs
+    that validation itself. Negotiation results retain unknown extension fields
+    so the proxy middleware can forward them rather than discarding vocabulary
+    it does not understand.
     """
+
+    _raw_discover_result: dict[str, Any] | None = None
+
+    async def send_request(
+        self,
+        request: mcp_types.ClientRequest | mcp_types.Request[Any, Any],
+        result_type: type[ReceiveResultT] | TypeAdapter[ReceiveResultT],
+        request_read_timeout_seconds: float | None = None,
+        metadata: ClientMessageMetadata | None = None,
+        progress_callback: ProgressFnT | None = None,
+    ) -> ReceiveResultT:
+        if result_type is mcp_types.InitializeResult:
+            result = await super().send_request(
+                request,
+                _ExtensibleInitializeResult,
+                request_read_timeout_seconds=request_read_timeout_seconds,
+                metadata=metadata,
+                progress_callback=progress_callback,
+            )
+            return cast("ReceiveResultT", result)
+        return await super().send_request(
+            request,
+            result_type,
+            request_read_timeout_seconds=request_read_timeout_seconds,
+            metadata=metadata,
+            progress_callback=progress_callback,
+        )
+
+    async def send_discover(self, version: str) -> dict[str, Any]:
+        raw = await super().send_discover(version)
+        self._raw_discover_result = raw
+        return raw
+
+    def adopt(
+        self, result: mcp_types.InitializeResult | mcp_types.DiscoverResult
+    ) -> None:
+        if (
+            isinstance(result, mcp_types.DiscoverResult)
+            and self._raw_discover_result is not None
+        ):
+            result = _ExtensibleDiscoverResult.model_validate(self._raw_discover_result)
+        super().adopt(result)
 
     async def validate_tool_result(
         self, name: str, result: mcp_types.CallToolResult
@@ -226,65 +276,6 @@ def _stash_proxy_request_context(client: Client, ctx: Context) -> None:
             ctx.request_context,
             ctx._fastmcp,  # weakref to FastMCP, not the Context
         )
-
-
-class ProxyInitializeMiddleware(Middleware):
-    def __init__(self, proxy: FastMCPProxy) -> None:
-        self.proxy = proxy
-
-    async def on_initialize(
-        self,
-        context: MiddlewareContext[mcp_types.InitializeRequest],
-        call_next: CallNext[
-            mcp_types.InitializeRequest,
-            mcp_types.InitializeResult | None,
-        ],
-    ) -> mcp_types.InitializeResult | None:
-        client = await self.proxy._get_client()
-        upstream_instructions: str | None = None
-        try:
-            if isinstance(client, ProxyClient):
-                ctx = context.fastmcp_context
-                if ctx is not None:
-                    client._proxy_rc_ref[0] = (
-                        ctx.request_context,
-                        ctx._fastmcp,
-                    )
-            async with client:
-                # Entering the context already ran connect-time negotiation.
-                # `initialize()` returns the handshake result on a legacy backend,
-                # but raises on a modern (server/discover) backend, which has no
-                # InitializeResult. That mismatch only arises when an explicit
-                # `mode=` pins the backend to a different era than this legacy
-                # front (the era-mirroring default keeps the two in lockstep, so
-                # a legacy front always reaches a legacy backend here). Skip the
-                # handshake-only call when the backend negotiated the modern era.
-                if client.protocol_version not in MODERN_PROTOCOL_VERSIONS:
-                    await client.initialize()
-                    # Capture the upstream's instructions while the session is
-                    # live; `initialize_result` clears once the context exits.
-                    init_result = client.initialize_result
-                    if init_result is not None:
-                        upstream_instructions = init_result.instructions
-        except MCPError:
-            raise
-        except _PROXY_TRANSPORT_ERRORS as error:
-            raise _proxy_upstream_error(error) from error
-
-        result = await call_next(context)
-
-        # Forward the upstream server's instructions unless the proxy defines its
-        # own. `instructions` is part of the MCP InitializeResult and is meant to
-        # steer the model, so a proxy that dropped it would silently degrade any
-        # downstream consumer relying on upstream guidance.
-        if (
-            result is not None
-            and self.proxy.instructions is None
-            and upstream_instructions is not None
-        ):
-            result.instructions = upstream_instructions
-
-        return result
 
 
 # -----------------------------------------------------------------------------
@@ -1266,6 +1257,7 @@ class FastMCPProxy(FastMCP):
         *,
         client_factory: ClientFactoryT,
         provider_error_strategy: ProviderErrorStrategy = "warn",
+        identity: ProxyIdentity = "proxy",
         **kwargs,
     ):
         """Initialize the proxy server.
@@ -1280,16 +1272,23 @@ class FastMCPProxy(FastMCP):
             provider_error_strategy: How provider errors should affect aggregate
                 operations. Defaults to ``"warn"`` for compatibility; use
                 ``"raise"`` when the proxy should surface upstream failures.
+            identity: Whether negotiation exposes the proxy's server identity or
+                the upstream server's. Defaults to ``"proxy"`` for compatibility.
             **kwargs: Additional settings for the FastMCP server.
         """
+        from fastmcp.server.middleware.proxy import (
+            ProxyNegotiationMetadataMiddleware,
+        )
+
         super().__init__(**kwargs)
         self.provider_error_strategy = provider_error_strategy
         self.client_factory = client_factory
-        provider: Provider = ProxyProvider(client_factory)
+        provider = ProxyProvider(client_factory)
         self.add_provider(provider)
-        self.middleware.append(ProxyInitializeMiddleware(self))
+        self.middleware.append(
+            ProxyNegotiationMetadataMiddleware(provider, identity=identity)
+        )
         self._setup_proxy_ping_handler()
-        self._setup_proxy_discover_handler()
 
     async def _get_client(self) -> Client:
         client = self.client_factory()
@@ -1309,73 +1308,6 @@ class FastMCPProxy(FastMCP):
 
         self._mcp_server.add_request_handler(
             "ping", mcp_types.RequestParams, ping_remote
-        )
-
-    def _setup_proxy_discover_handler(self) -> None:
-        """Forward the backend's instructions on the modern (`server/discover`) path.
-
-        `ProxyInitializeMiddleware` forwards upstream instructions by patching
-        the `InitializeResult`, but `on_initialize` only fires for the legacy
-        handshake. A modern client negotiates via `server/discover`, whose
-        default SDK handler reads `self.instructions` off the low-level server
-        directly, so a proxy would silently drop its upstream's instructions for
-        every modern client.
-
-        The SDK sanctions replacing this handler wholesale, so we delegate to
-        its own implementation for the rest of the result (supported versions,
-        capabilities, server info) and only fill in the instructions we would
-        otherwise lose. Resolving them here — at request time, from a live
-        backend session — keeps the proxy's lazy-connect contract intact: the
-        backend is contacted when a client actually asks, never at construction.
-        """
-        build_default_result = self._mcp_server._handle_discover
-
-        async def discover_remote(
-            ctx: ServerRequestContext[Any, Any],
-            params: mcp_types.RequestParams | None,
-        ) -> mcp_types.DiscoverResult:
-            result = await build_default_result(ctx, params)
-            # A proxy with its own instructions keeps them, matching the
-            # precedence `ProxyInitializeMiddleware` applies on the legacy path.
-            if result.instructions is not None:
-                return result
-            client = await self._get_client()
-            # `session.instructions` is era-neutral: it reads the backend's
-            # `DiscoverResult` or `InitializeResult` depending on what the
-            # backend negotiated, so a modern front can proxy a legacy backend.
-            if client.is_connected():
-                result.instructions = client.session.instructions
-                return result
-            # Era mirroring pins a modern backend to an exact version, and a
-            # pinned version adopts a synthesized `DiscoverResult` instead of
-            # probing the wire — so the pinned client would report no
-            # instructions at all. Instructions are metadata with no
-            # back-channel, so this read does not need the era consistency
-            # mirroring exists to protect; negotiate with "auto" instead, which
-            # probes `server/discover` and falls back to the handshake for a
-            # legacy-only backend.
-            client.mode = "auto"
-            try:
-                async with client:
-                    result.instructions = client.session.instructions
-            except (MCPError, *_PROXY_TRANSPORT_ERRORS) as error:
-                # Instructions are optional metadata, so an unreachable backend
-                # must not fail negotiation itself. Failing here would surface
-                # as a confusing protocol error: the client's auto-negotiation
-                # reads any `server/discover` error as "not a modern server"
-                # and retries with the initialize handshake, which this
-                # modern-serving proxy then rejects — hiding the real cause.
-                # Answer without upstream instructions instead and let the
-                # backend failure surface on the first real operation, where
-                # the proxy reports it as an upstream connection error.
-                logger.debug(
-                    "Could not read upstream instructions for server/discover: %r",
-                    error,
-                )
-            return result
-
-        self._mcp_server.add_request_handler(
-            "server/discover", mcp_types.RequestParams, discover_remote
         )
 
 

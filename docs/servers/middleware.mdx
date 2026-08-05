@@ -310,6 +310,31 @@ async def on_initialize(self, context: MiddlewareContext, call_next):
 Rejection works only **before** `call_next()`. Raising `McpError` afterward logs the error without sending it — the client still receives a successful initialize response.
 </Warning>
 
+#### on_discover
+
+Called when a modern client negotiates through `server/discover`. Like `on_initialize`, this hook receives the typed request and can safely inspect or transform the typed `DiscoverResult` returned by `call_next()`.
+
+```python
+import mcp_types
+
+from fastmcp.server.middleware import CallNext, Middleware, MiddlewareContext
+
+
+class DiscoveryMiddleware(Middleware):
+    async def on_discover(
+        self,
+        context: MiddlewareContext[mcp_types.DiscoverRequest],
+        call_next: CallNext[
+            mcp_types.DiscoverRequest,
+            mcp_types.DiscoverResult,
+        ],
+    ) -> mcp_types.DiscoverResult:
+        result = await call_next(context)
+        return result.model_copy(update={"instructions": "Custom instructions"})
+```
+
+**Returns:** `DiscoverResult` — the transformed value is serialized to the client. Fields such as `supported_versions`, `capabilities`, `ttl_ms`, and `cache_scope` describe the server's public behavior, so middleware should only change them when it also changes that behavior.
+
 ### Raw Handler
 
 For complete control over all messages, override `__call__` instead of individual hooks:

@@ -388,6 +388,38 @@ Only reuse sessions when you know the backend is stateless (e.g. stateless HTTP)
 
 ## Advanced Usage
 
+### Controlled Gateways with Negotiation Metadata
+
+`ProxyProvider` deliberately owns only remote components. To also forward optional server negotiation metadata, add `ProxyNegotiationMetadataMiddleware` explicitly. This is useful for gateways that need transforms, local components, or other middleware without adopting all of `FastMCPProxy`:
+
+```python
+from fastmcp import FastMCP
+from fastmcp.server.middleware import ProxyNegotiationMetadataMiddleware
+from fastmcp.server.providers.proxy import ProxyClient, ProxyProvider
+
+
+def create_backend_client() -> ProxyClient:
+    return ProxyClient("http://backend:8000/mcp", mode="auto")
+
+
+backend = ProxyProvider(create_backend_client)
+metadata = ProxyNegotiationMetadataMiddleware(
+    backend,
+    identity="proxy",
+)
+
+gateway = FastMCP(
+    "Controlled Gateway",
+    instructions="Use only approved gateway operations.",
+    providers=[backend],
+    middleware=[metadata],
+)
+```
+
+The middleware works across both the legacy `initialize` handshake and modern `server/discover`. It forwards upstream instructions, namespaced `_meta`, unknown extension fields, and optionally the full upstream `serverInfo`. The frontend remains authoritative for protocol versions, capabilities, cache policy, and `resultType`, since those fields must describe the gateway after its filtering and transforms.
+
+`identity="proxy"` (the default) retains the gateway's `serverInfo`; use `identity="upstream"` to expose the backend's complete implementation identity. Explicit frontend instructions and frontend metadata win on collision. Metadata is fetched lazily during negotiation, and an unavailable backend does not fail negotiation solely because optional metadata could not be read—the first proxied operation reports that failure.
+
 ### FastMCPProxy Class
 
 For explicit session control, use `FastMCPProxy` directly:
