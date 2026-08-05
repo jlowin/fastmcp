@@ -28,7 +28,6 @@ from fastmcp.server.http import (
 from fastmcp.server.providers.base import Provider
 from fastmcp.server.providers.fastmcp_provider import FastMCPProvider
 from fastmcp.server.providers.wrapped_provider import _WrappedProvider
-from fastmcp.utilities.cli import log_server_banner
 from fastmcp.utilities.logging import get_logger, temporary_log_level
 
 if TYPE_CHECKING:
@@ -230,6 +229,8 @@ class TransportMixin:
 
         # Display server banner
         if show_banner:
+            from fastmcp.utilities.cli import log_server_banner
+
             log_server_banner(server=self)
 
         token = set_transport("stdio")
@@ -337,6 +338,8 @@ class TransportMixin:
 
         # Display server banner
         if show_banner:
+            from fastmcp.utilities.cli import log_server_banner
+
             log_server_banner(server=self)
         uvicorn_config_from_user = uvicorn_config or {}
 
