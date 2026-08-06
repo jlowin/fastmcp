@@ -29,10 +29,6 @@ from mcp.shared.exceptions import MCPError
 from pydantic import ValidationError
 
 from fastmcp.apps.config import UI_EXTENSION_ID
-from fastmcp.server._negotiation import (
-    _ExtensibleDiscoverResult,
-    _ExtensibleInitializeResult,
-)
 from fastmcp.server.telemetry import seam_span
 from fastmcp.utilities.logging import get_logger
 
@@ -346,11 +342,9 @@ class FastMCPServerMiddleware:
         ) -> mcp_types.DiscoverResult:
             raw = await call_next(ctx)
             if isinstance(raw, mcp_types.DiscoverResult):
-                return _ExtensibleDiscoverResult.model_validate(
-                    raw.model_dump(by_alias=True)
-                )
+                return raw
             if isinstance(raw, Mapping):
-                return _ExtensibleDiscoverResult.model_validate(dict(raw))
+                return mcp_types.DiscoverResult.model_validate(dict(raw))
             raise TypeError(
                 "server/discover handler returned "
                 f"{type(raw).__name__}; expected DiscoverResult or mapping"
@@ -408,11 +402,9 @@ class FastMCPServerMiddleware:
             nonlocal captured_result, call_next_completed
             raw = await call_next(ctx)
             if isinstance(raw, mcp_types.InitializeResult):
-                captured_result = _ExtensibleInitializeResult.model_validate(
-                    raw.model_dump(by_alias=True)
-                )
+                captured_result = raw
             elif isinstance(raw, Mapping):
-                captured_result = _ExtensibleInitializeResult.model_validate(dict(raw))
+                captured_result = mcp_types.InitializeResult.model_validate(dict(raw))
             call_next_completed = True
             return captured_result if raw is not None else None
 

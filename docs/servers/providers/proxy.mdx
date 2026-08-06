@@ -416,7 +416,7 @@ gateway = FastMCP(
 )
 ```
 
-The middleware works across both the legacy `initialize` handshake and modern `server/discover`. It forwards upstream instructions, namespaced `_meta`, unknown extension fields, and optionally the full upstream `serverInfo`. The frontend remains authoritative for protocol versions, capabilities, cache policy, and `resultType`, since those fields must describe the gateway after its filtering and transforms.
+The middleware works across both the legacy `initialize` handshake and modern `server/discover`. It forwards upstream instructions, namespaced `_meta`, and optionally the full upstream `serverInfo`. The frontend remains authoritative for protocol versions, capabilities, cache policy, and `resultType`, since those fields must describe the gateway after its filtering and transforms. Unknown top-level fields are not forwarded because the gateway cannot safely interpret their claims.
 
 `identity="proxy"` (the default) retains the gateway's `serverInfo`; use `identity="upstream"` to expose the backend's complete implementation identity. Explicit frontend instructions and frontend metadata win on collision. Metadata is fetched lazily during negotiation, and an unavailable backend does not fail negotiation solely because optional metadata could not be read—the first proxied operation reports that failure.
 

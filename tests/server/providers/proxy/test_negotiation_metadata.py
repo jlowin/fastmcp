@@ -44,8 +44,6 @@ class UpstreamMetadataMiddleware(Middleware):
         updates: dict[str, Any] = {
             "instructions": "upstream instructions",
             "meta": meta,
-            "x-upstream-extension": {"enabled": True},
-            "x-shared-extension": "upstream",
         }
         if isinstance(result, mcp_types.InitializeResult):
             updates.update(
@@ -53,10 +51,6 @@ class UpstreamMetadataMiddleware(Middleware):
                 capabilities=mcp_types.ServerCapabilities(
                     experimental={"upstream": {"claimed": True}}
                 ),
-                supportedVersions=["upstream-version"],
-                ttlMs=91_000,
-                cacheScope="public",
-                resultType="upstream-result",
             )
         else:
             meta[mcp_types.SERVER_INFO_META_KEY] = UPSTREAM_INFO.model_dump(
@@ -67,10 +61,6 @@ class UpstreamMetadataMiddleware(Middleware):
                 cache_scope="public",
                 capabilities=mcp_types.ServerCapabilities(
                     experimental={"upstream": {"claimed": True}}
-                ),
-                protocolVersion="upstream-version",
-                serverInfo=UPSTREAM_INFO.model_dump(
-                    by_alias=True, mode="json", exclude_none=True
                 ),
             )
         return updates
@@ -106,8 +96,6 @@ class FrontendMetadataMiddleware(Middleware):
                     "com.example/shared": "frontend",
                     "com.example/frontend": {"enabled": True},
                 },
-                "x-shared-extension": "frontend",
-                "x-frontend-extension": {"enabled": True},
             }
         )
 
@@ -170,9 +158,7 @@ async def test_forwards_metadata_across_all_protocol_era_combinations(
 ):
     gateway = make_gateway(make_upstream(), backend_mode=backend_mode)
 
-    # ProxyClient retains unknown extension fields so this test observes the
-    # complete typed result rather than only its core mcp-types vocabulary.
-    async with ProxyClient(gateway, mode=frontend_mode) as client:
+    async with Client(gateway, mode=frontend_mode) as client:
         result = client.session.initialize_result or client.session.discover_result
         assert result is not None
         assert client.instructions == "upstream instructions"
@@ -181,10 +167,6 @@ async def test_forwards_metadata_across_all_protocol_era_combinations(
         assert result.meta is not None
         assert result.meta["com.example/upstream"] == {"enabled": True}
         stamped_info = result.meta.get(mcp_types.SERVER_INFO_META_KEY)
-        assert result.model_extra == {
-            "x-upstream-extension": {"enabled": True},
-            "x-shared-extension": "upstream",
-        }
         assert result.capabilities.experimental is None
 
         if isinstance(result, mcp_types.InitializeResult):
@@ -224,7 +206,7 @@ async def test_frontend_values_take_precedence(frontend_mode: str):
         frontend_metadata=True,
     )
 
-    async with ProxyClient(gateway, mode=frontend_mode) as client:
+    async with Client(gateway, mode=frontend_mode) as client:
         result = client.session.initialize_result or client.session.discover_result
         assert result is not None
         assert client.instructions == "frontend instructions"
@@ -232,11 +214,6 @@ async def test_frontend_values_take_precedence(frontend_mode: str):
         assert result.meta["com.example/shared"] == "frontend"
         assert result.meta["com.example/frontend"] == {"enabled": True}
         assert result.meta["com.example/upstream"] == {"enabled": True}
-        assert result.model_extra == {
-            "x-upstream-extension": {"enabled": True},
-            "x-shared-extension": "frontend",
-            "x-frontend-extension": {"enabled": True},
-        }
 
 
 @pytest.mark.parametrize("frontend_mode", ["legacy", "auto"])

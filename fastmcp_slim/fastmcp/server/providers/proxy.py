@@ -50,10 +50,6 @@ from fastmcp.resources.base import (
     ResourceResult,
 )
 from fastmcp.resources.template import expand_uri_template
-from fastmcp.server._negotiation import (
-    _ExtensibleDiscoverResult,
-    _ExtensibleInitializeResult,
-)
 from fastmcp.server.context import Context
 from fastmcp.server.dependencies import fastmcp_request_ctx, get_context
 from fastmcp.server.providers.aggregate import ProviderErrorStrategy
@@ -69,11 +65,6 @@ from fastmcp.utilities.versions import VersionSpec, version_sort_key
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from mcp.client.session import ReceiveResultT
-    from mcp.shared.dispatcher import ProgressFnT
-    from mcp.shared.message import ClientMessageMetadata
-    from pydantic import TypeAdapter
-
     from fastmcp.client.transports import ClientTransport
     from fastmcp.server.middleware.proxy import ProxyIdentity
 
@@ -84,55 +75,14 @@ ClientFactoryT = Callable[[], Client] | Callable[[], Awaitable[Client]]
 
 
 class _ForwardingClientSession(ClientSession):
-    """A proxy session that relays backend results without consuming them.
+    """A session that does not enforce the backend's declared output schema.
 
-    Tool results skip output-schema validation because the end client performs
-    that validation itself. Negotiation results retain unknown extension fields
-    so the proxy middleware can forward them rather than discarding vocabulary
-    it does not understand.
+    `ClientSession.call_tool` normally validates a tool's structured content
+    against the output schema the backend advertised, raising if they disagree.
+    That check belongs to whoever consumes the result. A proxy only relays it,
+    and the end client runs the same check for itself, so enforcing it mid-path
+    turns a backend's schema bug into a proxy error and hides the real response.
     """
-
-    _raw_discover_result: dict[str, Any] | None = None
-
-    async def send_request(
-        self,
-        request: mcp_types.ClientRequest | mcp_types.Request[Any, Any],
-        result_type: type[ReceiveResultT] | TypeAdapter[ReceiveResultT],
-        request_read_timeout_seconds: float | None = None,
-        metadata: ClientMessageMetadata | None = None,
-        progress_callback: ProgressFnT | None = None,
-    ) -> ReceiveResultT:
-        if result_type is mcp_types.InitializeResult:
-            result = await super().send_request(
-                request,
-                _ExtensibleInitializeResult,
-                request_read_timeout_seconds=request_read_timeout_seconds,
-                metadata=metadata,
-                progress_callback=progress_callback,
-            )
-            return cast("ReceiveResultT", result)
-        return await super().send_request(
-            request,
-            result_type,
-            request_read_timeout_seconds=request_read_timeout_seconds,
-            metadata=metadata,
-            progress_callback=progress_callback,
-        )
-
-    async def send_discover(self, version: str) -> dict[str, Any]:
-        raw = await super().send_discover(version)
-        self._raw_discover_result = raw
-        return raw
-
-    def adopt(
-        self, result: mcp_types.InitializeResult | mcp_types.DiscoverResult
-    ) -> None:
-        if (
-            isinstance(result, mcp_types.DiscoverResult)
-            and self._raw_discover_result is not None
-        ):
-            result = _ExtensibleDiscoverResult.model_validate(self._raw_discover_result)
-        super().adopt(result)
 
     async def validate_tool_result(
         self, name: str, result: mcp_types.CallToolResult

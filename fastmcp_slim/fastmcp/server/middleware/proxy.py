@@ -4,17 +4,13 @@ from __future__ import annotations
 
 import inspect
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 import mcp_types
 from mcp.shared.exceptions import MCPError
 from mcp_types.version import MODERN_PROTOCOL_VERSIONS
 
 from fastmcp.client.client import Client
-from fastmcp.server._negotiation import (
-    _ExtensibleDiscoverResult,
-    _ExtensibleInitializeResult,
-)
 from fastmcp.server.middleware.middleware import CallNext, Middleware, MiddlewareContext
 from fastmcp.utilities.logging import get_logger
 
@@ -25,41 +21,12 @@ logger = get_logger(__name__)
 
 ProxyIdentity = Literal["proxy", "upstream"]
 
-# Claims describing the connection or the result envelope belong to the public
-# gateway. Some are unknown fields when they cross eras, so filter aliases and
-# Python field names rather than relying only on the source model's typed fields.
-_GATEWAY_OWNED_FIELDS = frozenset(
-    {
-        "protocolVersion",
-        "protocol_version",
-        "supportedVersions",
-        "supported_versions",
-        "capabilities",
-        "ttlMs",
-        "ttl_ms",
-        "cacheScope",
-        "cache_scope",
-        "resultType",
-        "result_type",
-        "serverInfo",
-        "server_info",
-    }
-)
-
-
-NegotiationResultT = TypeVar(
-    "NegotiationResultT",
-    mcp_types.InitializeResult,
-    mcp_types.DiscoverResult,
-)
-
 
 @dataclass(frozen=True)
 class _NegotiationMetadata:
     instructions: str | None
     server_info: mcp_types.Implementation | None
     meta: dict[str, Any]
-    extensions: dict[str, Any]
 
     @classmethod
     def from_client(cls, client: Client) -> _NegotiationMetadata | None:
@@ -70,11 +37,6 @@ class _NegotiationMetadata:
             instructions=result.instructions,
             server_info=client.session.server_info,
             meta=dict(result.meta or {}),
-            extensions={
-                key: value
-                for key, value in (result.model_extra or {}).items()
-                if key not in _GATEWAY_OWNED_FIELDS
-            },
         )
 
 
@@ -82,10 +44,9 @@ class ProxyNegotiationMetadataMiddleware(Middleware):
     """Forward optional negotiation metadata from a ``ProxyProvider`` backend.
 
     The frontend always owns protocol versions, capabilities, cache policy, and
-    result type. Instructions, namespaced metadata, and extension fields are
-    filled from the backend only where the frontend has no value. ``identity``
-    controls whether server identity remains the gateway's or is replaced by
-    the backend's.
+    result type. Instructions and namespaced metadata are filled from the
+    backend only where the frontend has no value. ``identity`` controls whether
+    server identity remains the gateway's or is replaced by the backend's.
     """
 
     def __init__(
@@ -154,33 +115,23 @@ class ProxyNegotiationMetadataMiddleware(Middleware):
             )
         return merged
 
-    def _merge_result(
+    def _updates(
         self,
-        result: NegotiationResultT,
+        result: mcp_types.InitializeResult | mcp_types.DiscoverResult,
         upstream: _NegotiationMetadata,
-    ) -> NegotiationResultT:
-        dumped = result.model_dump(by_alias=True)
-        if isinstance(result, mcp_types.InitializeResult):
-            forwarded = _ExtensibleInitializeResult.model_validate(dumped)
-        else:
-            forwarded = _ExtensibleDiscoverResult.model_validate(dumped)
-
-        frontend_extensions = forwarded.model_extra or {}
-        updates = {
-            key: value
-            for key, value in upstream.extensions.items()
-            if key not in frontend_extensions
+    ) -> dict[str, Any]:
+        updates: dict[str, Any] = {
+            "meta": self._merge_meta(dict(result.meta or {}), upstream) or None
         }
-        updates["meta"] = self._merge_meta(dict(forwarded.meta or {}), upstream) or None
-        if forwarded.instructions is None and upstream.instructions is not None:
+        if result.instructions is None and upstream.instructions is not None:
             updates["instructions"] = upstream.instructions
         if (
-            isinstance(forwarded, mcp_types.InitializeResult)
+            isinstance(result, mcp_types.InitializeResult)
             and self.identity == "upstream"
             and upstream.server_info is not None
         ):
             updates["server_info"] = upstream.server_info
-        return cast("NegotiationResultT", forwarded.model_copy(update=updates))
+        return updates
 
     async def on_initialize(
         self,
@@ -195,7 +146,7 @@ class ProxyNegotiationMetadataMiddleware(Middleware):
         upstream = await self._read_upstream(context)
         if upstream is None:
             return result
-        return self._merge_result(result, upstream)
+        return result.model_copy(update=self._updates(result, upstream))
 
     async def on_discover(
         self,
@@ -206,4 +157,4 @@ class ProxyNegotiationMetadataMiddleware(Middleware):
         upstream = await self._read_upstream(context)
         if upstream is None:
             return result
-        return self._merge_result(result, upstream)
+        return result.model_copy(update=self._updates(result, upstream))
