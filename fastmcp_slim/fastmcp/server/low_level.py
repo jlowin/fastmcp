@@ -157,7 +157,7 @@ class FastMCPServerMiddleware:
       through ``on_initialize`` and ``server/discover`` through ``on_discover``.
       Neither has an interior FastMCP handler adapter, and the SDK serializes both
       results before returning through its middleware seam, so this root adapter
-      restores the typed result before FastMCP middleware observes it.
+      restores core results to typed models before FastMCP middleware observes them.
     - The component methods (``tools/call``, ``tools/list``, ``resources/read``,
       ...) still run their FastMCP chain *interior*, in the handler adapter, where
       ``on_call_tool`` receives the typed component result and a tool exception

@@ -56,7 +56,7 @@ from fastmcp.resources.base import (
 from fastmcp.resources.template import expand_uri_template
 from fastmcp.server.context import Context
 from fastmcp.server.dependencies import fastmcp_request_ctx, get_context
-from fastmcp.server.middleware.middleware import CallNext, Middleware, MiddlewareContext
+from fastmcp.server.middleware import CallNext, Middleware, MiddlewareContext
 from fastmcp.server.providers.aggregate import ProviderErrorStrategy
 from fastmcp.server.providers.base import Provider
 from fastmcp.server.server import FastMCP
@@ -1167,7 +1167,7 @@ class ProxyMetadataMiddleware(Middleware):
     ) -> None:
         if identity not in ("proxy", "upstream"):
             raise ValueError("identity must be 'proxy' or 'upstream'")
-        self.client_factory = provider.client_factory
+        self.provider = provider
         self.identity = identity
 
     async def _read_connected(self, client: Client) -> _UpstreamServerMetadata | None:
@@ -1185,12 +1185,6 @@ class ProxyMetadataMiddleware(Middleware):
             result = mcp_types.DiscoverResult.model_validate(raw)
             return _UpstreamServerMetadata.from_discover(result)
         return _UpstreamServerMetadata.from_client(client)
-
-    async def _create_client(self) -> Client:
-        client = self.client_factory()
-        if inspect.isawaitable(client):
-            client = cast(Client, await client)
-        return client
 
     async def _read_upstream(
         self, client: Client, context: Context | None
@@ -1235,7 +1229,8 @@ class ProxyMetadataMiddleware(Middleware):
             mcp_types.InitializeRequest, mcp_types.InitializeResult | None
         ],
     ) -> mcp_types.InitializeResult | None:
-        client = await self._create_client()
+        # Factory errors must occur before the legacy response is committed.
+        client = await self.provider._get_client()
         result = await call_next(context)
         if result is None:
             return None
@@ -1255,7 +1250,7 @@ class ProxyMetadataMiddleware(Middleware):
         result = await call_next(context)
         if not isinstance(result, mcp_types.DiscoverResult):
             return result
-        client = await self._create_client()
+        client = await self.provider._get_client()
         upstream = await self._read_upstream(client, context.fastmcp_context)
         if upstream is None:
             return result

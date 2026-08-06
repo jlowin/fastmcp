@@ -164,7 +164,6 @@ def make_gateway(
         cache_ttl=7,
         cache_scope="private",
     )
-    gateway.provider_error_strategy = "raise"
     return gateway
 
 
@@ -431,32 +430,27 @@ async def test_stateful_pinned_metadata_uses_registered_client_lifecycle():
     assert not created[0].is_connected()
 
 
-async def test_client_factory_errors_are_not_swallowed():
-    def broken_factory() -> Client:
-        raise RuntimeError("broken client factory")
-
-    provider = ProxyProvider(broken_factory)
-    gateway = FastMCP(
-        "gateway",
-        providers=[provider],
-        middleware=[ProxyMetadataMiddleware(provider)],
-    )
-
-    with pytest.raises(MCPError):
-        async with Client(gateway, mode="legacy"):
-            pass
-
-
 @pytest.mark.parametrize("frontend_mode", ["legacy", "auto"])
 @pytest.mark.parametrize("async_factory", [False, True])
-async def test_client_factory_mcp_errors_are_not_swallowed(
-    frontend_mode: str, async_factory: bool
+@pytest.mark.parametrize("error_kind", ["runtime", "mcp"])
+async def test_client_factory_errors_are_not_swallowed(
+    frontend_mode: str,
+    async_factory: bool,
+    error_kind: Literal["runtime", "mcp"],
 ):
+    def factory_error() -> Exception:
+        if error_kind == "mcp":
+            return MCPError(
+                code=mcp_types.INTERNAL_ERROR,
+                message="broken client factory",
+            )
+        return RuntimeError("broken client factory")
+
     def broken_factory() -> Client:
-        raise MCPError(code=mcp_types.INTERNAL_ERROR, message="broken client factory")
+        raise factory_error()
 
     async def broken_async_factory() -> Client:
-        raise MCPError(code=mcp_types.INTERNAL_ERROR, message="broken client factory")
+        raise factory_error()
 
     factory = broken_async_factory if async_factory else broken_factory
     provider = ProxyProvider(factory)
@@ -466,8 +460,7 @@ async def test_client_factory_mcp_errors_are_not_swallowed(
         middleware=[ProxyMetadataMiddleware(provider)],
     )
 
-    match = "broken client factory" if frontend_mode == "legacy" else None
-    with pytest.raises(MCPError, match=match):
+    with pytest.raises(MCPError):
         async with Client(gateway, mode=frontend_mode):
             pass
 

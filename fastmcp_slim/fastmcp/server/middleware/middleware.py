@@ -234,7 +234,6 @@ class Middleware:
         context: MiddlewareContext[mt.DiscoverRequest],
         call_next: CallNext[mt.DiscoverRequest, mt.DiscoverResult | dict[str, Any]],
     ) -> mt.DiscoverResult | dict[str, Any]:
-        """Handle core discovery results or extension-owned result mappings."""
         return await call_next(context)
 
     async def on_call_tool(
