@@ -374,6 +374,24 @@ async def test_invalid_backend_client_negotiation_is_not_ignored():
             pass
 
 
+async def test_unrelated_client_validation_error_is_not_ignored():
+    class InvalidClient(ProxyClient):
+        async def __aenter__(self) -> ProxyClient:
+            mcp_types.Implementation.model_validate({})
+            return self
+
+    provider = ProxyProvider(lambda: InvalidClient(make_upstream()))
+    gateway = FastMCP(
+        "gateway",
+        providers=[provider],
+        middleware=[ProxyMetadataMiddleware(provider)],
+    )
+
+    with pytest.raises(MCPError):
+        async with Client(gateway, mode="auto"):
+            pass
+
+
 @pytest.mark.parametrize("mode", ["legacy", "auto"])
 async def test_forwarded_metadata_does_not_alias_connected_backend(mode: str):
     backend_info = mcp_types.Implementation(name="shared-backend", version="1.0")

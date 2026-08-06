@@ -1194,7 +1194,11 @@ class ProxyMetadataMiddleware(Middleware):
                 and result_type not in mcp_types.CORE_RESULT_TYPES
             ):
                 return None
-            result = mcp_types.DiscoverResult.model_validate(raw)
+            try:
+                result = mcp_types.DiscoverResult.model_validate(raw)
+            except ValidationError as error:
+                logger.debug("Could not read upstream server metadata: %r", error)
+                return None
             return _UpstreamServerMetadata.from_discover(result)
         return _UpstreamServerMetadata.from_client(client)
 
@@ -1209,7 +1213,7 @@ class ProxyMetadataMiddleware(Middleware):
                 return await self._read_connected(client)
             async with client:
                 return await self._read_connected(client)
-        except (MCPError, ValidationError, *_PROXY_TRANSPORT_ERRORS) as error:
+        except (MCPError, *_PROXY_TRANSPORT_ERRORS) as error:
             if isinstance(error, RuntimeError) and not _has_transport_cause(error):
                 raise
             logger.debug("Could not read upstream server metadata: %r", error)
