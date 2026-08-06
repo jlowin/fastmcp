@@ -1048,9 +1048,9 @@ class _NegotiationMetadata:
 class ProxyMetadataMiddleware(Middleware):
     """Forward optional negotiation metadata from a ``ProxyProvider`` backend.
 
-    The frontend always owns protocol versions, capabilities, cache policy, and
-    result type. Instructions and namespaced metadata are filled from the
-    backend only where the frontend has no value. ``identity`` controls whether
+    Only instructions and namespaced metadata are forwarded, with frontend
+    values taking precedence. Protocol versions, capabilities, cache policy,
+    and result type always remain frontend-owned. ``identity`` controls whether
     server identity remains the gateway's or is replaced by the backend's.
     """
 
