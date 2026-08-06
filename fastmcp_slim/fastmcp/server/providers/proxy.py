@@ -30,6 +30,7 @@ from mcp_types import (
     TextResourceContents,
 )
 from mcp_types.version import MODERN_PROTOCOL_VERSIONS
+from pydantic import ValidationError
 from pydantic.networks import AnyUrl
 
 from fastmcp._warnings import FastMCPDeprecationWarning
@@ -162,6 +163,15 @@ def _forwardable_request_meta(ctx: Context | None) -> dict[str, Any] | None:
         if key not in _CONNECTION_META_KEYS
     }
     return forwarded or None
+
+
+def _forwardable_server_meta(meta: dict[str, Any] | None) -> dict[str, Any]:
+    """Backend result metadata that may cross onto the frontend connection."""
+    return {
+        key: value
+        for key, value in (meta or {}).items()
+        if key not in _CONNECTION_META_KEYS and key != mcp_types.SERVER_INFO_META_KEY
+    }
 
 
 def _session_request_meta(
@@ -1036,15 +1046,36 @@ class _UpstreamServerMetadata:
     meta: dict[str, Any]
 
     @classmethod
+    def from_result(
+        cls,
+        result: mcp_types.InitializeResult | mcp_types.DiscoverResult,
+        server_info: mcp_types.Implementation | None,
+    ) -> _UpstreamServerMetadata:
+        return cls(
+            instructions=result.instructions,
+            server_info=server_info,
+            meta=dict(result.meta or {}),
+        )
+
+    @classmethod
     def from_client(cls, client: Client) -> _UpstreamServerMetadata | None:
         result = client.session.initialize_result or client.session.discover_result
         if result is None:
             return None
-        return cls(
-            instructions=result.instructions,
-            server_info=client.session.server_info,
-            meta=dict(result.meta or {}),
-        )
+        return cls.from_result(result, client.session.server_info)
+
+    @classmethod
+    def from_discover(cls, result: mcp_types.DiscoverResult) -> _UpstreamServerMetadata:
+        raw_server_info = (result.meta or {}).get(mcp_types.SERVER_INFO_META_KEY)
+        try:
+            server_info = (
+                mcp_types.Implementation.model_validate(raw_server_info)
+                if raw_server_info is not None
+                else None
+            )
+        except ValidationError:
+            server_info = None
+        return cls.from_result(result, server_info)
 
 
 class ProxyMetadataMiddleware(Middleware):
@@ -1075,23 +1106,32 @@ class ProxyMetadataMiddleware(Middleware):
             client = cast(Client, await client)
 
         connected = client.is_connected()
-        # A pinned modern client without a prior discovery result adopts a
-        # synthesized result without contacting the server. Probe with a copy so
-        # metadata comes from the backend without changing the configured mode.
-        if (
-            not connected
-            and client.mode in MODERN_PROTOCOL_VERSIONS
-            and client.prior_discover is None
-        ):
+        synthesized_discover = (
+            client.mode in MODERN_PROTOCOL_VERSIONS and client.prior_discover is None
+        )
+        # A disconnected pinned client can probe with a copy. A connected client
+        # must keep using its existing transport, so query discovery directly
+        # without replacing the result already adopted by its session.
+        if synthesized_discover and not connected:
             client = client.new()
             client.mode = "auto"
 
         if context is not None:
             _stash_proxy_request_context(client, context)
-        if connected:
-            return _UpstreamServerMetadata.from_client(client)
 
         try:
+            if synthesized_discover and connected:
+                raw = await client.session.send_discover(client.mode)
+                result_type = raw.get("resultType")
+                if (
+                    isinstance(result_type, str)
+                    and result_type not in mcp_types.CORE_RESULT_TYPES
+                ):
+                    return None
+                result = mcp_types.DiscoverResult.model_validate(raw)
+                return _UpstreamServerMetadata.from_discover(result)
+            if connected:
+                return _UpstreamServerMetadata.from_client(client)
             async with client:
                 return _UpstreamServerMetadata.from_client(client)
         except (MCPError, *_PROXY_TRANSPORT_ERRORS) as error:
@@ -1103,11 +1143,7 @@ class ProxyMetadataMiddleware(Middleware):
         result: mcp_types.InitializeResult | mcp_types.DiscoverResult,
         upstream: _UpstreamServerMetadata,
     ) -> dict[str, Any]:
-        meta = {
-            key: value
-            for key, value in upstream.meta.items()
-            if key != mcp_types.SERVER_INFO_META_KEY
-        }
+        meta = _forwardable_server_meta(upstream.meta)
         meta.update(result.meta or {})
 
         updates: dict[str, Any] = {"meta": meta or None}

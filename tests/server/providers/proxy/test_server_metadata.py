@@ -40,6 +40,9 @@ class UpstreamMetadataMiddleware(Middleware):
     def _updates(self, result: mcp_types.Result) -> dict[str, Any]:
         meta = {
             **(result.meta or {}),
+            mcp_types.PROTOCOL_VERSION_META_KEY: "upstream-version",
+            mcp_types.CLIENT_INFO_META_KEY: {"name": "upstream-client"},
+            mcp_types.CLIENT_CAPABILITIES_META_KEY: {"upstream": True},
             "com.example/upstream": {"enabled": True},
             "com.example/shared": "upstream",
         }
@@ -178,6 +181,12 @@ async def test_forwards_metadata_across_all_protocol_era_combinations(
         assert client.server_info.name == "gateway"
         assert result.meta is not None
         assert result.meta["com.example/upstream"] == {"enabled": True}
+        for key in (
+            mcp_types.PROTOCOL_VERSION_META_KEY,
+            mcp_types.CLIENT_INFO_META_KEY,
+            mcp_types.CLIENT_CAPABILITIES_META_KEY,
+        ):
+            assert key not in result.meta
         stamped_info = result.meta.get(mcp_types.SERVER_INFO_META_KEY)
         assert result.capabilities.experimental is None
 
@@ -263,7 +272,7 @@ async def test_forwards_backend_logs_while_reading_metadata():
     assert messages == ["metadata connection"]
 
 
-async def test_pinned_client_uses_prior_discover_metadata():
+async def test_pinned_clients_use_available_metadata():
     prior_info = mcp_types.Implementation(name="prior", version="1.0")
     prior = mcp_types.DiscoverResult(
         supported_versions=[MODERN_PROTOCOL_VERSIONS[0]],
@@ -296,6 +305,24 @@ async def test_pinned_client_uses_prior_discover_metadata():
         assert client.server_info == prior_info
         assert result.meta is not None
         assert result.meta["com.example/prior"] is True
+
+    version = MODERN_PROTOCOL_VERSIONS[0]
+    upstream = make_upstream()
+    async with Client(upstream, mode=version) as backend_client:
+        assert backend_client.instructions is None
+        proxy = create_proxy(backend_client, identity="upstream")
+
+        async with Client(proxy, mode="auto") as client:
+            result = client.session.discover_result
+            assert result is not None
+            assert client.instructions == "upstream instructions"
+            assert client.server_info == UPSTREAM_INFO
+            assert result.meta is not None
+            assert result.meta["com.example/upstream"] == {"enabled": True}
+
+        # The metadata probe must not replace the connected client's adopted
+        # synthetic result.
+        assert backend_client.instructions is None
 
 
 async def test_client_factory_errors_are_not_swallowed():

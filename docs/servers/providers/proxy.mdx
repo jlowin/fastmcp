@@ -60,11 +60,9 @@ To mount a proxy inside another FastMCP server, see [Mounting External Servers](
 
 ## Connection Semantics
 
-FastMCP proxies are lazy bridges. Creating the proxy object and starting the local server do not contact the upstream server. The upstream connection begins when an MCP client sends an `initialize` request to the proxy.
+FastMCP proxies are lazy bridges. Creating the proxy object and starting the local server do not contact the upstream server. During client negotiation, the proxy makes a best-effort connection to read optional server metadata; an unavailable backend does not prevent the client from connecting to the proxy.
 
-During initialization, the proxy initializes the upstream server before responding locally. If the upstream server is unavailable, the URL does not point to an MCP endpoint, or upstream authentication cannot complete, the proxy initialization fails. This keeps the local proxy's connection status aligned with the upstream server it represents.
-
-After initialization, the proxy forwards MCP requests such as `ping`, `tools/list`, `resources/list`, `prompts/list`, tool calls, resource reads, sampling, elicitation, logging, and progress through the upstream client.
+Subsequent MCP requests such as `ping`, `tools/list`, `resources/list`, `prompts/list`, tool calls, resource reads, sampling, elicitation, logging, and progress connect to the backend as needed. Component provider failures follow `provider_error_strategy`: the default `"warn"` logs and skips a failed provider, while `"raise"` reports the failure to the client.
 
 ## Transport Bridging
 
@@ -408,7 +406,7 @@ gateway = FastMCP(
 )
 ```
 
-By default the gateway keeps its own `serverInfo`; pass `identity="upstream"` to use the backend identity when available. Frontend instructions and `_meta` values win on collisions. The middleware never copies upstream protocol versions, capabilities, cache policy, `resultType`, or unknown top-level fields. If the backend is unavailable, the client can still connect without its optional metadata.
+By default the gateway keeps its own `serverInfo`; pass `identity="upstream"` to use the backend identity when available. Frontend instructions and `_meta` values win on collisions. The middleware never copies upstream protocol versions, connection metadata, capabilities, cache policy, `resultType`, or unknown top-level fields. If the backend is unavailable, the client can still connect without its optional metadata.
 
 ### FastMCPProxy Class
 
