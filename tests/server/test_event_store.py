@@ -7,6 +7,7 @@ from mcp.server.streamable_http import EventMessage
 from mcp_types import JSONRPCRequest
 
 from fastmcp.server.event_store import (
+    _LOCK_STRIPES,
     EventEntry,
     EventStore,
     SessionScopedEventStore,
@@ -303,6 +304,44 @@ class TestConcurrentStoreEvent:
         assert len(stream_data.event_ids) == 2
         assert sorted(stream_data.event_ids + deleted) == sorted(event_ids)
         assert len(deleted) == len(set(deleted))
+
+    async def test_distinct_streams_are_not_serialized(self, monkeypatch):
+        """Unrelated streams must not wait on each other's backend calls.
+
+        One EventStore is shared by every session, so a store-wide lock would
+        put a Redis round-trip for one session in front of every other one.
+        """
+        event_store = EventStore()
+
+        # hash() is salted per process, so pick the second stream at runtime.
+        first = "stream-a"
+        second = next(
+            candidate
+            for candidate in (f"stream-{i}" for i in range(1000))
+            if hash(candidate) % _LOCK_STRIPES != hash(first) % _LOCK_STRIPES
+        )
+
+        stream_get = event_store._stream_store.get
+        both_inside = asyncio.Event()
+        inside = 0
+
+        async def gate(**kwargs):
+            nonlocal inside
+            inside += 1
+            if inside == 2:
+                both_inside.set()
+            # Both critical sections have to be open at once; a store-wide lock
+            # would keep the second task out until the first finished.
+            await asyncio.wait_for(both_inside.wait(), timeout=2)
+            return await stream_get(**kwargs)
+
+        monkeypatch.setattr(event_store._stream_store, "get", gate)
+
+        message = JSONRPCRequest(jsonrpc="2.0", method="test", id=1)
+        await asyncio.gather(
+            event_store.store_event(first, message),
+            event_store.store_event(second, message),
+        )
 
 
 class TestEventStoreIntegration:
