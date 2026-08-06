@@ -1046,7 +1046,7 @@ requires-dist = [
     { name = "httpx2", marker = "extra == 'client'", specifier = ">=2.5.0" },
     { name = "httpx2", marker = "extra == 'mcp'", specifier = ">=2.5.0" },
     { name = "httpx2", marker = "extra == 'server'", specifier = ">=2.5.0" },
-    { name = "joserfc", marker = "extra == 'server'", specifier = ">=1.1.0" },
+    { name = "joserfc", marker = "extra == 'server'", specifier = ">=1.5.0" },
     { name = "jsonref", marker = "extra == 'gemini'", specifier = ">=1.1.0" },
     { name = "jsonref", marker = "extra == 'server'", specifier = ">=1.1.0" },
     { name = "jsonschema-path", marker = "extra == 'server'", specifier = ">=0.3.4" },
