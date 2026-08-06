@@ -962,9 +962,8 @@ class Context:
         *,
         response_title: str | None = None,
         response_description: str | None = None,
-    ) -> AcceptedElicitation[T] | DeclinedElicitation | CancelledElicitation: ...
-
-    """The accepted elicitation will contain the response data"""
+    ) -> AcceptedElicitation[T] | DeclinedElicitation | CancelledElicitation:
+        """The accepted elicitation will contain the response data"""
 
     @overload
     async def elicit(
@@ -974,10 +973,9 @@ class Context:
         *,
         response_title: str | None = None,
         response_description: str | None = None,
-    ) -> AcceptedElicitation[str] | DeclinedElicitation | CancelledElicitation: ...
-
-    """When response_type is a list of strings, the accepted elicitation will
-    contain the selected string response"""
+    ) -> AcceptedElicitation[str] | DeclinedElicitation | CancelledElicitation:
+        """When response_type is a list of strings, the accepted elicitation will
+        contain the selected string response"""
 
     @overload
     async def elicit(
@@ -987,10 +985,9 @@ class Context:
         *,
         response_title: str | None = None,
         response_description: str | None = None,
-    ) -> AcceptedElicitation[str] | DeclinedElicitation | CancelledElicitation: ...
-
-    """When response_type is a dict mapping keys to title dicts, the accepted
-    elicitation will contain the selected key"""
+    ) -> AcceptedElicitation[str] | DeclinedElicitation | CancelledElicitation:
+        """When response_type is a dict mapping keys to title dicts, the accepted
+        elicitation will contain the selected key"""
 
     @overload
     async def elicit(
@@ -1000,12 +997,9 @@ class Context:
         *,
         response_title: str | None = None,
         response_description: str | None = None,
-    ) -> (
-        AcceptedElicitation[list[str]] | DeclinedElicitation | CancelledElicitation
-    ): ...
-
-    """When response_type is a list containing a list of strings (multi-select),
-    the accepted elicitation will contain a list of selected strings"""
+    ) -> AcceptedElicitation[list[str]] | DeclinedElicitation | CancelledElicitation:
+        """When response_type is a list containing a list of strings (multi-select),
+        the accepted elicitation will contain a list of selected strings"""
 
     @overload
     async def elicit(
@@ -1015,13 +1009,10 @@ class Context:
         *,
         response_title: str | None = None,
         response_description: str | None = None,
-    ) -> (
-        AcceptedElicitation[list[str]] | DeclinedElicitation | CancelledElicitation
-    ): ...
-
-    """When response_type is a list containing a dict mapping keys to title dicts
-    (multi-select with titles), the accepted elicitation will contain a list of
-    selected keys"""
+    ) -> AcceptedElicitation[list[str]] | DeclinedElicitation | CancelledElicitation:
+        """When response_type is a list containing a dict mapping keys to title dicts
+        (multi-select with titles), the accepted elicitation will contain a list of
+        selected keys"""
 
     async def elicit(
         self,
