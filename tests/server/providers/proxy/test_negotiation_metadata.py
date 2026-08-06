@@ -195,6 +195,13 @@ async def test_identity_policy_forwards_full_implementation(
             assert client.server_info.version == "9.8.7"
         else:
             assert client.server_info == UPSTREAM_INFO
+            result = client.session.initialize_result or client.session.discover_result
+            assert result is not None
+            if isinstance(result, mcp_types.InitializeResult):
+                assert mcp_types.SERVER_INFO_META_KEY not in (result.meta or {})
+            else:
+                assert result.meta is not None
+                assert result.meta[mcp_types.SERVER_INFO_META_KEY]["name"] == "upstream"
 
 
 @pytest.mark.parametrize("frontend_mode", ["legacy", "auto"])
