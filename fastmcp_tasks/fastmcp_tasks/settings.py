@@ -13,7 +13,7 @@ import os
 from datetime import timedelta
 from typing import Annotated
 
-from pydantic import Field
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Load the same dotenv source as core FastMCP settings, so a deployment that
@@ -127,6 +127,38 @@ class DocketSettings(BaseSettings):
 
 
 docket_settings = DocketSettings()
+
+
+class TasksSettings(BaseSettings):
+    """Settings for the task engine itself, as opposed to its Docket backend."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="FASTMCP_TASKS_",
+        env_file=_ENV_FILE,
+        extra="ignore",
+    )
+
+    encryption_key: Annotated[
+        SecretStr | None,
+        Field(
+            description=inspect.cleandoc(
+                """
+                Key used to encrypt task context snapshots at rest. The snapshot
+                carries the submitting caller's access token and HTTP headers,
+                and it is written to the Docket backend for the task's TTL.
+                Every server and worker sharing a task queue must set the same
+                key; a worker that cannot decrypt a snapshot fails the task
+                rather than running it as an anonymous caller. When unset, the
+                snapshot is stored as plaintext JSON. The Fernet key is derived
+                from this value with PBKDF2, so any non-empty string works, but
+                use at least 32 random characters.
+                """
+            ),
+        ),
+    ] = None
+
+
+tasks_settings = TasksSettings()
 
 
 class TasksClientSettings(BaseSettings):

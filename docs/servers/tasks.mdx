@@ -162,6 +162,7 @@ mcp.add_extension(TasksExtension(url="redis://localhost:6379/0", concurrency=20)
 | `FASTMCP_DOCKET_URL` | `memory://` | Backend URL (`memory://` or `redis://host:port/db`) |
 | `FASTMCP_DOCKET_NAME` | `fastmcp` | Queue name. Servers and workers sharing a name and URL share a queue. |
 | `FASTMCP_DOCKET_CONCURRENCY` | `10` | Maximum concurrent tasks per worker. |
+| `FASTMCP_TASKS_ENCRYPTION_KEY` | (unset) | Encrypts [task context snapshots at rest](#credentials-at-rest). Every server and worker sharing a queue must set the same key. |
 
 ## Backends
 
@@ -199,10 +200,10 @@ A background task runs long after the request that submitted it has ended, but i
 
 That snapshot lives in the backend for the task's TTL. With `memory://` it never leaves the process. With Redis or Valkey it is a stored value, and by default it is stored as plaintext JSON. A `rediss://` URL encrypts the connection, not the data the backend holds. Anyone who can read the backend can read the tokens.
 
-Set `FASTMCP_ENCRYPTION_KEY` to encrypt the snapshot before it is written:
+Set `FASTMCP_TASKS_ENCRYPTION_KEY` to encrypt the snapshot before it is written:
 
 ```bash
-export FASTMCP_ENCRYPTION_KEY=$(python -c "import secrets; print(secrets.token_urlsafe(32))")
+export FASTMCP_TASKS_ENCRYPTION_KEY=$(python -c "import secrets; print(secrets.token_urlsafe(32))")
 ```
 
 <Warning>

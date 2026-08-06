@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Annotated, Any, Literal
 
 from platformdirs import user_data_dir
-from pydantic import Field, SecretStr, field_validator
+from pydantic import Field, field_validator
 from pydantic_settings import (
     BaseSettings,
     SettingsConfigDict,
@@ -266,26 +266,6 @@ class Settings(BaseSettings):
             ),
         ),
     ] = False
-
-    encryption_key: Annotated[
-        SecretStr | None,
-        Field(
-            description=inspect.cleandoc(
-                """
-                Key used to encrypt sensitive FastMCP data at rest. Today this
-                protects the task-context snapshot, which carries the submitting
-                caller's access token and HTTP headers and is written to the
-                Docket backend for the task's TTL. Every server and worker
-                sharing a task queue must set the same key; a worker that cannot
-                decrypt a snapshot fails the task rather than running it as an
-                anonymous caller. When unset, the snapshot is stored as
-                plaintext JSON. The Fernet key is derived from this value with
-                PBKDF2, so any non-empty string works, but use at least 32
-                random characters.
-                """
-            ),
-        ),
-    ] = None
 
     server_dependencies: list[str] = Field(
         default_factory=list,

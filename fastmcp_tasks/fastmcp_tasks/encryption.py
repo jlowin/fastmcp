@@ -5,9 +5,9 @@ inbound HTTP header, and it lives in the Docket backend for the task's TTL. A
 distributed backend therefore keeps bearer credentials in Redis, where a
 ``rediss://`` URL protects the wire but not the stored value.
 
-Setting ``FASTMCP_ENCRYPTION_KEY`` turns the stored snapshot into a Fernet token.
-The same key must reach every server and worker on the queue, because the process
-that restores a snapshot is rarely the one that captured it.
+Setting ``FASTMCP_TASKS_ENCRYPTION_KEY`` turns the stored snapshot into a
+Fernet token. The same key must reach every server and worker on the queue,
+because the process that restores a snapshot is rarely the one that captured it.
 """
 
 from __future__ import annotations
@@ -16,13 +16,13 @@ from abc import ABC, abstractmethod
 from functools import lru_cache
 from typing import ClassVar
 
-import fastmcp
 from fastmcp.utilities.logging import get_logger
+from fastmcp_tasks.settings import tasks_settings
 
 logger = get_logger(__name__)
 
-# Domain separation: FASTMCP_ENCRYPTION_KEY is meant to serve other at-rest uses
-# over time, and each derives its own Fernet key from this shared material.
+# Domain separation: FASTMCP_TASKS_ENCRYPTION_KEY may protect other task-owned
+# state over time, and each use derives its own Fernet key from this material.
 _SNAPSHOT_KEY_SALT = "fastmcp-task-snapshot-key"
 
 # Below this, warn: the keyspace is small enough that the offline attacker this
@@ -86,7 +86,7 @@ class PlaintextCodec(SnapshotCodec):
         if text.startswith(_FERNET_PREFIX):
             raise SnapshotDecryptionError(
                 "The stored task snapshot is encrypted, but this process has "
-                "no FASTMCP_ENCRYPTION_KEY configured."
+                "no FASTMCP_TASKS_ENCRYPTION_KEY configured."
             )
         return text
 
@@ -109,7 +109,7 @@ class EncryptedCodec(SnapshotCodec):
 
         if not material:
             raise ValueError(
-                "FASTMCP_ENCRYPTION_KEY must not be empty. Unset it to store "
+                "FASTMCP_TASKS_ENCRYPTION_KEY must not be empty. Unset it to store "
                 "task snapshots as plaintext, or set at least 32 random "
                 "characters."
             )
@@ -141,7 +141,7 @@ class EncryptedCodec(SnapshotCodec):
         except InvalidToken as e:
             raise SnapshotDecryptionError(
                 "The stored task snapshot could not be decrypted with the "
-                "configured FASTMCP_ENCRYPTION_KEY."
+                "configured FASTMCP_TASKS_ENCRYPTION_KEY."
             ) from e
 
 
@@ -160,7 +160,7 @@ def _codec_for(material: str) -> EncryptedCodec:
 
 def snapshot_codec() -> SnapshotCodec:
     """The codec for the configured key; the plaintext codec when none is set."""
-    key = fastmcp.settings.encryption_key
+    key = tasks_settings.encryption_key
     if key is None:
         return _PLAINTEXT_CODEC
     return _codec_for(key.get_secret_value())

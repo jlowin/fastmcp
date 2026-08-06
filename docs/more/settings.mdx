@@ -81,15 +81,14 @@ These control how the server listens when running with an HTTP transport.
 
 ## Tasks (Docket)
 
-Task settings (the `FASTMCP_DOCKET_` variables) moved to the optional `fastmcp-tasks` package. See [server tasks](/servers/tasks) for configuration.
+Task settings (the `FASTMCP_DOCKET_` and `FASTMCP_TASKS_` variables) live in the optional `fastmcp-tasks` package. See [server tasks](/servers/tasks) for configuration, including `FASTMCP_TASKS_ENCRYPTION_KEY` for [encrypting task snapshots at rest](/servers/tasks#credentials-at-rest).
 
 ## Security
 
-These control encryption of FastMCP's data at rest, and its SSRF protection for the outbound fetches it makes during authentication (OAuth client metadata and JWKS).
+These control FastMCP's SSRF protection for the outbound fetches it makes during authentication (OAuth client metadata and JWKS).
 
 | Environment Variable | Type | Default | Description |
 |---|---|---|---|
-| `FASTMCP_ENCRYPTION_KEY` | `str` | None | Key used to encrypt sensitive FastMCP data at rest. Today this protects the [task context snapshot](/servers/tasks#credentials-at-rest), which carries the submitting caller's access token and HTTP headers and lives in the Docket backend for the task's TTL. Every server and worker sharing a task queue must set the same key. When unset, the snapshot is stored as plaintext JSON. |
 | `FASTMCP_SSRF_TRUST_PROXY` | `bool` | `false` | Trust an outbound HTTP proxy for SSRF-protected fetches. When `false`, FastMCP resolves the target hostname itself and refuses to connect if it maps to a private, loopback, link-local, or reserved IP. When `true`, FastMCP routes auth metadata and JWKS fetches through the configured `HTTPS_PROXY`/`ALL_PROXY` and does not honor `NO_PROXY`; if no proxy is configured the fetch is refused. |
 
 By default, FastMCP protects its OAuth and JWKS fetches against [SSRF](https://owasp.org/www-community/attacks/Server_Side_Request_Forgery) by resolving the target hostname, rejecting any address that maps to a private, loopback, link-local, or reserved IP, and then pinning the connection to that validated IP.

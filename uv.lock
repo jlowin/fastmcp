@@ -1009,7 +1009,6 @@ openai = [
 ]
 server = [
     { name = "authlib" },
-    { name = "cryptography" },
     { name = "cyclopts" },
     { name = "exceptiongroup" },
     { name = "griffelib" },
@@ -1038,7 +1037,6 @@ requires-dist = [
     { name = "authlib", marker = "extra == 'client'", specifier = ">=1.6.11" },
     { name = "authlib", marker = "extra == 'server'", specifier = ">=1.6.11" },
     { name = "azure-identity", marker = "extra == 'azure'", specifier = ">=1.16.0" },
-    { name = "cryptography", marker = "extra == 'server'", specifier = ">=43.0.0" },
     { name = "cyclopts", marker = "extra == 'server'", specifier = ">=4.0.0" },
     { name = "exceptiongroup", marker = "extra == 'client'", specifier = ">=1.2.2" },
     { name = "exceptiongroup", marker = "extra == 'mcp'", specifier = ">=1.2.2" },
@@ -1091,6 +1089,7 @@ name = "fastmcp-tasks"
 source = { editable = "fastmcp_tasks" }
 dependencies = [
     { name = "burner-redis", marker = "sys_platform == 'win32'" },
+    { name = "cryptography" },
     { name = "fastmcp-slim", extra = ["server"] },
     { name = "pydocket" },
 ]
@@ -1098,6 +1097,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "burner-redis", marker = "sys_platform == 'win32'", specifier = "<0.1.7" },
+    { name = "cryptography", specifier = ">=43.0.0" },
     { name = "fastmcp-slim", extras = ["server"], editable = "fastmcp_slim" },
     { name = "pydocket", specifier = ">=0.20.0" },
 ]

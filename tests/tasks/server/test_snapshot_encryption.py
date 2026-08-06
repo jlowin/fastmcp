@@ -3,7 +3,7 @@
 The snapshot carries the submitting caller's access token and every inbound HTTP
 header, and it is written to the Docket backend for the task's TTL. With a
 distributed backend those credentials sit in Redis where the backend's operators
-can read them. Setting ``FASTMCP_ENCRYPTION_KEY`` makes the snapshot a Fernet
+can read them. Setting ``FASTMCP_TASKS_ENCRYPTION_KEY`` makes the snapshot a Fernet
 token instead, and makes a worker that cannot decrypt one fail the task rather
 than run it as an anonymous caller.
 """
@@ -25,9 +25,9 @@ from fastmcp_tasks.encryption import (
     snapshot_codec,
 )
 from fastmcp_tasks.keys import task_redis_prefix
+from fastmcp_tasks.settings import TasksSettings, tasks_settings
 from pydantic import SecretStr
 
-import fastmcp
 from fastmcp import FastMCP
 from fastmcp.server.dependencies import get_access_token
 from fastmcp_tasks import TasksExtension
@@ -45,14 +45,14 @@ OTHER_KEY = "a-different-test-encryption-key-entirely"
 
 @pytest.fixture
 def encryption_key() -> Iterator[str]:
-    """Configure the global encryption key for the duration of a test."""
+    """Configure the tasks encryption key for the duration of a test."""
     clear_codec_cache()
-    previous = fastmcp.settings.encryption_key
-    fastmcp.settings.encryption_key = SecretStr(KEY)
+    previous = tasks_settings.encryption_key
+    tasks_settings.encryption_key = SecretStr(KEY)
     try:
         yield KEY
     finally:
-        fastmcp.settings.encryption_key = previous
+        tasks_settings.encryption_key = previous
         clear_codec_cache()
 
 
@@ -60,12 +60,12 @@ def encryption_key() -> Iterator[str]:
 def no_encryption_key() -> Iterator[None]:
     """Guarantee no key is configured, whatever the ambient environment holds."""
     clear_codec_cache()
-    previous = fastmcp.settings.encryption_key
-    fastmcp.settings.encryption_key = None
+    previous = tasks_settings.encryption_key
+    tasks_settings.encryption_key = None
     try:
         yield
     finally:
-        fastmcp.settings.encryption_key = previous
+        tasks_settings.encryption_key = previous
         clear_codec_cache()
 
 
@@ -136,8 +136,30 @@ class TestSnapshotCodec:
         anonymous run, defeating the submitter's fail-closed configuration.
         """
         encrypted = EncryptedCodec(KEY).encode('{"a": 1}')
-        with pytest.raises(SnapshotDecryptionError, match="no FASTMCP_ENCRYPTION_KEY"):
+        with pytest.raises(
+            SnapshotDecryptionError, match="no FASTMCP_TASKS_ENCRYPTION_KEY"
+        ):
             PlaintextCodec().decode(encrypted)
+
+
+class TestTasksSettings:
+    def test_encryption_key_defaults_to_none(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.delenv("FASTMCP_TASKS_ENCRYPTION_KEY", raising=False)
+
+        assert TasksSettings().encryption_key is None
+
+    def test_encryption_key_env_var(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setenv("FASTMCP_TASKS_ENCRYPTION_KEY", "s3kr1t-material")
+
+        key = TasksSettings().encryption_key
+        assert key is not None
+        assert key.get_secret_value() == "s3kr1t-material"
+
+    def test_encryption_key_is_not_printable(self, monkeypatch: pytest.MonkeyPatch):
+        """A settings dump must never carry the key into a log."""
+        monkeypatch.setenv("FASTMCP_TASKS_ENCRYPTION_KEY", "s3kr1t-material")
+
+        assert "s3kr1t-material" not in repr(TasksSettings())
 
 
 class TestSnapshotSerialization:
@@ -265,7 +287,7 @@ class TestEncryptedSnapshotRoundTrip:
 
         assert final.status == "failed"
         assert final.error is not None
-        assert "FASTMCP_ENCRYPTION_KEY" in caplog.text
+        assert "FASTMCP_TASKS_ENCRYPTION_KEY" in caplog.text
 
     async def test_missing_snapshot_fails_the_task(
         self, echo_token_server: FastMCP, encryption_key: str
@@ -332,7 +354,7 @@ class TestEncryptedSnapshotRoundTrip:
             created = await submit_task(
                 echo_token_server, "whoami", {}, access_token=token
             )
-            fastmcp.settings.encryption_key = None
+            tasks_settings.encryption_key = None
             clear_codec_cache()
             final = await wait_for_task(
                 echo_token_server,

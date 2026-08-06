@@ -251,7 +251,7 @@ class TaskContextSnapshot:
     ) -> None:
         """Store this snapshot as a single Redis key.
 
-        The stored value is encrypted when a ``FASTMCP_ENCRYPTION_KEY`` is
+        The stored value is encrypted when a ``FASTMCP_TASKS_ENCRYPTION_KEY`` is
         configured: this payload carries the caller's bearer token and headers,
         and a distributed backend keeps it where the backend's operators can
         read it (#4747).
@@ -374,8 +374,9 @@ async def restore_task_snapshot(key: str = TaskKey()) -> None:
         # workers is the likely reason and is not guessable from the wire error.
         _logger.error(
             "Failed to decrypt the task snapshot for %s. Every server and worker "
-            "on this queue must share the same FASTMCP_ENCRYPTION_KEY. The task "
-            "will fail rather than run without the submitting caller's identity.",
+            "on this queue must share the same FASTMCP_TASKS_ENCRYPTION_KEY. The "
+            "task will fail rather than run without the submitting caller's "
+            "identity.",
             key,
         )
         raise
