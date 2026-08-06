@@ -35,6 +35,7 @@ from fastmcp.tools.base import (
     InputRequiredToolResult,
     Tool,
     ToolResult,
+    _serialize_to_jsonable,
 )
 from fastmcp.tools.function_parsing import ParsedFunction, _is_object_schema
 from fastmcp.utilities.async_utils import (
@@ -213,6 +214,10 @@ class FunctionTool(Tool):
             )
         ),
     ] = True
+
+    def _serialize_output(self, raw_value: Any) -> Any:
+        """Serialize using the return annotation that produced the output schema."""
+        return _serialize_to_jsonable(raw_value, self.return_type)
 
     @classmethod
     def from_function(

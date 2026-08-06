@@ -309,10 +309,15 @@ class TransformedTool(Tool):
 
     parent_tool: SkipJsonSchema[Tool]
     fn: SkipJsonSchema[Callable[..., Any]]
+    return_type: Annotated[SkipJsonSchema[Any], Field(exclude=True)] = None
     forwarding_fn: SkipJsonSchema[
         Callable[..., Any]
     ]  # Always present, handles arg transformation
     transform_args: dict[str, ArgTransform]
+
+    def _serialize_output(self, raw_value: Any) -> Any:
+        """Serialize using the custom transform's declared return type."""
+        return _serialize_to_jsonable(raw_value, self.return_type)
 
     async def run(self, arguments: dict[str, Any]) -> ToolResult:
         """Run the tool with context set for forward() functions.
@@ -401,14 +406,14 @@ class TransformedTool(Tool):
             # First handle structured content based on output schema, if any
             if self.output_schema is not None:
                 if self.output_schema.get("x-fastmcp-wrap-result"):
-                    structured_output = {"result": _serialize_to_jsonable(result)}
+                    structured_output = {"result": self._serialize_output(result)}
                 else:
-                    structured_output = result
+                    structured_output = self._serialize_output(result)
             # If no output schema, try to serialize the result. If it is a dict, use
             # it as structured content. If it is not a dict, ignore it.
             if structured_output is None:
                 try:
-                    structured_output = _serialize_to_jsonable(result)
+                    structured_output = self._serialize_output(result)
                     if not isinstance(structured_output, dict):
                         structured_output = None
                 except Exception:
@@ -631,6 +636,7 @@ class TransformedTool(Tool):
 
         transformed_tool = cls(
             fn=final_fn,
+            return_type=parsed_fn.return_type if parsed_fn is not None else None,
             forwarding_fn=forwarding_fn,
             parent_tool=tool,
             name=final_name,

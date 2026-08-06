@@ -4,7 +4,7 @@ from typing import Annotated, Any
 
 import pytest
 from mcp_types import CallToolResult, TextContent
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, with_config
 from pydantic.dataclasses import dataclass as pydantic_dataclass
 from typing_extensions import TypedDict
 
@@ -480,6 +480,53 @@ class TestSerializeByAlias:
             "dataValue"
         }
         assert result.structured_content == {"dataValue": "data"}
+
+    async def test_configured_standard_dataclass_can_enable_aliases(self):
+        """A configured stdlib dataclass uses aliases in schema and output."""
+
+        @with_config(ConfigDict(serialize_by_alias=True))
+        @dataclass
+        class Output:
+            value: Annotated[str, Field(serialization_alias="dataValue")]
+
+        mcp = FastMCP()
+
+        @mcp.tool
+        def get_output() -> Output:
+            return Output(value="data")
+
+        async with Client(mcp) as client:
+            tools = {tool.name: tool for tool in await client.list_tools()}
+            result = await client.call_tool("get_output", {})
+
+        assert set(tools["get_output"].output_schema["properties"]) == {  # type: ignore[index]
+            "dataValue"
+        }
+        assert result.structured_content == {"dataValue": "data"}
+
+    async def test_nested_configured_standard_dataclass_can_enable_aliases(self):
+        """Typed containers preserve a nested dataclass's alias configuration."""
+
+        @with_config(ConfigDict(serialize_by_alias=True))
+        @dataclass
+        class Output:
+            value: Annotated[str, Field(serialization_alias="dataValue")]
+
+        mcp = FastMCP()
+
+        @mcp.tool
+        def get_output() -> list[Output]:
+            return [Output(value="data")]
+
+        async with Client(mcp) as client:
+            tools = {tool.name: tool for tool in await client.list_tools()}
+            result = await client.call_tool("get_output", {})
+
+        item_schema = tools["get_output"].output_schema["properties"]["result"][  # type: ignore[index]
+            "items"
+        ]
+        assert set(item_schema["properties"]) == {"dataValue"}
+        assert result.structured_content == {"result": [{"dataValue": "data"}]}
 
     async def test_typed_dict_uses_pydantic_alias_default(self):
         """A TypedDict schema uses the field names emitted by Pydantic."""

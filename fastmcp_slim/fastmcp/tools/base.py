@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 from collections.abc import Callable
 from typing import (
     TYPE_CHECKING,
@@ -38,6 +39,7 @@ from fastmcp.utilities.types import (
     Image,
     NotSet,
     NotSetT,
+    get_cached_typeadapter,
 )
 
 if TYPE_CHECKING:
@@ -65,9 +67,20 @@ def default_serializer(data: Any) -> str:
     return _JSONABLE_ADAPTER.dump_json(data, fallback=str).decode()
 
 
-def _serialize_to_jsonable(data: Any) -> Any:
+def _serialize_to_jsonable(data: Any, annotation: Any = Any) -> Any:
     """Serialize through Pydantic while preserving each model's configuration."""
-    return _JSONABLE_ADAPTER.dump_python(data, mode="json")
+    if (
+        annotation is inspect.Signature.empty
+        or annotation is None
+        or annotation is Any
+        or annotation is ...
+        or isinstance(annotation, str)
+    ):
+        adapter = _JSONABLE_ADAPTER
+    else:
+        adapter = get_cached_typeadapter(annotation)
+
+    return adapter.dump_python(data, mode="json")
 
 
 class ToolResult(BaseModel):
@@ -341,6 +354,10 @@ class Tool(FastMCPComponent):
         """
         raise NotImplementedError("Subclasses must implement run()")
 
+    def _serialize_output(self, raw_value: Any) -> Any:
+        """Serialize a tool result to JSON-compatible Python values."""
+        return _serialize_to_jsonable(raw_value)
+
     def convert_result(self, raw_value: Any) -> ToolResult:
         """Convert a raw result to ToolResult.
 
@@ -382,7 +399,7 @@ class Tool(FastMCPComponent):
             return ToolResult(content=content)
 
         try:
-            structured = _serialize_to_jsonable(raw_value)
+            structured = self._serialize_output(raw_value)
         except (pydantic_core.PydanticSerializationError, UnicodeDecodeError):
             return ToolResult(content=content)
 
