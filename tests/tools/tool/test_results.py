@@ -439,6 +439,131 @@ class TestSerializeByAlias:
             "aliased": {"aliasedValue": "aliased"},
         }
 
+    async def test_conflicting_structural_alias_contexts_use_permissive_schema(self):
+        """A reused structural type cannot have one schema for two alias modes."""
+
+        @dataclass
+        class Child:
+            value: Annotated[str, Field(serialization_alias="dataValue")]
+
+        class AliasedParent(BaseModel):
+            model_config = ConfigDict(serialize_by_alias=True)
+            child: Child
+
+        class NamedParent(BaseModel):
+            model_config = ConfigDict(serialize_by_alias=False)
+            child: Child
+
+        class Output(BaseModel):
+            aliased: AliasedParent
+            named: NamedParent
+
+        mcp = FastMCP()
+
+        @mcp.tool
+        def get_output() -> Output:
+            return Output(
+                aliased=AliasedParent(child=Child(value="aliased")),
+                named=NamedParent(child=Child(value="named")),
+            )
+
+        async with Client(mcp) as client:
+            tools = {tool.name: tool for tool in await client.list_tools()}
+            result = await client.call_tool("get_output", {})
+
+        assert tools["get_output"].output_schema == {"type": "object"}
+        assert result.structured_content == {
+            "aliased": {"child": {"dataValue": "aliased"}},
+            "named": {"child": {"value": "named"}},
+        }
+
+    async def test_conflicting_typed_dict_alias_contexts_use_permissive_schema(self):
+        """TypedDict aliases can also depend on their containing model."""
+
+        class Child(TypedDict):
+            value: Annotated[str, Field(serialization_alias="dataValue")]
+
+        class AliasedParent(BaseModel):
+            model_config = ConfigDict(serialize_by_alias=True)
+            child: Child
+
+        class NamedParent(BaseModel):
+            model_config = ConfigDict(serialize_by_alias=False)
+            child: Child
+
+        class Output(BaseModel):
+            aliased: AliasedParent
+            named: NamedParent
+
+        mcp = FastMCP()
+
+        @mcp.tool
+        def get_output() -> list[Output]:
+            return [
+                Output(
+                    aliased=AliasedParent(child={"value": "aliased"}),
+                    named=NamedParent(child={"value": "named"}),
+                )
+            ]
+
+        async with Client(mcp) as client:
+            tools = {tool.name: tool for tool in await client.list_tools()}
+            result = await client.call_tool("get_output", {})
+
+        assert tools["get_output"].output_schema == {
+            "type": "object",
+            "properties": {"result": {}},
+            "required": ["result"],
+            "x-fastmcp-wrap-result": True,
+        }
+        assert result.structured_content == {
+            "result": [
+                {
+                    "aliased": {"child": {"dataValue": "aliased"}},
+                    "named": {"child": {"value": "named"}},
+                }
+            ]
+        }
+
+    async def test_configured_dataclass_has_one_alias_context(self):
+        """A dataclass's own alias config remains schema-safe when reused."""
+
+        @with_config(ConfigDict(serialize_by_alias=True))
+        @dataclass
+        class Child:
+            value: Annotated[str, Field(serialization_alias="dataValue")]
+
+        class AliasedParent(BaseModel):
+            model_config = ConfigDict(serialize_by_alias=True)
+            child: Child
+
+        class NamedParent(BaseModel):
+            model_config = ConfigDict(serialize_by_alias=False)
+            child: Child
+
+        class Output(BaseModel):
+            aliased: AliasedParent
+            named: NamedParent
+
+        mcp = FastMCP()
+
+        @mcp.tool
+        def get_output() -> Output:
+            return Output(
+                aliased=AliasedParent(child=Child(value="aliased")),
+                named=NamedParent(child=Child(value="named")),
+            )
+
+        async with Client(mcp) as client:
+            tools = {tool.name: tool for tool in await client.list_tools()}
+            result = await client.call_tool("get_output", {})
+
+        assert tools["get_output"].output_schema is not None
+        assert result.structured_content == {
+            "aliased": {"child": {"dataValue": "aliased"}},
+            "named": {"child": {"dataValue": "named"}},
+        }
+
     async def test_dataclass_uses_pydantic_alias_default(self):
         """A dataclass schema uses field names when aliases are not enabled."""
 
