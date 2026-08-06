@@ -9,6 +9,7 @@ from mcp import MCPError
 from mcp_types.version import MODERN_PROTOCOL_VERSIONS
 
 from fastmcp import Client, FastMCP
+from fastmcp.client.logging import LogMessage
 from fastmcp.client.transports import StreamableHttpTransport
 from fastmcp.server import create_proxy
 from fastmcp.server.middleware import CallNext, Middleware, MiddlewareContext
@@ -220,6 +221,85 @@ async def test_frontend_values_take_precedence(frontend_mode: str):
         assert result.meta["com.example/shared"] == "frontend"
         assert result.meta["com.example/frontend"] == {"enabled": True}
         assert result.meta["com.example/upstream"] == {"enabled": True}
+
+
+async def test_forwards_backend_logs_while_reading_metadata():
+    messages: list[str] = []
+
+    class LogOnInitialize(Middleware):
+        async def on_initialize(
+            self,
+            context: MiddlewareContext[mcp_types.InitializeRequest],
+            call_next: CallNext[
+                mcp_types.InitializeRequest, mcp_types.InitializeResult | None
+            ],
+        ) -> mcp_types.InitializeResult | None:
+            result = await call_next(context)
+            assert context.fastmcp_context is not None
+            await context.fastmcp_context.log("metadata connection")
+            return result
+
+    async def capture_log(message: LogMessage) -> None:
+        messages.append(message.data["msg"])
+
+    upstream = FastMCP("upstream", middleware=[LogOnInitialize()])
+    proxy = create_proxy(upstream)
+
+    async with Client(proxy, mode="legacy", log_handler=capture_log):
+        pass
+
+    assert messages == ["metadata connection"]
+
+
+async def test_pinned_client_uses_prior_discover_metadata():
+    prior_info = mcp_types.Implementation(name="prior", version="1.0")
+    prior = mcp_types.DiscoverResult(
+        supported_versions=[MODERN_PROTOCOL_VERSIONS[0]],
+        capabilities=mcp_types.ServerCapabilities(),
+        instructions="prior instructions",
+        meta={
+            mcp_types.SERVER_INFO_META_KEY: prior_info.model_dump(
+                by_alias=True, mode="json"
+            ),
+            "com.example/prior": True,
+        },
+    )
+    provider = ProxyProvider(
+        lambda: ProxyClient(
+            make_upstream(),
+            mode=MODERN_PROTOCOL_VERSIONS[0],
+            prior_discover=prior,
+        )
+    )
+    gateway = FastMCP(
+        "gateway",
+        providers=[provider],
+        middleware=[ProxyMetadataMiddleware(provider, identity="upstream")],
+    )
+
+    async with Client(gateway, mode="auto") as client:
+        result = client.session.discover_result
+        assert result is not None
+        assert client.instructions == "prior instructions"
+        assert client.server_info == prior_info
+        assert result.meta is not None
+        assert result.meta["com.example/prior"] is True
+
+
+async def test_client_factory_errors_are_not_swallowed():
+    def broken_factory() -> Client:
+        raise RuntimeError("broken client factory")
+
+    provider = ProxyProvider(broken_factory)
+    gateway = FastMCP(
+        "gateway",
+        providers=[provider],
+        middleware=[ProxyMetadataMiddleware(provider)],
+    )
+
+    with pytest.raises(MCPError):
+        async with Client(gateway, mode="legacy"):
+            pass
 
 
 @pytest.mark.parametrize("frontend_mode", ["legacy", "auto"])

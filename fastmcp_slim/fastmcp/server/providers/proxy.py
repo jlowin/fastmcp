@@ -1065,22 +1065,31 @@ class ProxyMetadataMiddleware(Middleware):
         self.client_factory = provider.client_factory
         self.identity = identity
 
-    async def _read_upstream(self) -> _UpstreamServerMetadata | None:
+    async def _read_upstream(
+        self, context: Context | None
+    ) -> _UpstreamServerMetadata | None:
+        client = self.client_factory()
+        if inspect.isawaitable(client):
+            client = cast(Client, await client)
+
+        connected = client.is_connected()
+        # A pinned modern client without a prior discovery result adopts a
+        # synthesized result without contacting the server. Probe with a copy so
+        # metadata comes from the backend without changing the configured mode.
+        if (
+            not connected
+            and client.mode in MODERN_PROTOCOL_VERSIONS
+            and client._prior_discover is None
+        ):
+            client = client.new()
+            client.mode = "auto"
+
+        if context is not None:
+            _stash_proxy_request_context(client, context)
+        if connected:
+            return _UpstreamServerMetadata.from_client(client)
+
         try:
-            client = self.client_factory()
-            if inspect.isawaitable(client):
-                client = cast(Client, await client)
-
-            if client.is_connected():
-                return _UpstreamServerMetadata.from_client(client)
-
-            # A pinned modern client adopts a synthesized DiscoverResult without
-            # contacting the server. Probe with a copy so metadata comes from the
-            # backend without changing the factory's configured mode.
-            if client.mode in MODERN_PROTOCOL_VERSIONS:
-                client = client.new()
-                client.mode = "auto"
-
             async with client:
                 return _UpstreamServerMetadata.from_client(client)
         except (MCPError, *_PROXY_TRANSPORT_ERRORS) as error:
@@ -1122,7 +1131,7 @@ class ProxyMetadataMiddleware(Middleware):
         result = await call_next(context)
         if result is None:
             return None
-        upstream = await self._read_upstream()
+        upstream = await self._read_upstream(context.fastmcp_context)
         if upstream is None:
             return result
         return result.model_copy(update=self._updates(result, upstream))
@@ -1133,7 +1142,7 @@ class ProxyMetadataMiddleware(Middleware):
         call_next: CallNext[mcp_types.DiscoverRequest, mcp_types.DiscoverResult],
     ) -> mcp_types.DiscoverResult:
         result = await call_next(context)
-        upstream = await self._read_upstream()
+        upstream = await self._read_upstream(context.fastmcp_context)
         if upstream is None:
             return result
         return result.model_copy(update=self._updates(result, upstream))
