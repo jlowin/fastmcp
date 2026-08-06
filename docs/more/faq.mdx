@@ -22,15 +22,23 @@ The client probes `server/discover` and adopts the modern protocol when the serv
 
 ## What are the two protocol eras, and which one does my server speak?
 
-Both. A FastMCP server serves every era from one deployment and one URL, and the SDK negotiates per connection — the client picks, not the server.
+Both. A FastMCP 4 server supports the handshake revisions `2024-11-05`, `2025-03-26`, `2025-06-18`, and `2025-11-25`, plus the modern `2026-07-28` protocol. It serves all of them from one deployment and one URL, and the SDK negotiates per connection — the client picks, not the server.
 
 The *handshake* era (`2025-11-25` and earlier) opens each connection with `initialize` and holds a session, which gives the server a back-channel it can push requests down. The *modern* era (`2026-07-28`) is sessionless: the client learns what the server offers through `server/discover`, every request stands alone, and there is no back-channel. Inside a tool, `ctx.request_context.protocol_version` tells you which era the current call arrived on; on the client, `client.protocol_version` reports it after connecting.
+
+A protocol version establishes the wire format, while capabilities describe which optional operations a particular server provides. The capabilities returned by `server/discover` or `initialize` are therefore the authoritative way for a client to determine what is available.
 
 ## Can FastMCP 4 talk to older clients and servers?
 
 Yes, in both directions, with no configuration. A FastMCP 4 server answers a handshake-era client and a modern one from the same process: the old client sends `initialize` and gets a session id, the modern client discovers and stays stateless.
 
 A FastMCP 4 client is equally happy against an old server, because `mode="auto"` falls back to the handshake when discovery finds no modern peer. The client-side handlers for server-initiated capabilities are all still there too — passing `sampling_handler=` or `roots=` answers a legacy server's requests exactly as before, which is what a modern client needs in order to interoperate. See [client sampling](/clients/sampling) and [client roots](/clients/roots).
+
+## How does FastMCP verify protocol conformance?
+
+FastMCP runs the [official MCP conformance suite](https://github.com/modelcontextprotocol/conformance) in CI against a pinned suite release. A failing scenario for a released capability that FastMCP advertises as supported is treated as a regression.
+
+The suite's `all` mode also exercises draft, pending, retired, and deliberately unsupported capabilities, so its raw pass count is broader than FastMCP's support contract. Known exceptions are recorded in [`expected-failures.yml`](https://github.com/PrefectHQ/fastmcp/blob/main/tests/conformance/expected-failures.yml) with their rationale, and new upstream scenarios arrive through deliberate suite-version updates rather than silently changing CI.
 
 ## When should I pin `mode="legacy"`?
 
