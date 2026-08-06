@@ -4,6 +4,9 @@ from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
 import pytest
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed448 import Ed448PrivateKey
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from joserfc import jwk as jose_jwk
 from joserfc import jwt
 from joserfc.jws import JWSRegistry
@@ -79,6 +82,49 @@ class SymmetricKeyHelper:
         token = jwt.encode(header, payload, signing_key, algorithms=[algorithm])
 
         return token
+
+
+def create_okp_key_pair(
+    private_key: Ed25519PrivateKey | Ed448PrivateKey,
+) -> tuple[str, str]:
+    """Serialize an EdDSA key pair as PEM strings."""
+    private_pem = private_key.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption(),
+    ).decode()
+    public_pem = (
+        private_key.public_key()
+        .public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo,
+        )
+        .decode()
+    )
+    return private_pem, public_pem
+
+
+def create_okp_token(
+    private_key: str,
+    algorithm: str,
+    *,
+    kid: str | None = None,
+) -> str:
+    """Create a JWT signed by an OKP key."""
+    header = {"alg": algorithm}
+    if kid is not None:
+        header["kid"] = kid
+    return jwt.encode(
+        header,
+        {
+            "sub": "test-user",
+            "iss": "https://test.example.com",
+            "aud": "https://api.example.com",
+            "exp": int(time.time()) + 3600,
+        },
+        jose_jwk.import_key(private_key, "OKP"),
+        algorithms=[algorithm],
+    )
 
 
 @pytest.fixture(scope="module")
@@ -485,6 +531,58 @@ class TestSymmetricKeyJWT:
         assert access_token is None
 
 
+class TestEdDSAJWT:
+    """Tests for JWT verification using Edwards-curve keys."""
+
+    @pytest.mark.parametrize("algorithm", ["Ed25519", "Ed448"])
+    async def test_static_public_key(self, algorithm: str):
+        """Fully specified EdDSA algorithms verify with a static public key."""
+        if algorithm == "Ed25519":
+            private_key = Ed25519PrivateKey.generate()
+        else:
+            private_key = Ed448PrivateKey.generate()
+        private_pem, public_pem = create_okp_key_pair(private_key)
+        verifier = JWTVerifier(
+            public_key=public_pem,
+            issuer="https://test.example.com",
+            audience="https://api.example.com",
+            algorithm=algorithm,
+        )
+
+        access_token = await verifier.load_access_token(
+            create_okp_token(private_pem, algorithm)
+        )
+
+        assert access_token is not None
+        assert access_token.client_id == "test-user"
+
+    @pytest.mark.filterwarnings(
+        "ignore:EdDSA is deprecated via RFC 9864:joserfc.errors.SecurityWarning"
+    )
+    async def test_legacy_eddsa_jwks(
+        self,
+        httpx_mock: HTTPXMock,
+    ):
+        """Legacy EdDSA tokens verify against an Ed25519 JWKS entry."""
+        private_pem, public_pem = create_okp_key_pair(Ed25519PrivateKey.generate())
+        public_jwk = jose_jwk.import_key(public_pem, "OKP").as_dict()
+        public_jwk.update(kid="ed25519-key", alg="EdDSA", use="sig")
+        httpx_mock.add_response(json={"keys": [public_jwk]})
+        verifier = JWTVerifier(
+            jwks_uri="https://test.example.com/.well-known/jwks.json",
+            issuer="https://test.example.com",
+            audience="https://api.example.com",
+            algorithm="EdDSA",
+        )
+
+        access_token = await verifier.load_access_token(
+            create_okp_token(private_pem, "EdDSA", kid="ed25519-key")
+        )
+
+        assert access_token is not None
+        assert access_token.client_id == "test-user"
+
+
 def _create_token_without_sub(
     rsa_key_pair: RSAKeyPair,
     *,
@@ -662,7 +760,7 @@ class TestBearerTokenJWKS:
         assert access_token.claims.get("iss") == issuer
         assert access_token.claims.get("aud") == audience
 
-    async def test_jwks_skips_unsupported_key_types(
+    async def test_jwks_skips_unusable_keys(
         self,
         rsa_key_pair: RSAKeyPair,
         jwks_provider: JWTVerifier,
@@ -670,28 +768,19 @@ class TestBearerTokenJWKS:
         httpx_mock: HTTPXMock,
         mock_dns,
     ):
-        """An unsupported key type in the JWKS (e.g. OKP/Ed25519) must be
-        skipped, not poison the whole key set - #4515.
-
-        Some authorization servers (e.g. Rauthy, Ory Hydra) publish an
-        Ed25519 key alongside RSA keys; tokens signed by the RSA keys must
-        still verify.
-        """
-        okp_key = cast(
+        """An unusable key must not poison the whole key set - #4515."""
+        malformed_key = cast(
             "JWKData",
             {
-                "kty": "OKP",
-                "crv": "Ed25519",
-                "kid": "ed25519-key",
-                "alg": "EdDSA",
+                "kty": "RSA",
+                "kid": "malformed-key",
                 "use": "sig",
-                "x": "11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo",
             },
         )
         mock_jwks_data["keys"][0]["kid"] = "test-key-1"
-        # Unsupported key FIRST, so an unguarded conversion loop would
+        # Malformed key FIRST, so an unguarded conversion loop would
         # abort before reaching the RSA key the token needs
-        mock_jwks_data["keys"].insert(0, okp_key)
+        mock_jwks_data["keys"].insert(0, malformed_key)
         httpx_mock.add_response(json=mock_jwks_data)
 
         token = rsa_key_pair.create_token(
@@ -705,37 +794,60 @@ class TestBearerTokenJWKS:
         assert access_token is not None
         assert access_token.client_id == "test-user"
 
-    async def test_jwks_with_only_unsupported_keys_rejects_cleanly(
+    async def test_jwks_ignores_other_algorithm_key_types_without_kid(
+        self,
+        rsa_key_pair: RSAKeyPair,
+        jwks_provider: JWTVerifier,
+        mock_jwks_data: JWKSData,
+        httpx_mock: HTTPXMock,
+        mock_dns,
+    ):
+        """Unrelated key types do not make a no-kid lookup ambiguous."""
+        _, public_pem = create_okp_key_pair(Ed25519PrivateKey.generate())
+        okp_key = jose_jwk.import_key(public_pem, "OKP").as_dict()
+        okp_key.update(kid="ed25519-key", alg="Ed25519", use="sig")
+        mock_jwks_data["keys"].append(cast("JWKData", okp_key))
+        httpx_mock.add_response(json=mock_jwks_data)
+
+        token = rsa_key_pair.create_token(
+            subject="test-user",
+            issuer="https://test.example.com",
+            audience="https://api.example.com",
+        )
+
+        access_token = await jwks_provider.load_access_token(token)
+
+        assert access_token is not None
+        assert access_token.client_id == "test-user"
+
+    async def test_jwks_with_only_unusable_keys_rejects_cleanly(
         self,
         rsa_key_pair: RSAKeyPair,
         jwks_provider: JWTVerifier,
         httpx_mock: HTTPXMock,
         mock_dns,
     ):
-        """If every key in the JWKS is unsupported, verification fails
+        """If every key in the JWKS is unusable, verification fails
         cleanly (returns None) rather than crashing - #4515."""
-        okp_only = {
+        unusable_only = {
             "keys": [
                 cast(
                     "JWKData",
                     {
-                        "kty": "OKP",
-                        "crv": "Ed25519",
-                        "kid": "ed25519-key",
-                        "alg": "EdDSA",
+                        "kty": "RSA",
+                        "kid": "malformed-key",
                         "use": "sig",
-                        "x": "11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo",
                     },
                 )
             ]
         }
-        httpx_mock.add_response(json=okp_only)
+        httpx_mock.add_response(json=unusable_only)
 
         token = rsa_key_pair.create_token(
             subject="test-user",
             issuer="https://test.example.com",
             audience="https://api.example.com",
-            kid="ed25519-key",
+            kid="malformed-key",
         )
 
         access_token = await jwks_provider.load_access_token(token)
