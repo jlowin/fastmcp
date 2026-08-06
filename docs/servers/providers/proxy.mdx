@@ -388,37 +388,24 @@ Only reuse sessions when you know the backend is stateless (e.g. stateless HTTP)
 
 ## Advanced Usage
 
-### Controlled Gateways with Negotiation Metadata
+### Forwarding Negotiation Metadata
 
-`ProxyProvider` deliberately owns only remote components. To also forward optional server negotiation metadata, add `ProxyNegotiationMetadataMiddleware` explicitly. This is useful for gateways that need transforms, local components, or other middleware without adopting all of `FastMCPProxy`:
+Add `ProxyNegotiationMetadataMiddleware` when a gateway built with `ProxyProvider` should also expose backend instructions and namespaced `_meta`:
 
 ```python
 from fastmcp import FastMCP
 from fastmcp.server.middleware import ProxyNegotiationMetadataMiddleware
 from fastmcp.server.providers.proxy import ProxyClient, ProxyProvider
 
-
-def create_backend_client() -> ProxyClient:
-    return ProxyClient("http://backend:8000/mcp", mode="auto")
-
-
-backend = ProxyProvider(create_backend_client)
-metadata = ProxyNegotiationMetadataMiddleware(
-    backend,
-    identity="proxy",
-)
-
+backend = ProxyProvider(lambda: ProxyClient("http://backend:8000/mcp", mode="auto"))
 gateway = FastMCP(
     "Controlled Gateway",
-    instructions="Use only approved gateway operations.",
     providers=[backend],
-    middleware=[metadata],
+    middleware=[ProxyNegotiationMetadataMiddleware(backend)],
 )
 ```
 
-The middleware works across both the legacy `initialize` handshake and modern `server/discover`. It forwards upstream instructions, namespaced `_meta`, and optionally the full upstream `serverInfo`. The frontend remains authoritative for protocol versions, capabilities, cache policy, and `resultType`, since those fields must describe the gateway after its filtering and transforms. Unknown top-level fields are not forwarded because the gateway cannot safely interpret their claims.
-
-`identity="proxy"` (the default) retains the gateway's `serverInfo`; use `identity="upstream"` to expose the backend's complete implementation identity. Explicit frontend instructions and frontend metadata win on collision. Metadata is fetched lazily during negotiation, and an unavailable backend does not fail negotiation solely because optional metadata could not be read—the first proxied operation reports that failure.
+By default the gateway keeps its own `serverInfo`; pass `identity="upstream"` to expose the backend identity. Frontend values win on collisions, and protocol versions, capabilities, cache policy, `resultType`, and unknown top-level fields always remain frontend-owned. If the backend is unavailable, negotiation succeeds without its optional metadata.
 
 ### FastMCPProxy Class
 
