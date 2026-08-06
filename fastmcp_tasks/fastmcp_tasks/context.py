@@ -134,6 +134,28 @@ def get_task_leg_number() -> int:
         return 1
 
 
+def _snapshot_redis_key(docket: Docket, task_scope: str | None, task_id: str) -> str:
+    """The Redis key holding a task's context snapshot."""
+    return docket.key(f"{task_redis_prefix(task_scope)}:{task_id}:snapshot")
+
+
+async def refresh_snapshot_ttl(
+    docket: Docket, task_scope: str | None, task_id: str, ttl_seconds: int
+) -> None:
+    """Slide the snapshot key's TTL alongside the task's routing keys.
+
+    An actively polled task refreshes its metadata and leg pointers on every
+    ``tasks/get``, and the snapshot must live just as long: a re-entered leg
+    restores the submitting caller from it. Without the refresh, a task parked
+    on input past the snapshot's creation-time TTL loses the caller, which
+    means an unauthenticated run without encryption and a failed task with it.
+    """
+    async with docket.redis() as redis:
+        await redis.expire(
+            _snapshot_redis_key(docket, task_scope, task_id), ttl_seconds
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class TaskContextSnapshot:
     """All context data snapshotted at task-submission time.
@@ -234,7 +256,7 @@ class TaskContextSnapshot:
         and a distributed backend keeps it where the backend's operators can
         read it (#4747).
         """
-        key = docket.key(f"{task_redis_prefix(task_scope)}:{task_id}:snapshot")
+        key = _snapshot_redis_key(docket, task_scope, task_id)
         payload = snapshot_codec().encode(self.to_json())
         async with docket.redis() as redis:
             await redis.set(key, payload, ex=ttl_seconds)
@@ -332,9 +354,7 @@ async def restore_task_snapshot(key: str = TaskKey()) -> None:
     task_id = parts["client_task_id"]
     try:
         async with docket.redis() as redis:
-            raw = await redis.get(
-                docket.key(f"{task_redis_prefix(task_scope)}:{task_id}:snapshot")
-            )
+            raw = await redis.get(_snapshot_redis_key(docket, task_scope, task_id))
         if raw is None:
             if not codec.protected:
                 return

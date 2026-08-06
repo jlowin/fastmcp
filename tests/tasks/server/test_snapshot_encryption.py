@@ -129,6 +129,16 @@ class TestSnapshotCodec:
         assert codec.decode('{"a": 1}') == '{"a": 1}'
         assert codec.decode(b'{"a": 1}') == '{"a": 1}'
 
+    def test_plaintext_codec_refuses_an_encrypted_payload(self):
+        """A keyless process must not pass ciphertext through as plaintext.
+
+        Passing it through would end in a swallowed parse error and an
+        anonymous run, defeating the submitter's fail-closed configuration.
+        """
+        encrypted = EncryptedCodec(KEY).encode('{"a": 1}')
+        with pytest.raises(SnapshotDecryptionError, match="no FASTMCP_ENCRYPTION_KEY"):
+            PlaintextCodec().decode(encrypted)
+
 
 class TestSnapshotSerialization:
     def test_json_round_trip_preserves_every_field(
@@ -304,6 +314,32 @@ class TestEncryptedSnapshotRoundTrip:
                     access_token=token,
                     target_states=frozenset({"failed"}),
                 )
+
+        assert final.status == "failed"
+
+    async def test_keyless_worker_fails_the_encrypted_task(
+        self, echo_token_server: FastMCP, encryption_key: str
+    ):
+        """A worker whose key was lost mid-rollout must not run anonymously.
+
+        The submitter wrote an encrypted snapshot; the restoring process has no
+        key at all, so its plaintext codec would otherwise pass the ciphertext
+        through to a parse failure the fail-open path swallows.
+        """
+        token = make_access_token("client-a", "user-1")
+
+        async with running_task_server(echo_token_server):
+            created = await submit_task(
+                echo_token_server, "whoami", {}, access_token=token
+            )
+            fastmcp.settings.encryption_key = None
+            clear_codec_cache()
+            final = await wait_for_task(
+                echo_token_server,
+                created.task_id,
+                access_token=token,
+                target_states=frozenset({"failed"}),
+            )
 
         assert final.status == "failed"
 

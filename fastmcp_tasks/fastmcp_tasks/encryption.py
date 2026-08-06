@@ -30,13 +30,20 @@ _SNAPSHOT_KEY_SALT = "fastmcp-task-snapshot-key"
 # proxy's threshold for its signing-key material.
 _SHORT_KEY_WARNING_LENGTH = 12
 
+# Every Fernet token starts with the version byte 0x80, which base64url encodes
+# (together with the leading zero bytes of its 64-bit timestamp) as "gAAAAA".
+# A plaintext snapshot is a JSON object starting with "{", so the prefix cannot
+# collide with a legitimately unencrypted value.
+_FERNET_PREFIX = "gAAAAA"
+
 
 class SnapshotDecryptionError(Exception):
-    """A stored snapshot could not be decrypted with the configured key.
+    """A stored snapshot is encrypted but cannot be read by this process.
 
-    Raised for a wrong key, a tampered value, or a plaintext value written
-    before the key was configured. The restore path lets this escape so the task
-    fails, rather than running the tool as an anonymous caller.
+    Raised for a wrong key, a tampered value, a plaintext value written before
+    the key was configured, or an encrypted value read by a process with no key
+    configured at all. The restore path lets this escape so the task fails,
+    rather than running the tool as an anonymous caller.
     """
 
 
@@ -60,7 +67,14 @@ class SnapshotCodec(ABC):
 
 
 class PlaintextCodec(SnapshotCodec):
-    """Stores snapshots as-is; the contract when no encryption key is set."""
+    """Stores snapshots as-is; the contract when no encryption key is set.
+
+    It still refuses to decode a Fernet envelope: an encrypted snapshot
+    reaching a keyless process means the submitter configured a key this
+    process lacks (a partial rollout, or a lost setting), and passing the
+    ciphertext through would end in a swallowed parse error and an anonymous
+    run instead of the configured fail-closed behavior.
+    """
 
     protected = False
 
@@ -68,7 +82,13 @@ class PlaintextCodec(SnapshotCodec):
         return payload
 
     def decode(self, stored: str | bytes) -> str:
-        return stored.decode() if isinstance(stored, bytes) else stored
+        text = stored.decode() if isinstance(stored, bytes) else stored
+        if text.startswith(_FERNET_PREFIX):
+            raise SnapshotDecryptionError(
+                "The stored task snapshot is encrypted, but this process has "
+                "no FASTMCP_ENCRYPTION_KEY configured."
+            )
+        return text
 
 
 class EncryptedCodec(SnapshotCodec):
