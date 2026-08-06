@@ -52,7 +52,18 @@ def parse_frontmatter(content: str) -> tuple[dict[str, Any], str]:
     frontmatter_text = content[3 : 3 + end_match.start()]
     remaining = content[3 + end_match.end() :]
 
-    # Parse YAML (simple key: value parsing, no complex types)
+    # Try parsing with yaml.BaseLoader first.
+    # BaseLoader supports block scalars (|, >) without implicit type coercion
+    # (no yes->True, no 1.10->1.1), making it safe for untrusted frontmatter.
+    try:
+        import yaml
+        parsed = yaml.load(frontmatter_text, Loader=yaml.BaseLoader)
+        if isinstance(parsed, dict):
+            return parsed, remaining
+    except Exception:
+        pass
+
+    # Fall back to simple line-by-line parsing for malformed YAML
     frontmatter: dict[str, Any] = {}
     for line in frontmatter_text.strip().split("\n"):
         if ":" in line:
