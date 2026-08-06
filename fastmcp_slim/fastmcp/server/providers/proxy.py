@@ -1048,10 +1048,10 @@ class _NegotiationMetadata:
 class ProxyMetadataMiddleware(Middleware):
     """Forward optional negotiation metadata from a ``ProxyProvider`` backend.
 
-    Only instructions and namespaced metadata are forwarded, with frontend
-    values taking precedence. Protocol versions, capabilities, cache policy,
-    and result type always remain frontend-owned. ``identity`` controls whether
-    server identity remains the gateway's or is replaced by the backend's.
+    Instructions and namespaced metadata are forwarded with frontend values
+    taking precedence. Protocol versions, capabilities, cache policy, and result
+    type are never copied from the backend. ``identity`` controls whether server
+    identity remains the gateway's or uses the backend's when available.
     """
 
     def __init__(
@@ -1335,8 +1335,9 @@ class FastMCPProxy(FastMCP):
             provider_error_strategy: How provider errors should affect aggregate
                 operations. Defaults to ``"warn"`` for compatibility; use
                 ``"raise"`` when the proxy should surface upstream failures.
-            identity: Whether negotiation exposes the proxy's server identity or
-                the upstream server's. Defaults to ``"proxy"`` for compatibility.
+            identity: Whether negotiation retains the proxy's server identity or
+                uses the upstream server's when available. Defaults to ``"proxy"``
+                for compatibility.
             **kwargs: Additional settings for the FastMCP server.
         """
         super().__init__(**kwargs)

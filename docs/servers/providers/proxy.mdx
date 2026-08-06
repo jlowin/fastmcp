@@ -408,7 +408,7 @@ gateway = FastMCP(
 )
 ```
 
-By default the gateway keeps its own `serverInfo`; pass `identity="upstream"` to expose the backend identity. Frontend values win on collisions, and protocol versions, capabilities, cache policy, `resultType`, and unknown top-level fields always remain frontend-owned. If the backend is unavailable, negotiation succeeds without its optional metadata.
+By default the gateway keeps its own `serverInfo`; pass `identity="upstream"` to use the backend identity when available. Frontend instructions and `_meta` values win on collisions. The middleware never copies upstream protocol versions, capabilities, cache policy, `resultType`, or unknown top-level fields. If the backend is unavailable, negotiation succeeds without its optional metadata.
 
 ### FastMCPProxy Class
 
