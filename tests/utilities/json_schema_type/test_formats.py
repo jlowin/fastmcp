@@ -112,3 +112,22 @@ class TestFormatTypes:
         )
         assert isinstance(result.full_uri, AnyUrl)
         assert isinstance(result.ref_uri, str)
+
+    def test_str_backed_format_keeps_max_length(self):
+        """Unknown/custom formats fall back to str and must still enforce length."""
+        t = json_schema_to_type(
+            {"type": "string", "format": "phone", "maxLength": 3}
+        )
+        validator = TypeAdapter(t)
+        assert validator.validate_python("123") == "123"
+        with pytest.raises(ValidationError):
+            validator.validate_python("abcd")
+
+    def test_uri_reference_format_keeps_min_length(self):
+        t = json_schema_to_type(
+            {"type": "string", "format": "uri-reference", "minLength": 2}
+        )
+        validator = TypeAdapter(t)
+        assert validator.validate_python("/a") == "/a"
+        with pytest.raises(ValidationError):
+            validator.validate_python("")

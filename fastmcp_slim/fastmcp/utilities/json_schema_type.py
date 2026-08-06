@@ -269,13 +269,6 @@ def _create_string_type(schema: Mapping[str, Any]) -> type | Annotated[Any, ...]
     if "const" in schema:
         return Literal[schema["const"]]  # type: ignore
 
-    if fmt := schema.get("format"):
-        if fmt == "uri":
-            return AnyUrl
-        elif fmt == "uri-reference":
-            return str
-        return FORMAT_TYPES.get(fmt, str)
-
     constraints = {
         k: v
         for k, v in {
@@ -286,7 +279,22 @@ def _create_string_type(schema: Mapping[str, Any]) -> type | Annotated[Any, ...]
         if v is not None
     }
 
-    if not constraints:
+    # Resolve format first. Non-str formats (date-time, email, uri, json) do not
+    # take length/pattern constraints. Str-backed formats (unknown custom names
+    # and uri-reference) must still honor minLength/maxLength/pattern.
+    if fmt := schema.get("format"):
+        if fmt == "uri":
+            return AnyUrl
+        if fmt == "uri-reference":
+            base: type | Annotated[Any, ...] = str
+        else:
+            base = FORMAT_TYPES.get(fmt, str)
+        if base is not str:
+            return base
+        if not constraints:
+            return str
+        # Fall through to apply StringConstraints on the str-backed format.
+    elif not constraints:
         return str
 
     annotated: Any = Annotated[str, StringConstraints(**constraints)]
