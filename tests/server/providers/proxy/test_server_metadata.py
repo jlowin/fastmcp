@@ -387,9 +387,11 @@ def test_gateway_construction_does_not_create_backend_client():
     assert calls == 0
 
 
-def test_proxy_initialize_middleware_is_deprecated():
+async def test_proxy_initialize_middleware_preserves_legacy_behavior():
+    upstream = FastMCP("upstream", instructions="legacy instructions")
+
     def client_factory() -> ProxyClient:
-        return ProxyClient(make_upstream())
+        return ProxyClient(upstream)
 
     proxy = FastMCPProxy(name="compatibility-proxy", client_factory=client_factory)
 
@@ -399,8 +401,13 @@ def test_proxy_initialize_middleware_is_deprecated():
     ):
         middleware = ProxyInitializeMiddleware(proxy)
 
+    proxy.middleware = [middleware]
+    async with Client(proxy, mode="legacy") as client:
+        assert client.instructions == "legacy instructions"
+    async with Client(proxy, mode="auto") as client:
+        assert client.instructions is None
+
     assert middleware.proxy is proxy
-    assert middleware.client_factory is client_factory
 
 
 async def test_fastmcp_proxy_uses_public_metadata_middleware():
