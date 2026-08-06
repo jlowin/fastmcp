@@ -130,27 +130,37 @@ Body
         assert frontmatter == {}
         assert body == "Body\n"
 
-    def test_frontmatter_numeric_scalars_are_typed(self):
-        """yaml.safe_load applies YAML typing to unquoted scalars.
+    def test_frontmatter_scalars_are_preserved_as_strings(self):
+        """`SkillInfo.frontmatter` is public; it must not silently retype values.
 
-        `version` is never read downstream (only `description` is, in
-        skill_provider.py), so this typed behavior is safe today, but it IS
-        a change from the old parser, which always kept every value as a
-        string. This pins the actual coerced types so a regression is
-        caught if that assumption ever changes.
+        `yaml.BaseLoader` parses block scalars (unlike the old line parser)
+        but applies no implicit scalar resolution, so every value comes back
+        exactly as written instead of being coerced to float/bool/date the
+        way a full loader (e.g. `safe_load`) would.
+
+        The `description: null` case looks surprising but is intentional:
+        under `BaseLoader`, YAML's null token resolves to the *string*
+        `"null"`, not Python `None`. This matches the pre-existing line-based
+        parser (which did `value.strip()` on the raw text and also produced
+        `"null"`), so this restores original behavior rather than inventing
+        a new one. Do not "fix" this back to `None`.
         """
         content = """---
-version: 1.0
-enabled: true
+version: 1.10
+enabled: yes
+released: 2024-01-01
+description: null
 ---
 
 Body
 """
         frontmatter, body = parse_frontmatter(content)
-        assert frontmatter["version"] == 1.0
-        assert isinstance(frontmatter["version"], float)
-        assert frontmatter["enabled"] is True
-        assert isinstance(frontmatter["enabled"], bool)
+        assert frontmatter["version"] == "1.10"
+        assert frontmatter["enabled"] == "yes"
+        assert frontmatter["released"] == "2024-01-01"
+        assert frontmatter["description"] == "null"
+        for value in frontmatter.values():
+            assert isinstance(value, str)
 
     def test_frontmatter_description_bool_recovers_original_text(self):
         content = """---

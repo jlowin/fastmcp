@@ -66,9 +66,16 @@ def _parse_frontmatter_line_based(frontmatter_text: str) -> dict[str, Any]:
 def parse_frontmatter(content: str) -> tuple[dict[str, Any], str]:
     """Parse YAML frontmatter from markdown content.
 
-    Prefers full YAML parsing so multiline block scalars (`|` / `>`) work.
-    If YAML parsing fails (invalid YAML, recursion limit, etc.), falls back to
-    a line-based key:value parser so plain frontmatter is not discarded.
+    Uses `yaml.BaseLoader` so multiline block scalars (`|` / `>`) work while
+    every scalar value is returned as a plain string. `SkillInfo.frontmatter`
+    is a public mapping; letting a full loader (e.g. `safe_load`) apply
+    implicit scalar typing would silently turn `version: 1.10` into the float
+    `1.1`, `enabled: yes` into `True`, or a date-like value into
+    `datetime.date` for every skill author, which is a backwards-incompatible
+    surprise rather than an internal detail. `BaseLoader` has no such
+    constructors, so values round-trip as written. If YAML parsing fails
+    (invalid YAML, recursion limit, etc.), falls back to a line-based
+    key:value parser so plain frontmatter is not discarded.
 
     Args:
         content: Markdown content potentially starting with ---
@@ -93,24 +100,13 @@ def parse_frontmatter(content: str) -> tuple[dict[str, Any], str]:
     remaining = content[3 + end_match.end() :]
 
     try:
-        parsed = yaml.safe_load(frontmatter_text)
+        parsed = yaml.load(frontmatter_text, Loader=yaml.BaseLoader)
     except (yaml.YAMLError, RecursionError):
         # Prefer partial recovery over discarding every key (issue #4416 review).
         return _parse_frontmatter_line_based(frontmatter_text), remaining
 
     if not isinstance(parsed, dict):
         return {}, remaining
-
-    # YAML may type `description: true` / dates as non-str, but SkillInfo.description
-    # is a str field that callers truthiness-check.
-    if "description" in parsed and parsed["description"] is not None:
-        if not isinstance(parsed["description"], str):
-            # YAML 1.1 coerces bare words like `yes` to non-str; recover the
-            # original text via the line-based parser instead.
-            raw = _parse_frontmatter_line_based(frontmatter_text).get("description")
-            parsed["description"] = (
-                raw if isinstance(raw, str) else str(parsed["description"])
-            )
 
     return parsed, remaining
 
