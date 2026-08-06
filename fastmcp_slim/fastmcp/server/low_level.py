@@ -38,7 +38,6 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
-
 # The request methods that FastMCP serves through a handler adapter, each of which
 # runs the FastMCP middleware chain interior (see MCPOperationsMixin). The root
 # dispatch leaves these to the interior dispatch and only observes them if they fail before
@@ -332,15 +331,23 @@ class FastMCPServerMiddleware:
         from fastmcp.server.context import Context
         from fastmcp.server.middleware.middleware import MiddlewareContext
 
-        params = ctx.params if isinstance(ctx.params, dict) else {}
-        discover_message = mcp_types.DiscoverRequest.model_validate(
-            {"method": "server/discover", "params": params}, by_name=False
-        )
+        try:
+            discover_message = mcp_types.DiscoverRequest.model_validate(
+                {"method": "server/discover", "params": ctx.params}, by_name=False
+            )
+        except ValidationError as exc:
+            return await self._run_outer_mw(fastmcp, ctx, call_next, _raise=exc)
 
         async def call_original_handler(
             _mw_ctx: MiddlewareContext,
         ) -> mcp_types.DiscoverResult:
-            raw = await call_next(ctx)
+            message = _mw_ctx.message
+            params = (
+                message.params.model_dump(by_alias=True, mode="json", exclude_none=True)
+                if message.params is not None
+                else None
+            )
+            raw = await call_next(replace(ctx, params=params))
             if isinstance(raw, mcp_types.DiscoverResult):
                 return raw
             if isinstance(raw, Mapping):
