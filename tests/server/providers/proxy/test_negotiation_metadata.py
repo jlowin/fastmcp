@@ -14,7 +14,7 @@ from fastmcp.server import create_proxy
 from fastmcp.server.middleware import CallNext, Middleware, MiddlewareContext
 from fastmcp.server.providers.proxy import (
     ProxyClient,
-    ProxyNegotiationMiddleware,
+    ProxyMetadataMiddleware,
     ProxyProvider,
 )
 from fastmcp.utilities.http import find_available_port
@@ -131,8 +131,8 @@ def make_gateway(
     frontend_metadata: bool = False,
 ) -> FastMCP:
     provider = ProxyProvider(lambda: ProxyClient(upstream, mode=backend_mode))
-    negotiation = ProxyNegotiationMiddleware(provider, identity=identity)
-    middleware: list[Middleware] = [negotiation]
+    metadata = ProxyMetadataMiddleware(provider, identity=identity)
+    middleware: list[Middleware] = [metadata]
     if frontend_metadata:
         middleware.append(FrontendMetadataMiddleware())
     gateway = FastMCP(
@@ -234,7 +234,7 @@ async def test_unavailable_backend_does_not_fail_negotiation(frontend_mode: str)
     gateway = FastMCP(
         "available-gateway",
         providers=[provider],
-        middleware=[ProxyNegotiationMiddleware(provider)],
+        middleware=[ProxyMetadataMiddleware(provider)],
     )
     gateway.provider_error_strategy = "raise"
 
@@ -257,17 +257,17 @@ def test_gateway_construction_does_not_create_backend_client():
     FastMCP(
         "lazy-gateway",
         providers=[provider],
-        middleware=[ProxyNegotiationMiddleware(provider)],
+        middleware=[ProxyMetadataMiddleware(provider)],
     )
 
     assert calls == 0
 
 
-async def test_fastmcp_proxy_uses_public_negotiation_middleware():
+async def test_fastmcp_proxy_uses_public_metadata_middleware():
     proxy = create_proxy(make_upstream(), name="convenience", identity="upstream")
 
     assert any(
-        isinstance(middleware, ProxyNegotiationMiddleware)
+        isinstance(middleware, ProxyMetadataMiddleware)
         for middleware in proxy.middleware
     )
     async with Client(proxy, mode="auto") as client:

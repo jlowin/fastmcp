@@ -390,13 +390,13 @@ Only reuse sessions when you know the backend is stateless (e.g. stateless HTTP)
 
 ### Forwarding Negotiation Metadata
 
-Add `ProxyNegotiationMiddleware` when a gateway built with `ProxyProvider` should also expose backend instructions and namespaced `_meta`:
+Add `ProxyMetadataMiddleware` when a gateway built with `ProxyProvider` should also expose backend instructions and namespaced `_meta`:
 
 ```python
 from fastmcp import FastMCP
 from fastmcp.server.providers.proxy import (
     ProxyClient,
-    ProxyNegotiationMiddleware,
+    ProxyMetadataMiddleware,
     ProxyProvider,
 )
 
@@ -404,7 +404,7 @@ backend = ProxyProvider(lambda: ProxyClient("http://backend:8000/mcp", mode="aut
 gateway = FastMCP(
     "Controlled Gateway",
     providers=[backend],
-    middleware=[ProxyNegotiationMiddleware(backend)],
+    middleware=[ProxyMetadataMiddleware(backend)],
 )
 ```
 
