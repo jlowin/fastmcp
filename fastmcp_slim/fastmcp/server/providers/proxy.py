@@ -241,6 +241,74 @@ def _stash_proxy_request_context(client: Client, ctx: Context) -> None:
         )
 
 
+class ProxyInitializeMiddleware(Middleware):
+    """Deprecated middleware for forwarding instructions during initialization."""
+
+    def __init__(self, proxy: FastMCPProxy) -> None:
+        warnings.warn(
+            "`ProxyInitializeMiddleware` is deprecated and will be removed in a "
+            "future release. `FastMCPProxy` now installs "
+            "`ProxyMetadataMiddleware` automatically.",
+            FastMCPDeprecationWarning,
+            stacklevel=2,
+        )
+        self.proxy = proxy
+
+    async def on_initialize(
+        self,
+        context: MiddlewareContext[mcp_types.InitializeRequest],
+        call_next: CallNext[
+            mcp_types.InitializeRequest,
+            mcp_types.InitializeResult | None,
+        ],
+    ) -> mcp_types.InitializeResult | None:
+        client = await self.proxy._get_client()
+        upstream_instructions: str | None = None
+        try:
+            if isinstance(client, ProxyClient):
+                ctx = context.fastmcp_context
+                if ctx is not None:
+                    client._proxy_rc_ref[0] = (
+                        ctx.request_context,
+                        ctx._fastmcp,
+                    )
+            async with client:
+                # Entering the context already ran connect-time negotiation.
+                # `initialize()` returns the handshake result on a legacy backend,
+                # but raises on a modern (server/discover) backend, which has no
+                # InitializeResult. That mismatch only arises when an explicit
+                # `mode=` pins the backend to a different era than this legacy
+                # front (the era-mirroring default keeps the two in lockstep, so
+                # a legacy front always reaches a legacy backend here). Skip the
+                # handshake-only call when the backend negotiated the modern era.
+                if client.protocol_version not in MODERN_PROTOCOL_VERSIONS:
+                    await client.initialize()
+                    # Capture the upstream's instructions while the session is
+                    # live; `initialize_result` clears once the context exits.
+                    init_result = client.initialize_result
+                    if init_result is not None:
+                        upstream_instructions = init_result.instructions
+        except MCPError:
+            raise
+        except _PROXY_TRANSPORT_ERRORS as error:
+            raise _proxy_upstream_error(error) from error
+
+        result = await call_next(context)
+
+        # Forward the upstream server's instructions unless the proxy defines its
+        # own. `instructions` is part of the MCP InitializeResult and is meant to
+        # steer the model, so a proxy that dropped it would silently degrade any
+        # downstream consumer relying on upstream guidance.
+        if (
+            result is not None
+            and self.proxy.instructions is None
+            and upstream_instructions is not None
+        ):
+            result.instructions = upstream_instructions
+
+        return result
+
+
 # -----------------------------------------------------------------------------
 # Proxy Component Classes
 # -----------------------------------------------------------------------------
@@ -1189,74 +1257,6 @@ class ProxyMetadataMiddleware(Middleware):
         if upstream is None:
             return result
         return result.model_copy(update=self._updates(result, upstream))
-
-
-class ProxyInitializeMiddleware(Middleware):
-    """Deprecated middleware for forwarding instructions during initialization."""
-
-    def __init__(self, proxy: FastMCPProxy) -> None:
-        warnings.warn(
-            "`ProxyInitializeMiddleware` is deprecated and will be removed in a "
-            "future release. `FastMCPProxy` now installs "
-            "`ProxyMetadataMiddleware` automatically.",
-            FastMCPDeprecationWarning,
-            stacklevel=2,
-        )
-        self.proxy = proxy
-
-    async def on_initialize(
-        self,
-        context: MiddlewareContext[mcp_types.InitializeRequest],
-        call_next: CallNext[
-            mcp_types.InitializeRequest,
-            mcp_types.InitializeResult | None,
-        ],
-    ) -> mcp_types.InitializeResult | None:
-        client = await self.proxy._get_client()
-        upstream_instructions: str | None = None
-        try:
-            if isinstance(client, ProxyClient):
-                ctx = context.fastmcp_context
-                if ctx is not None:
-                    client._proxy_rc_ref[0] = (
-                        ctx.request_context,
-                        ctx._fastmcp,
-                    )
-            async with client:
-                # Entering the context already ran connect-time negotiation.
-                # `initialize()` returns the handshake result on a legacy backend,
-                # but raises on a modern (server/discover) backend, which has no
-                # InitializeResult. That mismatch only arises when an explicit
-                # `mode=` pins the backend to a different era than this legacy
-                # front (the era-mirroring default keeps the two in lockstep, so
-                # a legacy front always reaches a legacy backend here). Skip the
-                # handshake-only call when the backend negotiated the modern era.
-                if client.protocol_version not in MODERN_PROTOCOL_VERSIONS:
-                    await client.initialize()
-                    # Capture the upstream's instructions while the session is
-                    # live; `initialize_result` clears once the context exits.
-                    init_result = client.initialize_result
-                    if init_result is not None:
-                        upstream_instructions = init_result.instructions
-        except MCPError:
-            raise
-        except _PROXY_TRANSPORT_ERRORS as error:
-            raise _proxy_upstream_error(error) from error
-
-        result = await call_next(context)
-
-        # Forward the upstream server's instructions unless the proxy defines its
-        # own. `instructions` is part of the MCP InitializeResult and is meant to
-        # steer the model, so a proxy that dropped it would silently degrade any
-        # downstream consumer relying on upstream guidance.
-        if (
-            result is not None
-            and self.proxy.instructions is None
-            and upstream_instructions is not None
-        ):
-            result.instructions = upstream_instructions
-
-        return result
 
 
 # -----------------------------------------------------------------------------
