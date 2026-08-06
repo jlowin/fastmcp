@@ -1028,13 +1028,13 @@ class ProxyProvider(Provider):
 
 
 @dataclass(frozen=True)
-class _NegotiationMetadata:
+class _UpstreamServerMetadata:
     instructions: str | None
     server_info: mcp_types.Implementation | None
     meta: dict[str, Any]
 
     @classmethod
-    def from_client(cls, client: Client) -> _NegotiationMetadata | None:
+    def from_client(cls, client: Client) -> _UpstreamServerMetadata | None:
         result = client.session.initialize_result or client.session.discover_result
         if result is None:
             return None
@@ -1046,7 +1046,7 @@ class _NegotiationMetadata:
 
 
 class ProxyMetadataMiddleware(Middleware):
-    """Forward optional negotiation metadata from a ``ProxyProvider`` backend.
+    """Forward optional server metadata from a ``ProxyProvider`` backend.
 
     Instructions and namespaced metadata are forwarded with frontend values
     taking precedence. Protocol versions, capabilities, cache policy, and result
@@ -1065,14 +1065,14 @@ class ProxyMetadataMiddleware(Middleware):
         self.client_factory = provider.client_factory
         self.identity = identity
 
-    async def _read_upstream(self) -> _NegotiationMetadata | None:
+    async def _read_upstream(self) -> _UpstreamServerMetadata | None:
         try:
             client = self.client_factory()
             if inspect.isawaitable(client):
                 client = cast(Client, await client)
 
             if client.is_connected():
-                return _NegotiationMetadata.from_client(client)
+                return _UpstreamServerMetadata.from_client(client)
 
             # A pinned modern client adopts a synthesized DiscoverResult without
             # contacting the server. Probe with a copy so metadata comes from the
@@ -1082,15 +1082,15 @@ class ProxyMetadataMiddleware(Middleware):
                 client.mode = "auto"
 
             async with client:
-                return _NegotiationMetadata.from_client(client)
+                return _UpstreamServerMetadata.from_client(client)
         except (MCPError, *_PROXY_TRANSPORT_ERRORS) as error:
-            logger.debug("Could not read upstream negotiation metadata: %r", error)
+            logger.debug("Could not read upstream server metadata: %r", error)
             return None
 
     def _updates(
         self,
         result: mcp_types.InitializeResult | mcp_types.DiscoverResult,
-        upstream: _NegotiationMetadata,
+        upstream: _UpstreamServerMetadata,
     ) -> dict[str, Any]:
         meta = {
             key: value
@@ -1335,8 +1335,8 @@ class FastMCPProxy(FastMCP):
             provider_error_strategy: How provider errors should affect aggregate
                 operations. Defaults to ``"warn"`` for compatibility; use
                 ``"raise"`` when the proxy should surface upstream failures.
-            identity: Whether negotiation retains the proxy's server identity or
-                uses the upstream server's when available. Defaults to ``"proxy"``
+            identity: Whether clients see the proxy's server identity or the
+                upstream server's when available. Defaults to ``"proxy"``
                 for compatibility.
             **kwargs: Additional settings for the FastMCP server.
         """

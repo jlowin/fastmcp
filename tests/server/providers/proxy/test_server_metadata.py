@@ -1,4 +1,4 @@
-"""Negotiation metadata forwarding across proxy protocol eras."""
+"""Server metadata forwarding across proxy protocol eras."""
 
 from itertools import product
 from typing import Any, Literal, TypeVar
@@ -223,7 +223,7 @@ async def test_frontend_values_take_precedence(frontend_mode: str):
 
 
 @pytest.mark.parametrize("frontend_mode", ["legacy", "auto"])
-async def test_unavailable_backend_does_not_fail_negotiation(frontend_mode: str):
+async def test_unavailable_backend_does_not_block_connection(frontend_mode: str):
     port = find_available_port()
     provider = ProxyProvider(
         lambda: ProxyClient(

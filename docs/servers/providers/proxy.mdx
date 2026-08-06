@@ -388,7 +388,7 @@ Only reuse sessions when you know the backend is stateless (e.g. stateless HTTP)
 
 ## Advanced Usage
 
-### Forwarding Negotiation Metadata
+### Forwarding Server Metadata
 
 Add `ProxyMetadataMiddleware` when a gateway built with `ProxyProvider` should also expose backend instructions and namespaced `_meta`:
 
@@ -408,7 +408,7 @@ gateway = FastMCP(
 )
 ```
 
-By default the gateway keeps its own `serverInfo`; pass `identity="upstream"` to use the backend identity when available. Frontend instructions and `_meta` values win on collisions. The middleware never copies upstream protocol versions, capabilities, cache policy, `resultType`, or unknown top-level fields. If the backend is unavailable, negotiation succeeds without its optional metadata.
+By default the gateway keeps its own `serverInfo`; pass `identity="upstream"` to use the backend identity when available. Frontend instructions and `_meta` values win on collisions. The middleware never copies upstream protocol versions, capabilities, cache policy, `resultType`, or unknown top-level fields. If the backend is unavailable, the client can still connect without its optional metadata.
 
 ### FastMCPProxy Class
 

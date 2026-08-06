@@ -204,7 +204,7 @@ async def test_create_proxy_with_transport(fastmcp_server):
 
 
 async def test_proxy_forwards_upstream_instructions():
-    """The shared negotiation middleware forwards upstream instructions."""
+    """The metadata middleware forwards upstream instructions."""
     upstream = FastMCP(name="upstream", instructions="USE_THIS_MARKER_123")
     proxy = create_proxy(upstream, name="proxy")
 
@@ -268,7 +268,7 @@ async def test_proxy_ping_surfaces_wrong_remote_path():
     async with run_server_async(remote, transport="http") as url:
         proxy = create_proxy(StreamableHttpTransport(url.removesuffix("/mcp")))
 
-        # Optional metadata lookup is best-effort, so negotiation succeeds. The
+        # Optional metadata lookup is best-effort, so the client can connect. The
         # first real proxied operation reports the bad backend path instead.
         async with Client(proxy, mode="legacy") as client:
             with pytest.raises(MCPError, match="Not Found"):
@@ -282,7 +282,7 @@ async def test_proxy_initialize_defers_remote_connection_error():
         provider_error_strategy="raise",
     )
 
-    # Negotiation succeeds without optional backend metadata; the first
+    # The client can connect without optional backend metadata; the first
     # component operation reports the unavailable backend.
     async with Client(proxy, mode="legacy") as client:
         with pytest.raises(MCPError, match="Client failed to connect"):
