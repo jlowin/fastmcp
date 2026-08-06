@@ -35,7 +35,6 @@ from fastmcp.tools.base import (
     InputRequiredToolResult,
     Tool,
     ToolResult,
-    _serialize_to_jsonable,
 )
 from fastmcp.tools.function_parsing import ParsedFunction, _is_object_schema
 from fastmcp.utilities.async_utils import (
@@ -198,7 +197,6 @@ def _resolve_param_hints(fn: Callable[..., Any]) -> dict[str, Any]:
 
 class FunctionTool(Tool):
     fn: SkipJsonSchema[Callable[..., Any]]
-    return_type: Annotated[SkipJsonSchema[Any], Field(exclude=True)] = None
     run_in_thread: Annotated[
         bool,
         Field(
@@ -214,10 +212,6 @@ class FunctionTool(Tool):
             )
         ),
     ] = True
-
-    def _serialize_output(self, raw_value: Any) -> Any:
-        """Serialize using the return annotation that produced the output schema."""
-        return _serialize_to_jsonable(raw_value, self.return_type)
 
     @classmethod
     def from_function(

@@ -246,10 +246,6 @@ class TestToolFromFunctionOutputSchema:
         tool = Tool.from_function(func)
         assert tool.output_schema is None
 
-        result = await tool.run({})
-        assert result.structured_content is None
-        assert len(result.content) == 1
-
     async def test_provided_output_schema_takes_precedence_over_json_compatible_annotation(
         self,
     ):

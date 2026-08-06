@@ -26,7 +26,6 @@ from pydantic import (
     Field,
     PrivateAttr,
     PydanticSchemaGenerationError,
-    TypeAdapter,
     model_validator,
 )
 from pydantic.json_schema import SkipJsonSchema
@@ -57,7 +56,7 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
-_JSONABLE_ADAPTER = TypeAdapter(Any)
+_JSONABLE_ADAPTER = get_cached_typeadapter(Any)
 
 
 def _default_title(name: str) -> str:
@@ -234,6 +233,7 @@ class Tool(FastMCPComponent):
 
     KEY_PREFIX: ClassVar[str] = "tool"
 
+    return_type: Annotated[SkipJsonSchema[Any], Field(exclude=True)] = None
     parameters: Annotated[
         dict[str, Any], Field(description="JSON schema for tool parameters")
     ]
@@ -364,10 +364,6 @@ class Tool(FastMCPComponent):
         """
         raise NotImplementedError("Subclasses must implement run()")
 
-    def _serialize_output(self, raw_value: Any) -> Any:
-        """Serialize a tool result to JSON-compatible Python values."""
-        return _serialize_to_jsonable(raw_value)
-
     def convert_result(self, raw_value: Any) -> ToolResult:
         """Convert a raw result to ToolResult.
 
@@ -397,17 +393,27 @@ class Tool(FastMCPComponent):
         if isinstance(raw_value, bytes):
             return ToolResult(content=content)
 
+        is_content_result = isinstance(
+            raw_value, ContentBlock | Audio | Image | File
+        ) or (
+            isinstance(raw_value, list | tuple)
+            and any(
+                isinstance(item, ContentBlock | Audio | Image | File)
+                for item in raw_value
+            )
+        )
+
         # Skip structured content for ContentBlock types only if no output_schema
         # (if output_schema exists, MCP SDK requires structured_content)
-        if self.output_schema is None and _is_content_result(raw_value):
+        if self.output_schema is None and is_content_result:
             return ToolResult(content=content)
 
         try:
-            structured = self._serialize_output(raw_value)
+            structured = _serialize_to_jsonable(raw_value, self.return_type)
         except (pydantic_core.PydanticSerializationError, UnicodeDecodeError):
             return ToolResult(content=content)
 
-        if not _is_content_result(raw_value):
+        if not is_content_result:
             content = _convert_to_content(structured)
 
         if self.output_schema is None:
@@ -590,16 +596,6 @@ def _convert_to_content(
         ]
     # If none of the items are ContentBlocks, aggregate all items into a single TextContent
     return [TextContent(type="text", text=default_serializer(result))]
-
-
-def _is_content_result(result: Any) -> bool:
-    """Whether a result contains content that must retain its MCP representation."""
-    return isinstance(result, ContentBlock | Audio | Image | File) or (
-        isinstance(result, list | tuple)
-        and any(
-            isinstance(item, ContentBlock | Audio | Image | File) for item in result
-        )
-    )
 
 
 __all__ = ["InputRequiredToolResult", "Tool", "ToolResult"]

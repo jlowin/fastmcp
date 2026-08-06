@@ -18,9 +18,6 @@ from fastmcp.tools.base import (
     InputRequiredToolResult,
     Tool,
     ToolResult,
-    _convert_to_content,
-    _is_content_result,
-    _serialize_to_jsonable,
 )
 from fastmcp.tools.function_parsing import ParsedFunction
 from fastmcp.utilities.async_utils import (
@@ -310,15 +307,10 @@ class TransformedTool(Tool):
 
     parent_tool: SkipJsonSchema[Tool]
     fn: SkipJsonSchema[Callable[..., Any]]
-    return_type: Annotated[SkipJsonSchema[Any], Field(exclude=True)] = None
     forwarding_fn: SkipJsonSchema[
         Callable[..., Any]
     ]  # Always present, handles arg transformation
     transform_args: dict[str, ArgTransform]
-
-    def _serialize_output(self, raw_value: Any) -> Any:
-        """Serialize using the custom transform's declared return type."""
-        return _serialize_to_jsonable(raw_value, self.return_type)
 
     async def run(self, arguments: dict[str, Any]) -> ToolResult:
         """Run the tool with context set for forward() functions.
@@ -399,37 +391,7 @@ class TransformedTool(Tool):
                 else:
                     return result
 
-            # Otherwise convert to content and create ToolResult with proper structured content
-
-            unstructured_result = _convert_to_content(result)
-
-            structured_output = None
-            # First handle structured content based on output schema, if any
-            if self.output_schema is not None:
-                serialized_result = self._serialize_output(result)
-                if self.output_schema.get("x-fastmcp-wrap-result"):
-                    structured_output = {"result": serialized_result}
-                else:
-                    structured_output = serialized_result
-
-                if not _is_content_result(result):
-                    unstructured_result = _convert_to_content(serialized_result)
-            # If no output schema, try to serialize the result. If it is a dict, use
-            # it as structured content. If it is not a dict, ignore it.
-            if structured_output is None:
-                try:
-                    structured_output = self._serialize_output(result)
-                    if not _is_content_result(result):
-                        unstructured_result = _convert_to_content(structured_output)
-                    if not isinstance(structured_output, dict):
-                        structured_output = None
-                except Exception:
-                    pass
-
-            return ToolResult(
-                content=unstructured_result,
-                structured_content=structured_output,
-            )
+            return self.convert_result(result)
         finally:
             _current_tool.reset(token)
 
