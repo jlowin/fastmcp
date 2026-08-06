@@ -62,12 +62,9 @@ async def stateful_proxy_server(fastmcp_server: FastMCP):
     # `mode="legacy"` default for a directly-constructed instance (see
     # `TestProxyClientEraDefault` in test_proxy_client.py) — this backend isn't
     # built through `create_proxy`'s era-mirroring factory, so it stays pinned
-    # regardless of the front era. Every test below that forwards a real tool
-    # call through this fixture pins its front `Client` to `mode="legacy"` too:
-    # otherwise a modern front's request `_meta` carries reserved
-    # modern-envelope keys that `ProxyTool.run`'s legacy-backend path forwards
-    # verbatim, and this legacy-locked backend session rejects them as a
-    # protocol violation.
+    # regardless of the front era. Tests of handshake-only forwarding pin their
+    # front `Client` to `mode="legacy"` too: those server-initiated
+    # interactions do not exist on modern connections.
     client = StatefulProxyClient(transport=FastMCPTransport(fastmcp_server))
     return FastMCPProxy(client_factory=client.new_stateful)
 

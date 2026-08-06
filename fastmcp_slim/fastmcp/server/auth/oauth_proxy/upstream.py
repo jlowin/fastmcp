@@ -43,8 +43,7 @@ class AsyncOAuth2Client:
     Drop-in replacement for the slice of authlib's `AsyncOAuth2Client` that
     `OAuthProxy` uses. Subclasses of `OAuthProxy` that override
     `_create_upstream_oauth_client` may return any object with the same
-    `fetch_token`/`refresh_token`/`client_secret`/`aclose` surface (including
-    an authlib client, if legacy httpx is installed in their environment).
+    `fetch_token`/`refresh_token`/`client_secret`/`aclose` surface.
     """
 
     def __init__(
