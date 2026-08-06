@@ -110,14 +110,26 @@ PROXY_TRANSPORT_OPTIONS = TransportOptions(
 #: anyio stream error directly. Every proxy entry point that opens a backend
 #: connection normalizes these into an ``MCPError`` so callers see a protocol
 #: error instead of a raw transport exception.
-_PROXY_TRANSPORT_ERRORS: tuple[type[Exception], ...] = (
-    RuntimeError,
+_PROXY_TRANSPORT_CAUSES: tuple[type[Exception], ...] = (
     TimeoutError,
     httpx2.HTTPError,
     anyio.ClosedResourceError,
     anyio.EndOfStream,
     anyio.BrokenResourceError,
 )
+_PROXY_TRANSPORT_ERRORS: tuple[type[Exception], ...] = (
+    RuntimeError,
+    *_PROXY_TRANSPORT_CAUSES,
+)
+
+
+def _has_transport_cause(error: RuntimeError) -> bool:
+    cause = error.__cause__
+    while cause is not None:
+        if isinstance(cause, _PROXY_TRANSPORT_CAUSES):
+            return True
+        cause = cause.__cause__
+    return False
 
 
 def _proxy_upstream_error(error: Exception) -> MCPError:
@@ -1197,7 +1209,9 @@ class ProxyMetadataMiddleware(Middleware):
                 return await self._read_connected(client)
             async with client:
                 return await self._read_connected(client)
-        except (MCPError, *_PROXY_TRANSPORT_ERRORS) as error:
+        except (MCPError, ValidationError, *_PROXY_TRANSPORT_ERRORS) as error:
+            if isinstance(error, RuntimeError) and not _has_transport_cause(error):
+                raise
             logger.debug("Could not read upstream server metadata: %r", error)
             return None
 

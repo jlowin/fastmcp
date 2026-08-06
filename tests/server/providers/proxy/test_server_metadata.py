@@ -328,6 +328,52 @@ async def test_connected_pinned_client_probes_without_adopting_metadata():
         assert backend_client.instructions is None
 
 
+async def test_invalid_upstream_discovery_metadata_is_ignored(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    version = MODERN_PROTOCOL_VERSIONS[0]
+
+    async def invalid_discover(_version: str) -> dict[str, Any]:
+        return {
+            "resultType": "complete",
+            "supportedVersions": [version],
+            "capabilities": [],
+        }
+
+    async with ProxyClient(make_upstream(), mode=version) as backend_client:
+        monkeypatch.setattr(backend_client.session, "send_discover", invalid_discover)
+        proxy = create_proxy(backend_client)
+
+        async with Client(proxy, mode="auto") as client:
+            assert client.server_info is not None
+            assert client.server_info.name == proxy.name
+            assert await client.list_tools() == []
+
+
+async def test_invalid_backend_client_negotiation_is_not_ignored():
+    version = MODERN_PROTOCOL_VERSIONS[0]
+    prior = mcp_types.DiscoverResult(
+        supported_versions=["2099-01-01"],
+        capabilities=mcp_types.ServerCapabilities(),
+    )
+    provider = ProxyProvider(
+        lambda: ProxyClient(
+            make_upstream(),
+            mode=version,
+            prior_discover=prior,
+        )
+    )
+    gateway = FastMCP(
+        "gateway",
+        providers=[provider],
+        middleware=[ProxyMetadataMiddleware(provider)],
+    )
+
+    with pytest.raises(MCPError):
+        async with Client(gateway, mode="auto"):
+            pass
+
+
 @pytest.mark.parametrize("mode", ["legacy", "auto"])
 async def test_forwarded_metadata_does_not_alias_connected_backend(mode: str):
     backend_info = mcp_types.Implementation(name="shared-backend", version="1.0")
