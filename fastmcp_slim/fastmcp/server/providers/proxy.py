@@ -11,8 +11,8 @@ import base64
 import inspect
 import time
 from collections.abc import Awaitable, Callable, Sequence
-from dataclasses import replace
-from typing import TYPE_CHECKING, Any, cast
+from dataclasses import dataclass, replace
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 import anyio
 import httpx2
@@ -52,6 +52,7 @@ from fastmcp.resources.base import (
 from fastmcp.resources.template import expand_uri_template
 from fastmcp.server.context import Context
 from fastmcp.server.dependencies import fastmcp_request_ctx, get_context
+from fastmcp.server.middleware.middleware import CallNext, Middleware, MiddlewareContext
 from fastmcp.server.providers.aggregate import ProviderErrorStrategy
 from fastmcp.server.providers.base import Provider
 from fastmcp.server.server import FastMCP
@@ -66,12 +67,12 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from fastmcp.client.transports import ClientTransport
-    from fastmcp.server.middleware.proxy import ProxyIdentity
 
 logger = get_logger(__name__)
 
 # Type alias for client factory functions
 ClientFactoryT = Callable[[], Client] | Callable[[], Awaitable[Client]]
+ProxyIdentity = Literal["proxy", "upstream"]
 
 
 class _ForwardingClientSession(ClientSession):
@@ -1026,6 +1027,118 @@ class ProxyProvider(Provider):
     # because client cleanup is handled per-request
 
 
+@dataclass(frozen=True)
+class _NegotiationMetadata:
+    instructions: str | None
+    server_info: mcp_types.Implementation | None
+    meta: dict[str, Any]
+
+    @classmethod
+    def from_client(cls, client: Client) -> _NegotiationMetadata | None:
+        result = client.session.initialize_result or client.session.discover_result
+        if result is None:
+            return None
+        return cls(
+            instructions=result.instructions,
+            server_info=client.session.server_info,
+            meta=dict(result.meta or {}),
+        )
+
+
+class ProxyNegotiationMetadataMiddleware(Middleware):
+    """Forward optional negotiation metadata from a ``ProxyProvider`` backend.
+
+    The frontend always owns protocol versions, capabilities, cache policy, and
+    result type. Instructions and namespaced metadata are filled from the
+    backend only where the frontend has no value. ``identity`` controls whether
+    server identity remains the gateway's or is replaced by the backend's.
+    """
+
+    def __init__(
+        self,
+        provider: ProxyProvider,
+        *,
+        identity: ProxyIdentity = "proxy",
+    ) -> None:
+        if identity not in ("proxy", "upstream"):
+            raise ValueError("identity must be 'proxy' or 'upstream'")
+        self.client_factory = provider.client_factory
+        self.identity = identity
+
+    async def _read_upstream(self) -> _NegotiationMetadata | None:
+        try:
+            client = self.client_factory()
+            if inspect.isawaitable(client):
+                client = cast(Client, await client)
+
+            if client.is_connected():
+                return _NegotiationMetadata.from_client(client)
+
+            # A pinned modern client adopts a synthesized DiscoverResult without
+            # contacting the server. Probe with a copy so metadata comes from the
+            # backend without changing the factory's configured mode.
+            if client.mode in MODERN_PROTOCOL_VERSIONS:
+                client = client.new()
+                client.mode = "auto"
+
+            async with client:
+                return _NegotiationMetadata.from_client(client)
+        except (MCPError, *_PROXY_TRANSPORT_ERRORS) as error:
+            logger.debug("Could not read upstream negotiation metadata: %r", error)
+            return None
+
+    def _updates(
+        self,
+        result: mcp_types.InitializeResult | mcp_types.DiscoverResult,
+        upstream: _NegotiationMetadata,
+    ) -> dict[str, Any]:
+        meta = {
+            key: value
+            for key, value in upstream.meta.items()
+            if key != mcp_types.SERVER_INFO_META_KEY
+        }
+        meta.update(result.meta or {})
+
+        updates: dict[str, Any] = {"meta": meta or None}
+        if result.instructions is None and upstream.instructions is not None:
+            updates["instructions"] = upstream.instructions
+        if self.identity == "upstream" and upstream.server_info is not None:
+            if isinstance(result, mcp_types.InitializeResult):
+                updates["server_info"] = upstream.server_info
+            else:
+                meta[mcp_types.SERVER_INFO_META_KEY] = upstream.server_info.model_dump(
+                    by_alias=True, mode="json", exclude_none=True
+                )
+                updates["meta"] = meta
+        return updates
+
+    async def on_initialize(
+        self,
+        context: MiddlewareContext[mcp_types.InitializeRequest],
+        call_next: CallNext[
+            mcp_types.InitializeRequest, mcp_types.InitializeResult | None
+        ],
+    ) -> mcp_types.InitializeResult | None:
+        result = await call_next(context)
+        if result is None:
+            return None
+        upstream = await self._read_upstream()
+        if upstream is None:
+            return result
+        return result.model_copy(update=self._updates(result, upstream))
+
+    async def on_discover(
+        self,
+        context: MiddlewareContext[mcp_types.DiscoverRequest],
+        call_next: CallNext[mcp_types.DiscoverRequest, mcp_types.DiscoverResult],
+    ) -> mcp_types.DiscoverResult:
+        result = await call_next(context)
+        upstream = await self._read_upstream()
+        if upstream is None:
+            return result
+        return result.model_copy(update=self._updates(result, upstream))
+
+
 # -----------------------------------------------------------------------------
 # Factory Functions
 # -----------------------------------------------------------------------------
@@ -1226,10 +1339,6 @@ class FastMCPProxy(FastMCP):
                 the upstream server's. Defaults to ``"proxy"`` for compatibility.
             **kwargs: Additional settings for the FastMCP server.
         """
-        from fastmcp.server.middleware.proxy import (
-            ProxyNegotiationMetadataMiddleware,
-        )
-
         super().__init__(**kwargs)
         self.provider_error_strategy = provider_error_strategy
         self.client_factory = client_factory

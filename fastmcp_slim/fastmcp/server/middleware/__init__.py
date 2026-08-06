@@ -9,7 +9,7 @@ from .middleware import (
 from .ping import PingMiddleware
 
 if TYPE_CHECKING:
-    from .proxy import (
+    from fastmcp.server.providers.proxy import (
         ProxyNegotiationMetadataMiddleware as ProxyNegotiationMetadataMiddleware,
     )
 
@@ -25,7 +25,7 @@ __all__ = [
 
 def __getattr__(name: str) -> object:
     if name == "ProxyNegotiationMetadataMiddleware":
-        from .proxy import ProxyNegotiationMetadataMiddleware
+        from fastmcp.server.providers.proxy import ProxyNegotiationMetadataMiddleware
 
         return ProxyNegotiationMetadataMiddleware
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

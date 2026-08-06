@@ -394,8 +394,11 @@ Add `ProxyNegotiationMetadataMiddleware` when a gateway built with `ProxyProvide
 
 ```python
 from fastmcp import FastMCP
-from fastmcp.server.middleware import ProxyNegotiationMetadataMiddleware
-from fastmcp.server.providers.proxy import ProxyClient, ProxyProvider
+from fastmcp.server.providers.proxy import (
+    ProxyClient,
+    ProxyNegotiationMetadataMiddleware,
+    ProxyProvider,
+)
 
 backend = ProxyProvider(lambda: ProxyClient("http://backend:8000/mcp", mode="auto"))
 gateway = FastMCP(
