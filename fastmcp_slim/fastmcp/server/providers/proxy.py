@@ -1167,7 +1167,10 @@ class ProxyMetadataMiddleware(Middleware):
         self.identity = identity
 
     async def _read_connected(self, client: Client) -> _UpstreamServerMetadata | None:
+        """Read metadata without changing the client's adopted negotiation state."""
         if client.mode in MODERN_PROTOCOL_VERSIONS and client.prior_discover is None:
+            # An exact pin adopts a synthetic result without probing. Read the
+            # real result directly, but do not adopt it into this borrowed session.
             raw = await client.session.send_discover(client.mode)
             result_type = raw.get("resultType")
             if (

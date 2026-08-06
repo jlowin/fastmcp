@@ -60,7 +60,7 @@ To mount a proxy inside another FastMCP server, see [Mounting External Servers](
 
 ## Connection Semantics
 
-FastMCP proxies are lazy bridges. Creating the proxy object and starting the local server do not contact the upstream server. During client negotiation, the proxy makes a best-effort connection to read optional server metadata; an unavailable backend does not prevent the client from connecting to the proxy.
+FastMCP proxies are lazy bridges. Creating the proxy object and starting the local server do not contact the upstream server. During client negotiation, the proxy makes a best-effort request for optional server metadata using the backend client's existing lifecycle and negotiation mode; an unavailable backend does not prevent the client from connecting to the proxy.
 
 Subsequent MCP requests such as `ping`, `tools/list`, `resources/list`, `prompts/list`, tool calls, resource reads, sampling, elicitation, logging, and progress connect to the backend as needed. Component provider failures follow `provider_error_strategy`: the default `"warn"` logs and skips a failed provider, while `"raise"` reports the failure to the client.
 
