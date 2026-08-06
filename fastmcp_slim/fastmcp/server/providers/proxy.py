@@ -1166,6 +1166,19 @@ class ProxyMetadataMiddleware(Middleware):
         self.client_factory = provider.client_factory
         self.identity = identity
 
+    async def _read_connected(self, client: Client) -> _UpstreamServerMetadata | None:
+        if client.mode in MODERN_PROTOCOL_VERSIONS and client.prior_discover is None:
+            raw = await client.session.send_discover(client.mode)
+            result_type = raw.get("resultType")
+            if (
+                isinstance(result_type, str)
+                and result_type not in mcp_types.CORE_RESULT_TYPES
+            ):
+                return None
+            result = mcp_types.DiscoverResult.model_validate(raw)
+            return _UpstreamServerMetadata.from_discover(result)
+        return _UpstreamServerMetadata.from_client(client)
+
     async def _read_upstream(
         self, context: Context | None
     ) -> _UpstreamServerMetadata | None:
@@ -1173,35 +1186,14 @@ class ProxyMetadataMiddleware(Middleware):
         if inspect.isawaitable(client):
             client = cast(Client, await client)
 
-        connected = client.is_connected()
-        synthesized_discover = (
-            client.mode in MODERN_PROTOCOL_VERSIONS and client.prior_discover is None
-        )
-        # A disconnected pinned client can probe with a copy. A connected client
-        # must keep using its existing transport, so query discovery directly
-        # without replacing the result already adopted by its session.
-        if synthesized_discover and not connected:
-            client = client.new()
-            client.mode = "auto"
-
         if context is not None:
             _stash_proxy_request_context(client, context)
 
         try:
-            if synthesized_discover and connected:
-                raw = await client.session.send_discover(client.mode)
-                result_type = raw.get("resultType")
-                if (
-                    isinstance(result_type, str)
-                    and result_type not in mcp_types.CORE_RESULT_TYPES
-                ):
-                    return None
-                result = mcp_types.DiscoverResult.model_validate(raw)
-                return _UpstreamServerMetadata.from_discover(result)
-            if connected:
-                return _UpstreamServerMetadata.from_client(client)
+            if client.is_connected():
+                return await self._read_connected(client)
             async with client:
-                return _UpstreamServerMetadata.from_client(client)
+                return await self._read_connected(client)
         except (MCPError, *_PROXY_TRANSPORT_ERRORS) as error:
             logger.debug("Could not read upstream server metadata: %r", error)
             return None

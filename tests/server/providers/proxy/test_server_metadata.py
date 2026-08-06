@@ -19,6 +19,7 @@ from fastmcp.server.providers.proxy import (
     ProxyInitializeMiddleware,
     ProxyMetadataMiddleware,
     ProxyProvider,
+    StatefulProxyClient,
 )
 from fastmcp.utilities.http import find_available_port
 
@@ -272,7 +273,7 @@ async def test_forwards_backend_logs_while_reading_metadata():
     assert messages == ["metadata connection"]
 
 
-async def test_pinned_clients_use_available_metadata():
+async def test_pinned_client_uses_prior_discover_metadata():
     prior_info = mcp_types.Implementation(name="prior", version="1.0")
     prior = mcp_types.DiscoverResult(
         supported_versions=[MODERN_PROTOCOL_VERSIONS[0]],
@@ -306,6 +307,8 @@ async def test_pinned_clients_use_available_metadata():
         assert result.meta is not None
         assert result.meta["com.example/prior"] is True
 
+
+async def test_connected_pinned_client_probes_without_adopting_metadata():
     version = MODERN_PROTOCOL_VERSIONS[0]
     upstream = make_upstream()
     async with Client(upstream, mode=version) as backend_client:
@@ -320,9 +323,52 @@ async def test_pinned_clients_use_available_metadata():
             assert result.meta is not None
             assert result.meta["com.example/upstream"] == {"enabled": True}
 
-        # The metadata probe must not replace the connected client's adopted
-        # synthetic result.
         assert backend_client.instructions is None
+
+
+async def test_disconnected_pinned_client_is_not_cloned():
+    class UnclonableProxyClient(ProxyClient):
+        def new(self) -> ProxyClient:
+            raise AssertionError("metadata client must not be cloned")
+
+    version = MODERN_PROTOCOL_VERSIONS[0]
+    provider = ProxyProvider(
+        lambda: UnclonableProxyClient(make_upstream(), mode=version)
+    )
+    gateway = FastMCP(
+        "gateway",
+        providers=[provider],
+        middleware=[ProxyMetadataMiddleware(provider, identity="upstream")],
+    )
+
+    async with Client(gateway, mode="auto") as client:
+        assert client.instructions == "upstream instructions"
+        assert client.server_info == UPSTREAM_INFO
+
+
+async def test_stateful_pinned_metadata_uses_registered_client_lifecycle():
+    created: list[StatefulProxyClient] = []
+
+    class TrackingStatefulProxyClient(StatefulProxyClient):
+        def new(self) -> StatefulProxyClient:
+            client = super().new()
+            created.append(client)
+            return client
+
+    version = MODERN_PROTOCOL_VERSIONS[0]
+    stateful_client = TrackingStatefulProxyClient(make_upstream(), mode=version)
+    proxy = FastMCPProxy(
+        name="stateful-proxy",
+        client_factory=stateful_client.new_stateful,
+        identity="upstream",
+    )
+
+    async with Client(proxy, mode="auto") as client:
+        assert client.instructions == "upstream instructions"
+        assert client.server_info == UPSTREAM_INFO
+
+    assert len(created) == 1
+    assert not created[0].is_connected()
 
 
 async def test_client_factory_errors_are_not_swallowed():
