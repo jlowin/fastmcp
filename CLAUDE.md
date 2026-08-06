@@ -56,6 +56,8 @@ When modifying MCP functionality, changes typically need to be applied across al
 
 **Read `CONTRIBUTING.md` before opening issues or PRs.** It describes when PRs are appropriate, what we expect from enhancement proposals, and what we'll close without review.
 
+**Review closed contributor PRs.** When reviewing an issue, inspect every associated non-maintainer PR, including closed PRs. External PRs may be closed as part of the issue-link and assignment workflow, so closure alone is not a negative signal. Read `CONTRIBUTING.md` and the PR timeline and comments to understand its status before evaluating it.
+
 ### Git & CI
 
 - Prek hooks are required (run automatically on commits)
