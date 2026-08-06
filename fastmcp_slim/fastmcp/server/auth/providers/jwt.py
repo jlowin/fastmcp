@@ -6,7 +6,7 @@ import contextlib
 import json
 import time
 from dataclasses import dataclass
-from typing import Any, TypeAlias, cast
+from typing import Any, Literal, TypeAlias, cast
 
 import httpx
 from cryptography.hazmat.primitives import serialization
@@ -29,14 +29,20 @@ JWKKeyData: TypeAlias = dict[str, str | list[str]]
 SUPPORTED_JWS_HEADER_FIELDS = frozenset(JWS_HEADER_REGISTRY)
 
 
-def _import_key_for_algorithm(key: str | bytes | JWKKeyData, algorithm: str):
+def _key_type_for_algorithm(algorithm: str) -> Literal["oct", "RSA", "EC", "OKP"]:
     if algorithm.startswith("HS"):
-        return jwk.import_key(key, "oct")
+        return "oct"
     if algorithm.startswith(("RS", "PS")):
-        return jwk.import_key(key, "RSA")
+        return "RSA"
     if algorithm.startswith("ES"):
-        return jwk.import_key(key, "EC")
+        return "EC"
+    if algorithm in {"EdDSA", "Ed25519", "Ed448"}:
+        return "OKP"
     raise ValueError(f"Unsupported algorithm: {algorithm}.")
+
+
+def _import_key_for_algorithm(key: str | bytes | JWKKeyData, algorithm: str):
+    return jwk.import_key(key, _key_type_for_algorithm(algorithm))
 
 
 def _jwk_to_pem(key_data: JWKKeyData) -> str:
@@ -45,6 +51,8 @@ def _jwk_to_pem(key_data: JWKKeyData) -> str:
         return jwk.import_key(key_data, "RSA").as_pem().decode("utf-8")
     if key_type == "EC":
         return jwk.import_key(key_data, "EC").as_pem().decode("utf-8")
+    if key_type == "OKP":
+        return jwk.import_key(key_data, "OKP").as_pem().decode("utf-8")
     raise ValueError(f"Unsupported JWK key type: {key_type!r}")
 
 
@@ -72,6 +80,8 @@ class JWKData(TypedDict, total=False):
     alg: str  # Algorithm (e.g., "RS256")
     n: str  # Modulus (for RSA keys)
     e: str  # Exponent (for RSA keys)
+    crv: str  # Curve name (for EC and OKP keys)
+    x: str  # Public key coordinate (for EC and OKP keys)
     x5c: list[str]  # X.509 certificate chain (for JWKs)
     x5t: str  # X.509 certificate thumbprint (for JWKs)
 
@@ -194,10 +204,11 @@ def _looks_like_pem_public_key(key: str | bytes) -> bool:
 
 class JWTVerifier(TokenVerifier):
     """
-    JWT token verifier supporting both asymmetric (RSA/ECDSA) and symmetric (HMAC) algorithms.
+    JWT token verifier supporting asymmetric (RSA/ECDSA/EdDSA) and symmetric (HMAC) algorithms.
 
     This verifier validates JWT tokens using various signing algorithms:
-    - **Asymmetric algorithms** (RS256/384/512, ES256/384/512, PS256/384/512):
+    - **Asymmetric algorithms** (RS256/384/512, ES256/384/512, PS256/384/512,
+      Ed25519, Ed448, and legacy EdDSA):
       Uses public/private key pairs. Ideal for external clients and services where
       only the authorization server has the private key.
     - **Symmetric algorithms** (HS256/384/512): Uses a shared secret for both
@@ -232,7 +243,7 @@ class JWTVerifier(TokenVerifier):
             jwks_uri: URI to fetch a JSON Web Key Set; used when verifying tokens with remote JWKS.
             issuer: Expected issuer claim value or list of allowed issuer values.
             audience: Expected audience claim value or list of allowed audience values.
-            algorithm: JWT signing algorithm to accept (default: "RS256"). Supported: HS256/384/512, RS256/384/512, ES256/384/512, PS256/384/512.
+            algorithm: JWT signing algorithm to accept (default: "RS256"). Supported: HS256/384/512, RS256/384/512, ES256/384/512, PS256/384/512, Ed25519, Ed448, and legacy EdDSA.
             required_scopes: Scopes that must be present in validated tokens.
             base_url: Base URL passed to the parent TokenVerifier.
             ssrf_safe: If True, JWKS fetches use SSRF protection (HTTPS-only,
@@ -275,6 +286,9 @@ class JWTVerifier(TokenVerifier):
             "PS256",
             "PS384",
             "PS512",
+            "EdDSA",
+            "Ed25519",
+            "Ed448",
         }:
             raise ValueError(f"Unsupported algorithm: {algorithm}.")
 
@@ -347,19 +361,31 @@ class JWTVerifier(TokenVerifier):
         try:
             jwks_data = await self._fetch_jwks()
 
-            # Cache all usable keys. A key that cannot be converted (e.g. an
-            # unsupported kty like OKP/Ed25519) is skipped rather than failing
-            # the whole set — per RFC 7517 §5, clients should ignore JWKs they
-            # don't understand. Otherwise one exotic key published by the
-            # authorization server would reject every token, including ones
-            # signed by supported keys in the same set (#4515).
+            # Cache all usable keys. A key that cannot be converted is skipped
+            # rather than failing the whole set — per RFC 7517 §5, clients
+            # should ignore JWKs they don't understand. Otherwise one exotic
+            # key published by the authorization server would reject every
+            # token, including ones signed by supported keys in the same set
+            # (#4515).
             self._jwks_cache = {}
             skipped_kids: set[str] = set()
+            expected_key_type = _key_type_for_algorithm(self.algorithm)
             for key_data in jwks_data.get("keys", []):
                 if not isinstance(key_data, dict):
                     self.logger.debug("Skipping non-object JWKS entry: %r", key_data)
                     continue
                 key_kid = key_data.get("kid")
+                if key_data.get("kty") != expected_key_type:
+                    self.logger.debug(
+                        "Skipping JWKS key %r: key type %r is incompatible "
+                        "with algorithm %s",
+                        key_kid,
+                        key_data.get("kty"),
+                        self.algorithm,
+                    )
+                    if key_kid:
+                        skipped_kids.add(key_kid)
+                    continue
                 try:
                     public_key = _jwk_to_pem(key_data)
                 except (JoseError, TypeError, KeyError, ValueError) as e:
