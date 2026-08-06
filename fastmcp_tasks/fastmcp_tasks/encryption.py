@@ -12,7 +12,9 @@ that restores a snapshot is rarely the one that captured it.
 
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
 from functools import lru_cache
+from typing import ClassVar
 
 import fastmcp
 from fastmcp.utilities.logging import get_logger
@@ -38,14 +40,47 @@ class SnapshotDecryptionError(Exception):
     """
 
 
-class SnapshotCodec:
-    """Encrypts and decrypts snapshot payloads with a key derived from material.
+class SnapshotCodec(ABC):
+    """Transforms snapshot payloads on their way to and from the backend.
+
+    ``protected`` tells the restore path which failure contract applies: a
+    protected snapshot that cannot be restored fails the task, an unprotected
+    one degrades to an anonymous run with a warning.
+    """
+
+    protected: ClassVar[bool]
+
+    @abstractmethod
+    def encode(self, payload: str) -> str:
+        """Return the stored form of a serialized snapshot."""
+
+    @abstractmethod
+    def decode(self, stored: str | bytes) -> str:
+        """Return the serialized snapshot a stored value holds."""
+
+
+class PlaintextCodec(SnapshotCodec):
+    """Stores snapshots as-is; the contract when no encryption key is set."""
+
+    protected = False
+
+    def encode(self, payload: str) -> str:
+        return payload
+
+    def decode(self, stored: str | bytes) -> str:
+        return stored.decode() if isinstance(stored, bytes) else stored
+
+
+class EncryptedCodec(SnapshotCodec):
+    """Encrypts snapshot payloads with a key derived from material.
 
     The material is a string from the environment, and nothing about a string
     proves it is random, so it is always treated as low-entropy: the Fernet key
     comes from PBKDF2, never from HKDF. The stretch costs about a second, paid
     once per process (see ``_codec_for``).
     """
+
+    protected = True
 
     def __init__(self, material: str) -> None:
         from cryptography.fernet import Fernet
@@ -90,21 +125,24 @@ class SnapshotCodec:
             ) from e
 
 
+_PLAINTEXT_CODEC = PlaintextCodec()
+
+
 @lru_cache(maxsize=4)
-def _codec_for(material: str) -> SnapshotCodec:
+def _codec_for(material: str) -> EncryptedCodec:
     """One codec per key, so the derivation cost is paid once per process.
 
     The PBKDF2 stretch takes about a second, and every task submission and
     every restore needs a codec.
     """
-    return SnapshotCodec(material)
+    return EncryptedCodec(material)
 
 
-def snapshot_codec() -> SnapshotCodec | None:
-    """The codec for the configured key, or ``None`` when none is configured."""
+def snapshot_codec() -> SnapshotCodec:
+    """The codec for the configured key; the plaintext codec when none is set."""
     key = fastmcp.settings.encryption_key
     if key is None:
-        return None
+        return _PLAINTEXT_CODEC
     return _codec_for(key.get_secret_value())
 
 

@@ -18,7 +18,8 @@ from unittest.mock import patch
 import pytest
 from fastmcp_tasks.context import TaskContextSnapshot
 from fastmcp_tasks.encryption import (
-    SnapshotCodec,
+    EncryptedCodec,
+    PlaintextCodec,
     SnapshotDecryptionError,
     clear_codec_cache,
     snapshot_codec,
@@ -84,41 +85,49 @@ def sensitive_snapshot() -> TaskContextSnapshot:
 
 class TestSnapshotCodec:
     def test_round_trips_a_payload(self):
-        codec = SnapshotCodec(KEY)
+        codec = EncryptedCodec(KEY)
         assert codec.decode(codec.encode('{"a": 1}')) == '{"a": 1}'
 
     def test_encoded_payload_hides_the_credentials(
         self, sensitive_snapshot: TaskContextSnapshot
     ):
-        encoded = SnapshotCodec(KEY).encode(sensitive_snapshot.to_json())
+        encoded = EncryptedCodec(KEY).encode(sensitive_snapshot.to_json())
         assert "token-client-a-user-1" not in encoded
         assert "authorization" not in encoded
 
     def test_decode_rejects_another_keys_payload(self):
-        encoded = SnapshotCodec(OTHER_KEY).encode('{"a": 1}')
+        encoded = EncryptedCodec(OTHER_KEY).encode('{"a": 1}')
         with pytest.raises(SnapshotDecryptionError):
-            SnapshotCodec(KEY).decode(encoded)
+            EncryptedCodec(KEY).decode(encoded)
 
     def test_decode_rejects_plaintext(self):
         """A snapshot written before the key was set must not be trusted."""
         with pytest.raises(SnapshotDecryptionError):
-            SnapshotCodec(KEY).decode('{"access_token_json": null}')
+            EncryptedCodec(KEY).decode('{"access_token_json": null}')
 
     def test_empty_material_is_rejected(self):
         """An empty key would derive a universally reproducible Fernet key."""
         with pytest.raises(ValueError, match="must not be empty"):
-            SnapshotCodec("")
+            EncryptedCodec("")
 
     def test_decode_accepts_bytes(self):
         """Redis hands back bytes on some backends."""
-        codec = SnapshotCodec(KEY)
+        codec = EncryptedCodec(KEY)
         assert codec.decode(codec.encode('{"a": 1}').encode()) == '{"a": 1}'
 
     def test_same_key_reuses_one_codec(self, encryption_key: str):
         assert snapshot_codec() is snapshot_codec()
 
-    def test_no_codec_without_a_key(self, no_encryption_key: None):
-        assert snapshot_codec() is None
+    def test_plaintext_codec_without_a_key(self, no_encryption_key: None):
+        codec = snapshot_codec()
+        assert isinstance(codec, PlaintextCodec)
+        assert not codec.protected
+
+    def test_plaintext_codec_is_a_pass_through(self):
+        codec = PlaintextCodec()
+        assert codec.encode('{"a": 1}') == '{"a": 1}'
+        assert codec.decode('{"a": 1}') == '{"a": 1}'
+        assert codec.decode(b'{"a": 1}') == '{"a": 1}'
 
 
 class TestSnapshotSerialization:
@@ -227,7 +236,7 @@ class TestEncryptedSnapshotRoundTrip:
         cause has to come from the log.
         """
         token = make_access_token("client-a", "user-1")
-        tampered = SnapshotCodec(OTHER_KEY).encode(TaskContextSnapshot().to_json())
+        tampered = EncryptedCodec(OTHER_KEY).encode(TaskContextSnapshot().to_json())
 
         with caplog.at_level(logging.ERROR, logger="fastmcp_tasks.context"):
             async with running_task_server(echo_token_server):
@@ -348,7 +357,7 @@ class TestTaskStillResolvesAfterFailure:
     ):
         """A fail-closed task is still a well-formed `tasks/get` result."""
         token = make_access_token("client-a", "user-1")
-        tampered = SnapshotCodec(OTHER_KEY).encode(TaskContextSnapshot().to_json())
+        tampered = EncryptedCodec(OTHER_KEY).encode(TaskContextSnapshot().to_json())
 
         async with running_task_server(echo_token_server):
             created = await submit_task(

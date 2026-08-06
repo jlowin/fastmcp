@@ -235,10 +235,7 @@ class TaskContextSnapshot:
         read it (#4747).
         """
         key = docket.key(f"{task_redis_prefix(task_scope)}:{task_id}:snapshot")
-        codec = snapshot_codec()
-        payload = self.to_json()
-        if codec is not None:
-            payload = codec.encode(payload)
+        payload = snapshot_codec().encode(self.to_json())
         async with docket.redis() as redis:
             await redis.set(key, payload, ex=ttl_seconds)
 
@@ -313,8 +310,8 @@ async def restore_task_snapshot(key: str = TaskKey()) -> None:
     from fastmcp_tasks.dependencies import _current_docket
 
     # Resolved before anything can fail: a misconfigured key (e.g. an empty
-    # string) raises here and fails the task, and the except blocks below read
-    # it to pick between the fail-open and fail-closed contracts.
+    # string) raises here and fails the task, and the branches below read
+    # `codec.protected` to pick between the fail-open and fail-closed contracts.
     codec = snapshot_codec()
 
     try:
@@ -324,7 +321,7 @@ async def restore_task_snapshot(key: str = TaskKey()) -> None:
     if docket is None:
         docket = _current_docket.get()
     if docket is None:
-        if codec is not None:
+        if codec.protected:
             raise RuntimeError(
                 "No Docket backend is available to retrieve the protected "
                 "task snapshot, so the submitting caller cannot be recovered."
@@ -339,15 +336,13 @@ async def restore_task_snapshot(key: str = TaskKey()) -> None:
                 docket.key(f"{task_redis_prefix(task_scope)}:{task_id}:snapshot")
             )
         if raw is None:
-            if codec is None:
+            if not codec.protected:
                 return
             raise RuntimeError(
                 "The task's context snapshot is missing (its TTL may have "
                 "expired), so the submitting caller cannot be recovered."
             )
-        if codec is not None:
-            raw = codec.decode(raw)
-        snapshot = TaskContextSnapshot.from_json(raw)
+        snapshot = TaskContextSnapshot.from_json(codec.decode(raw))
         _remember_snapshot(task_id, snapshot)
         # Restore the ambient request context (auth token, headers) so core's
         # get_access_token()/get_http_headers() see the submitting caller inside
@@ -365,7 +360,7 @@ async def restore_task_snapshot(key: str = TaskKey()) -> None:
         )
         raise
     except Exception:
-        if codec is not None:
+        if codec.protected:
             _logger.error(
                 "Failed to restore the protected task snapshot for %s. The task "
                 "will fail rather than run without the submitting caller's "
