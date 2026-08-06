@@ -1,0 +1,180 @@
+---
+title: "Protocol Support"
+description: "MCP protocol versions supported by FastMCP and their feature coverage"
+icon: "layer-group"
+---
+
+FastMCP supports multiple MCP protocol versions simultaneously, negotiating the best mutual version for each connection. This page documents which protocol versions are supported, what features are available in each, and the current conformance test status.
+
+## Supported Protocol Versions
+
+FastMCP serves two protocol eras from a single deployment:
+
+| Protocol Version | Era | Connection Style | FastMCP Support |
+|-----------------|-----|-----------------|-----------------|
+| `2024-11-05` | Handshake | Session-based | ✅ Server + Client |
+| `2025-03-26` | Handshake | Session-based | ✅ Server + Client |
+| `2025-06-18` | Handshake | Session-based | ✅ Server + Client |
+| `2025-11-25` | Handshake | Session-based | ✅ Server + Client |
+| `2026-07-28` | Modern | Sessionless | ✅ Server + Client |
+
+The **handshake era** uses `initialize` to establish a persistent session. The **modern era** uses `server/discover` for stateless request-response cycles where any replica behind a load balancer can answer any request.
+
+## Version Negotiation
+
+FastMCP auto-detects the protocol era per connection:
+
+- **Server**: responds to both `server/discover` (modern) and `initialize` (handshake) without configuration.
+- **Client**: `Client(mode="auto")` (the default) probes for the modern protocol and falls back to the handshake when necessary. Pin `mode="legacy"` to force the handshake era.
+
+```python
+from fastmcp import Client
+
+# Auto-negotiate (default) — tries modern first, falls back to handshake
+client = Client("https://example.com/mcp")
+
+# Force handshake-era protocol
+legacy = Client("https://example.com/mcp", mode="legacy")
+
+# Force a specific modern version
+modern = Client("https://example.com/mcp", mode="2026-07-28")
+```
+
+## Feature Support Matrix
+
+### Core MCP Primitives
+
+| Feature | Handshake Era | Modern Era (`2026-07-28`) |
+|---------|:------------:|:-------------------------:|
+| Tools (list, call) | ✅ | ✅ |
+| Resources (list, read, templates) | ✅ | ✅ |
+| Prompts (list, get) | ✅ | ✅ |
+| Pagination | ✅ | ✅ |
+| Completions | ✅ | ✅ |
+| Tool annotations | ✅ | ✅ |
+
+### Interactivity
+
+| Feature | Handshake Era | Modern Era (`2026-07-28`) |
+|---------|:------------:|:-------------------------:|
+| Elicitation (server-initiated) | ✅ via back-channel | ❌ No back-channel |
+| Elicitation (multi-round-trip) | ❌ | ✅ `InputRequiredResult` pattern |
+| Sampling | ✅ via back-channel | ❌ No back-channel |
+| Progress notifications | ✅ | ✅ |
+| Logging | ✅ | ✅ |
+
+<Note>
+The modern protocol (`2026-07-28`) removed the server-initiated back-channel (SEP-2577). Features that relied on it — sampling and legacy elicitation — use the multi-round-trip pattern instead, where a tool returns `InputRequiredResult` and re-runs per round.
+</Note>
+
+### Authentication & Authorization
+
+| Feature | Handshake Era | Modern Era (`2026-07-28`) |
+|---------|:------------:|:-------------------------:|
+| OAuth 2.1 (Authorization Server) | ✅ | ✅ |
+| Dynamic Client Registration | ✅ | ✅ |
+| JWT verification | ✅ | ✅ |
+| Protected-resource metadata (RFC 9728) | ✅ | ✅ |
+| Identity assertion (SEP-990) | ❌ | ✅ |
+| Tool-level authorization scopes | ✅ | ✅ |
+
+### Background Tasks
+
+| Feature | Handshake Era | Modern Era (`2026-07-28`) |
+|---------|:------------:|:-------------------------:|
+| Background tasks (SEP-2663) | ❌ | ✅ |
+| Task status polling | ❌ | ✅ |
+| Task cancellation | ❌ | ✅ |
+| Task input gathering (multi-round-trip) | ❌ | ✅ |
+
+### Server Capabilities
+
+| Feature | Handshake Era | Modern Era (`2026-07-28`) |
+|---------|:------------:|:-------------------------:|
+| Middleware pipeline | ✅ | ✅ |
+| Provider system (proxy, aggregate, filesystem, OpenAPI) | ✅ | ✅ |
+| Transform system (visibility, namespace, search, versioning) | ✅ | ✅ |
+| Server composition (`mount()`) | ✅ | ✅ |
+| Cache hints (SEP-2549) | ❌ | ✅ |
+| Distributed response caching | ❌ | ✅ |
+| Sessions / stateful user context | ✅ Transport sessions | ✅ `SessionProvider` |
+| Resource path security (traversal protection) | ✅ | ✅ |
+| Gateway routing headers | ❌ | ✅ |
+
+### Client Capabilities
+
+| Feature | Handshake Era | Modern Era (`2026-07-28`) |
+|---------|:------------:|:-------------------------:|
+| Tool calling | ✅ | ✅ |
+| Resource reading | ✅ | ✅ |
+| Prompt retrieval | ✅ | ✅ |
+| Client-side response caching | ❌ | ✅ |
+| Roots | ✅ | ❌ No back-channel |
+| Notifications | ✅ | ✅ |
+| Task management | ❌ | ✅ |
+
+### Telemetry
+
+| Feature | Handshake Era | Modern Era (`2026-07-28`) |
+|---------|:------------:|:-------------------------:|
+| OpenTelemetry spans | ✅ | ✅ |
+| `_meta` trace context propagation | ✅ | ✅ |
+| HTTP trace context propagation | ✅ | ✅ |
+
+## Conformance Testing
+
+FastMCP runs the official [MCP conformance test suite](https://github.com/modelcontextprotocol/conformance) as part of CI. The suite is pinned to a specific version to prevent upstream releases from causing unrelated CI failures.
+
+### Current Status
+
+- **Suite version**: `@modelcontextprotocol/conformance@0.2.0-alpha.10`
+- **Mode**: `--suite all` (includes draft and pending scenarios)
+- **Platforms**: Ubuntu (Linux), Python 3.10 and 3.13
+
+### Expected Failures
+
+The following scenarios are known gaps with documented reasons:
+
+| Scenario | Reason |
+|----------|--------|
+| `resources-subscribe` | Resource subscriptions are not implemented. Removed in MCP `2026-07-28`. |
+| `resources-unsubscribe` | Same as above — affects handshake-era clients only. |
+| `tasks-mrtr-composition` | SEP-2663 task/MRTR composition requires an unmade API design decision. FastMCP uses `input_required` + `tasks/update` instead. |
+
+### Running Conformance Tests Locally
+
+```bash
+# Requires Node.js and npx
+uv run pytest -m conformance
+```
+
+## Protocol Version in Application Code
+
+After connection, the negotiated version is available programmatically:
+
+```python
+from fastmcp import Client
+
+async with Client("https://example.com/mcp") as client:
+    print(client.protocol_version)      # e.g. "2026-07-28"
+    print(client.server_capabilities)   # negotiated capabilities
+    print(client.server_info)           # server metadata
+```
+
+On the server side, tools can inspect the connection's protocol version through the request context:
+
+```python
+from fastmcp import Context, FastMCP
+
+mcp = FastMCP("Demo")
+
+@mcp.tool
+async def my_tool(ctx: Context) -> str:
+    rc = ctx.request_context
+    if rc and rc.protocol_version == "2026-07-28":
+        # Modern-era behavior
+        ...
+    else:
+        # Handshake-era behavior
+        ...
+```

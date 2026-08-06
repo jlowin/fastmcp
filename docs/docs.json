@@ -375,6 +375,7 @@
                       "development/contributing",
                       "development/tests",
                       "development/releases",
+                      "development/protocol-support",
                       "patterns/contrib"
                     ]
                   },
