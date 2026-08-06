@@ -1182,13 +1182,15 @@ class ProxyMetadataMiddleware(Middleware):
             return _UpstreamServerMetadata.from_discover(result)
         return _UpstreamServerMetadata.from_client(client)
 
-    async def _read_upstream(
-        self, context: Context | None
-    ) -> _UpstreamServerMetadata | None:
+    async def _create_client(self) -> Client:
         client = self.client_factory()
         if inspect.isawaitable(client):
             client = cast(Client, await client)
+        return client
 
+    async def _read_upstream(
+        self, client: Client, context: Context | None
+    ) -> _UpstreamServerMetadata | None:
         if context is not None:
             _stash_proxy_request_context(client, context)
 
@@ -1229,10 +1231,11 @@ class ProxyMetadataMiddleware(Middleware):
             mcp_types.InitializeRequest, mcp_types.InitializeResult | None
         ],
     ) -> mcp_types.InitializeResult | None:
+        client = await self._create_client()
         result = await call_next(context)
         if result is None:
             return None
-        upstream = await self._read_upstream(context.fastmcp_context)
+        upstream = await self._read_upstream(client, context.fastmcp_context)
         if upstream is None:
             return result
         return result.model_copy(update=self._updates(result, upstream))
@@ -1248,7 +1251,8 @@ class ProxyMetadataMiddleware(Middleware):
         result = await call_next(context)
         if not isinstance(result, mcp_types.DiscoverResult):
             return result
-        upstream = await self._read_upstream(context.fastmcp_context)
+        client = await self._create_client()
+        upstream = await self._read_upstream(client, context.fastmcp_context)
         if upstream is None:
             return result
         return result.model_copy(update=self._updates(result, upstream))

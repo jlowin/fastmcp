@@ -388,6 +388,31 @@ async def test_client_factory_errors_are_not_swallowed():
 
 
 @pytest.mark.parametrize("frontend_mode", ["legacy", "auto"])
+@pytest.mark.parametrize("async_factory", [False, True])
+async def test_client_factory_mcp_errors_are_not_swallowed(
+    frontend_mode: str, async_factory: bool
+):
+    def broken_factory() -> Client:
+        raise MCPError(code=mcp_types.INTERNAL_ERROR, message="broken client factory")
+
+    async def broken_async_factory() -> Client:
+        raise MCPError(code=mcp_types.INTERNAL_ERROR, message="broken client factory")
+
+    factory = broken_async_factory if async_factory else broken_factory
+    provider = ProxyProvider(factory)
+    gateway = FastMCP(
+        "gateway",
+        providers=[provider],
+        middleware=[ProxyMetadataMiddleware(provider)],
+    )
+
+    match = "broken client factory" if frontend_mode == "legacy" else None
+    with pytest.raises(MCPError, match=match):
+        async with Client(gateway, mode=frontend_mode):
+            pass
+
+
+@pytest.mark.parametrize("frontend_mode", ["legacy", "auto"])
 async def test_unavailable_backend_does_not_block_connection(frontend_mode: str):
     port = find_available_port()
     provider = ProxyProvider(
