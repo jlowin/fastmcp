@@ -1045,7 +1045,7 @@ class _NegotiationMetadata:
         )
 
 
-class ProxyNegotiationMetadataMiddleware(Middleware):
+class ProxyNegotiationMiddleware(Middleware):
     """Forward optional negotiation metadata from a ``ProxyProvider`` backend.
 
     The frontend always owns protocol versions, capabilities, cache policy, and
@@ -1344,9 +1344,7 @@ class FastMCPProxy(FastMCP):
         self.client_factory = client_factory
         provider = ProxyProvider(client_factory)
         self.add_provider(provider)
-        self.middleware.append(
-            ProxyNegotiationMetadataMiddleware(provider, identity=identity)
-        )
+        self.middleware.append(ProxyNegotiationMiddleware(provider, identity=identity))
         self._setup_proxy_ping_handler()
 
     async def _get_client(self) -> Client:

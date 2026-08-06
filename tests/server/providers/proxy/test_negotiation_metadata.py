@@ -11,13 +11,12 @@ from mcp_types.version import MODERN_PROTOCOL_VERSIONS
 from fastmcp import Client, FastMCP
 from fastmcp.client.transports import StreamableHttpTransport
 from fastmcp.server import create_proxy
-from fastmcp.server.middleware import (
-    CallNext,
-    Middleware,
-    MiddlewareContext,
-    ProxyNegotiationMetadataMiddleware,
+from fastmcp.server.middleware import CallNext, Middleware, MiddlewareContext
+from fastmcp.server.providers.proxy import (
+    ProxyClient,
+    ProxyNegotiationMiddleware,
+    ProxyProvider,
 )
-from fastmcp.server.providers.proxy import ProxyClient, ProxyProvider
 from fastmcp.utilities.http import find_available_port
 
 ResultT = TypeVar("ResultT", bound=mcp_types.Result)
@@ -132,7 +131,7 @@ def make_gateway(
     frontend_metadata: bool = False,
 ) -> FastMCP:
     provider = ProxyProvider(lambda: ProxyClient(upstream, mode=backend_mode))
-    negotiation = ProxyNegotiationMetadataMiddleware(provider, identity=identity)
+    negotiation = ProxyNegotiationMiddleware(provider, identity=identity)
     middleware: list[Middleware] = [negotiation]
     if frontend_metadata:
         middleware.append(FrontendMetadataMiddleware())
@@ -235,7 +234,7 @@ async def test_unavailable_backend_does_not_fail_negotiation(frontend_mode: str)
     gateway = FastMCP(
         "available-gateway",
         providers=[provider],
-        middleware=[ProxyNegotiationMetadataMiddleware(provider)],
+        middleware=[ProxyNegotiationMiddleware(provider)],
     )
     gateway.provider_error_strategy = "raise"
 
@@ -258,7 +257,7 @@ def test_gateway_construction_does_not_create_backend_client():
     FastMCP(
         "lazy-gateway",
         providers=[provider],
-        middleware=[ProxyNegotiationMetadataMiddleware(provider)],
+        middleware=[ProxyNegotiationMiddleware(provider)],
     )
 
     assert calls == 0
@@ -268,7 +267,7 @@ async def test_fastmcp_proxy_uses_public_negotiation_middleware():
     proxy = create_proxy(make_upstream(), name="convenience", identity="upstream")
 
     assert any(
-        isinstance(middleware, ProxyNegotiationMetadataMiddleware)
+        isinstance(middleware, ProxyNegotiationMiddleware)
         for middleware in proxy.middleware
     )
     async with Client(proxy, mode="auto") as client:
