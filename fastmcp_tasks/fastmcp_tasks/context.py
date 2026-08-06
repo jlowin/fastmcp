@@ -297,10 +297,11 @@ async def restore_task_snapshot(key: str = TaskKey()) -> None:
     still runs, and sync helpers return ``None`` as they would have before
     the snapshot was captured.
 
-    A snapshot that will not decrypt is the one exception. When the deployment
-    configured an encryption key, an unreadable snapshot means the caller cannot
-    be recovered, so the task fails rather than running under no identity at all
-    (#4747).
+    Configuring an encryption key changes that contract. The operator asked for
+    fail-closed protection, so any failure to retrieve, decrypt, parse, or apply
+    the snapshot, including a snapshot that is simply missing, escapes this
+    dependency and fails the task, rather than running the tool without the
+    submitting caller's identity (#4747).
     """
     try:
         parts = parse_task_key(key)
@@ -311,6 +312,11 @@ async def restore_task_snapshot(key: str = TaskKey()) -> None:
     from fastmcp.server.dependencies import get_server
     from fastmcp_tasks.dependencies import _current_docket
 
+    # Resolved before anything can fail: a misconfigured key (e.g. an empty
+    # string) raises here and fails the task, and the except blocks below read
+    # it to pick between the fail-open and fail-closed contracts.
+    codec = snapshot_codec()
+
     try:
         docket = get_server()._docket
     except RuntimeError:
@@ -318,6 +324,11 @@ async def restore_task_snapshot(key: str = TaskKey()) -> None:
     if docket is None:
         docket = _current_docket.get()
     if docket is None:
+        if codec is not None:
+            raise RuntimeError(
+                "No Docket backend is available to retrieve the protected "
+                "task snapshot, so the submitting caller cannot be recovered."
+            )
         return
 
     task_scope = parts["task_scope"]
@@ -328,8 +339,12 @@ async def restore_task_snapshot(key: str = TaskKey()) -> None:
                 docket.key(f"{task_redis_prefix(task_scope)}:{task_id}:snapshot")
             )
         if raw is None:
-            return
-        codec = snapshot_codec()
+            if codec is None:
+                return
+            raise RuntimeError(
+                "The task's context snapshot is missing (its TTL may have "
+                "expired), so the submitting caller cannot be recovered."
+            )
         if codec is not None:
             raw = codec.decode(raw)
         snapshot = TaskContextSnapshot.from_json(raw)
@@ -350,6 +365,15 @@ async def restore_task_snapshot(key: str = TaskKey()) -> None:
         )
         raise
     except Exception:
+        if codec is not None:
+            _logger.error(
+                "Failed to restore the protected task snapshot for %s. The task "
+                "will fail rather than run without the submitting caller's "
+                "identity.",
+                key,
+                exc_info=True,
+            )
+            raise
         _logger.warning("Failed to restore task snapshot for %s", key, exc_info=True)
 
 

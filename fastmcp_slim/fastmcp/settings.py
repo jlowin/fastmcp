@@ -279,8 +279,9 @@ class Settings(BaseSettings):
                 sharing a task queue must set the same key; a worker that cannot
                 decrypt a snapshot fails the task rather than running it as an
                 anonymous caller. When unset, the snapshot is stored as
-                plaintext JSON. Any string works, because the Fernet key is
-                derived from it, but use at least 32 random characters.
+                plaintext JSON. The Fernet key is derived from this value with
+                PBKDF2, so any non-empty string works, but use at least 32
+                random characters.
                 """
             ),
         ),

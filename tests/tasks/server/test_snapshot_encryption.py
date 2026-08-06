@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import Iterator
+from unittest.mock import patch
 
 import pytest
 from fastmcp_tasks.context import TaskContextSnapshot
@@ -103,6 +104,11 @@ class TestSnapshotCodec:
         with pytest.raises(SnapshotDecryptionError):
             SnapshotCodec(KEY).decode('{"access_token_json": null}')
 
+    def test_empty_material_is_rejected(self):
+        """An empty key would derive a universally reproducible Fernet key."""
+        with pytest.raises(ValueError, match="must not be empty"):
+            SnapshotCodec("")
+
     def test_decode_accepts_bytes(self):
         """Redis hands back bytes on some backends."""
         codec = SnapshotCodec(KEY)
@@ -145,6 +151,15 @@ async def _write_stored_snapshot(
     key = docket.key(f"{task_redis_prefix(task_scope)}:{task_id}:snapshot")
     async with docket.redis() as redis:
         await redis.set(key, payload)
+
+
+async def _delete_stored_snapshot(mcp: FastMCP, task_scope: str, task_id: str) -> None:
+    """Remove a task's stored snapshot, as a TTL expiry would."""
+    docket = mcp._docket
+    assert docket is not None
+    key = docket.key(f"{task_redis_prefix(task_scope)}:{task_id}:snapshot")
+    async with docket.redis() as redis:
+        await redis.delete(key)
 
 
 @pytest.fixture
@@ -232,6 +247,56 @@ class TestEncryptedSnapshotRoundTrip:
         assert final.status == "failed"
         assert final.error is not None
         assert "FASTMCP_ENCRYPTION_KEY" in caplog.text
+
+    async def test_missing_snapshot_fails_the_task(
+        self, echo_token_server: FastMCP, encryption_key: str
+    ):
+        """Fail closed extends to a snapshot that is gone, not just unreadable.
+
+        A missing snapshot is reachable in production through TTL expiry, and
+        it loses the caller just as completely as a wrong key does.
+        """
+        token = make_access_token("client-a", "user-1")
+
+        async with running_task_server(echo_token_server):
+            created = await submit_task(
+                echo_token_server, "whoami", {}, access_token=token
+            )
+            await _delete_stored_snapshot(
+                echo_token_server, "client-a|user-1", created.task_id
+            )
+            final = await wait_for_task(
+                echo_token_server,
+                created.task_id,
+                access_token=token,
+                target_states=frozenset({"failed"}),
+            )
+
+        assert final.status == "failed"
+
+    async def test_unparseable_snapshot_fails_the_task(
+        self, echo_token_server: FastMCP, encryption_key: str
+    ):
+        """Fail closed extends past decryption: a parse failure also loses the
+        caller, so it must not degrade to an anonymous run."""
+        token = make_access_token("client-a", "user-1")
+
+        def boom(*_args, **_kwargs):
+            raise RuntimeError("simulated deserialization failure")
+
+        async with running_task_server(echo_token_server):
+            with patch.object(TaskContextSnapshot, "from_json", boom):
+                created = await submit_task(
+                    echo_token_server, "whoami", {}, access_token=token
+                )
+                final = await wait_for_task(
+                    echo_token_server,
+                    created.task_id,
+                    access_token=token,
+                    target_states=frozenset({"failed"}),
+                )
+
+        assert final.status == "failed"
 
 
 class TestUnencryptedByDefault:

@@ -23,9 +23,10 @@ logger = get_logger(__name__)
 # over time, and each derives its own Fernet key from this shared material.
 _SNAPSHOT_KEY_SALT = "fastmcp-task-snapshot-key"
 
-# Below this, the material is too weak to feed HKDF, which assumes its input is
-# already high-entropy. Matches the OAuth proxy's threshold for the same reason.
-_MINIMUM_HIGH_ENTROPY_LENGTH = 12
+# Below this, warn: the keyspace is small enough that the offline attacker this
+# feature defends against can search it even through PBKDF2. Matches the OAuth
+# proxy's threshold for its signing-key material.
+_SHORT_KEY_WARNING_LENGTH = 12
 
 
 class SnapshotDecryptionError(Exception):
@@ -40,9 +41,10 @@ class SnapshotDecryptionError(Exception):
 class SnapshotCodec:
     """Encrypts and decrypts snapshot payloads with a key derived from material.
 
-    Any string works as ``material``. High-entropy material is stretched with
-    HKDF; a short passphrase goes through PBKDF2 instead, which is slower but
-    survives the weaker input.
+    The material is a string from the environment, and nothing about a string
+    proves it is random, so it is always treated as low-entropy: the Fernet key
+    comes from PBKDF2, never from HKDF. The stretch costs about a second, paid
+    once per process (see ``_codec_for``).
     """
 
     def __init__(self, material: str) -> None:
@@ -50,17 +52,19 @@ class SnapshotCodec:
 
         from fastmcp.server.auth.jwt_issuer import derive_jwt_key
 
-        if len(material) >= _MINIMUM_HIGH_ENTROPY_LENGTH:
-            key = derive_jwt_key(
-                high_entropy_material=material, salt=_SNAPSHOT_KEY_SALT
+        if not material:
+            raise ValueError(
+                "FASTMCP_ENCRYPTION_KEY must not be empty. Unset it to store "
+                "task snapshots as plaintext, or set at least 32 random "
+                "characters."
             )
-        else:
+        if len(material) < _SHORT_KEY_WARNING_LENGTH:
             logger.warning(
                 "The configured encryption key is shorter than %d characters; "
                 "use at least 32 random characters.",
-                _MINIMUM_HIGH_ENTROPY_LENGTH,
+                _SHORT_KEY_WARNING_LENGTH,
             )
-            key = derive_jwt_key(low_entropy_material=material, salt=_SNAPSHOT_KEY_SALT)
+        key = derive_jwt_key(low_entropy_material=material, salt=_SNAPSHOT_KEY_SALT)
 
         self._fernet = Fernet(key=key)
 
@@ -90,8 +94,8 @@ class SnapshotCodec:
 def _codec_for(material: str) -> SnapshotCodec:
     """One codec per key, so the derivation cost is paid once per process.
 
-    PBKDF2 over a short passphrase takes about a second, and every task
-    submission and every restore needs a codec.
+    The PBKDF2 stretch takes about a second, and every task submission and
+    every restore needs a codec.
     """
     return SnapshotCodec(material)
 
