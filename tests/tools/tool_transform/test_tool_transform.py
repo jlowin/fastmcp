@@ -1,5 +1,6 @@
 """Core tool transform functionality."""
 
+import json
 import re
 from dataclasses import dataclass
 from typing import Annotated, Any
@@ -742,6 +743,27 @@ async def test_transform_fn_configured_dataclass_respects_serialize_by_alias():
     result = await transformed.run({})
 
     assert result.structured_content == {"result": [{"itemId": "42"}]}
+    assert isinstance(result.content[0], TextContent)
+    assert json.loads(result.content[0].text) == [{"itemId": "42"}]
+
+
+async def test_transform_fn_unsupported_return_annotation_falls_back_to_content():
+    """An unsupported transform annotation does not become a runtime failure."""
+
+    class Unsupported:
+        pass
+
+    def base() -> None:
+        pass
+
+    async def transform() -> Unsupported:
+        return Unsupported()
+
+    transformed = Tool.from_tool(base, transform_fn=transform, output_schema=None)
+    result = await transformed.run({})
+
+    assert result.structured_content is None
+    assert len(result.content) == 1
 
 
 class TestProxy:

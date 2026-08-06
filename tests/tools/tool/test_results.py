@@ -480,6 +480,7 @@ class TestSerializeByAlias:
             "dataValue"
         }
         assert result.structured_content == {"dataValue": "data"}
+        assert json.loads(result.content[0].text) == {"dataValue": "data"}  # type: ignore[union-attr]
 
     async def test_configured_standard_dataclass_can_enable_aliases(self):
         """A configured stdlib dataclass uses aliases in schema and output."""
@@ -503,6 +504,7 @@ class TestSerializeByAlias:
             "dataValue"
         }
         assert result.structured_content == {"dataValue": "data"}
+        assert json.loads(result.content[0].text) == {"dataValue": "data"}  # type: ignore[union-attr]
 
     async def test_nested_configured_standard_dataclass_can_enable_aliases(self):
         """Typed containers preserve a nested dataclass's alias configuration."""
@@ -527,6 +529,7 @@ class TestSerializeByAlias:
         ]
         assert set(item_schema["properties"]) == {"dataValue"}
         assert result.structured_content == {"result": [{"dataValue": "data"}]}
+        assert json.loads(result.content[0].text) == [{"dataValue": "data"}]  # type: ignore[union-attr]
 
     async def test_typed_dict_uses_pydantic_alias_default(self):
         """A TypedDict schema uses the field names emitted by Pydantic."""

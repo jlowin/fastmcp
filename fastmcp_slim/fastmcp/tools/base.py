@@ -21,7 +21,14 @@ from mcp_types import (
     ToolExecution,
 )
 from mcp_types import Tool as MCPTool
-from pydantic import BaseModel, Field, PrivateAttr, TypeAdapter, model_validator
+from pydantic import (
+    BaseModel,
+    Field,
+    PrivateAttr,
+    PydanticSchemaGenerationError,
+    TypeAdapter,
+    model_validator,
+)
 from pydantic.json_schema import SkipJsonSchema
 
 from fastmcp.utilities.authorization import AuthCheck
@@ -68,7 +75,7 @@ def default_serializer(data: Any) -> str:
 
 
 def _serialize_to_jsonable(data: Any, annotation: Any = Any) -> Any:
-    """Serialize through Pydantic while preserving each model's configuration."""
+    """Serialize through Pydantic, falling back for unsupported annotations."""
     if (
         annotation is inspect.Signature.empty
         or annotation is None
@@ -78,7 +85,10 @@ def _serialize_to_jsonable(data: Any, annotation: Any = Any) -> Any:
     ):
         adapter = _JSONABLE_ADAPTER
     else:
-        adapter = get_cached_typeadapter(annotation)
+        try:
+            return get_cached_typeadapter(annotation).dump_python(data, mode="json")
+        except PydanticSchemaGenerationError:
+            adapter = _JSONABLE_ADAPTER
 
     return adapter.dump_python(data, mode="json")
 
@@ -389,19 +399,16 @@ class Tool(FastMCPComponent):
 
         # Skip structured content for ContentBlock types only if no output_schema
         # (if output_schema exists, MCP SDK requires structured_content)
-        if self.output_schema is None and (
-            isinstance(raw_value, ContentBlock | Audio | Image | File)
-            or (
-                isinstance(raw_value, list | tuple)
-                and any(isinstance(item, ContentBlock) for item in raw_value)
-            )
-        ):
+        if self.output_schema is None and _is_content_result(raw_value):
             return ToolResult(content=content)
 
         try:
             structured = self._serialize_output(raw_value)
         except (pydantic_core.PydanticSerializationError, UnicodeDecodeError):
             return ToolResult(content=content)
+
+        if not _is_content_result(raw_value):
+            content = _convert_to_content(structured)
 
         if self.output_schema is None:
             # No schema - only use structured_content for dicts
@@ -583,6 +590,16 @@ def _convert_to_content(
         ]
     # If none of the items are ContentBlocks, aggregate all items into a single TextContent
     return [TextContent(type="text", text=default_serializer(result))]
+
+
+def _is_content_result(result: Any) -> bool:
+    """Whether a result contains content that must retain its MCP representation."""
+    return isinstance(result, ContentBlock | Audio | Image | File) or (
+        isinstance(result, list | tuple)
+        and any(
+            isinstance(item, ContentBlock | Audio | Image | File) for item in result
+        )
+    )
 
 
 __all__ = ["InputRequiredToolResult", "Tool", "ToolResult"]
