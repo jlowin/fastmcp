@@ -1,4 +1,7 @@
 import logging
+from pathlib import Path
+
+from rich.logging import RichHandler
 
 import fastmcp
 from fastmcp.utilities.logging import configure_logging, get_logger
@@ -40,6 +43,19 @@ def test_configure_logging_with_traceback_kwargs():
     logger = logging.getLogger("fastmcp")
     assert logger.handlers
     assert len(logger.handlers) == 2  # One for normal logs, one for tracebacks
+
+
+def test_configure_logging_suppresses_framework_package_paths():
+    configure_logging(enable_rich_tracebacks=True)
+
+    traceback_handler = logging.getLogger("fastmcp").handlers[-1]
+    assert isinstance(traceback_handler, RichHandler)
+    suppressed_packages = {
+        Path(path).name
+        for path in traceback_handler.tracebacks_suppress
+        if isinstance(path, str)
+    }
+    assert {"fastmcp", "mcp", "pydantic"} <= suppressed_packages
 
 
 def test_configure_logging_traceback_defaults_can_be_overridden():
@@ -91,8 +107,6 @@ def test_configure_logging_with_rich_enabled():
         # Should have two handlers when rich logging is enabled (normal + traceback)
         assert len(logger.handlers) == 2
         # Both should be RichHandler instances
-        from rich.logging import RichHandler
-
         assert all(isinstance(h, RichHandler) for h in logger.handlers)
     finally:
         fastmcp.settings.enable_rich_logging = original_enable_rich

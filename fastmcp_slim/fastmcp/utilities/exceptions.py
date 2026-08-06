@@ -7,30 +7,42 @@ from mcp import MCPError
 
 import fastmcp
 
-# FastMCP uses httpx2 internally, but user-supplied code (tools, resources, and
-# clients handed to the OpenAPI integration) may still raise exceptions from the
-# legacy httpx package. These catch tuples include both families when httpx is
-# installed, so user errors keep their specific handling without making httpx a
-# FastMCP dependency. The two libraries' exception hierarchies match name-for-name.
-try:
-    import httpx
 
-    HTTP_STATUS_ERRORS: tuple[type[BaseException], ...] = (
-        httpx2.HTTPStatusError,
-        httpx.HTTPStatusError,
+def _is_legacy_httpx_exception(exc: BaseException, exception_type: str) -> bool:
+    """Check a legacy-httpx exception without importing the legacy package."""
+    return any(
+        cls.__module__.partition(".")[0] == "httpx" and cls.__name__ == exception_type
+        for cls in type(exc).__mro__
     )
-    TIMEOUT_ERRORS: tuple[type[BaseException], ...] = (
-        httpx2.TimeoutException,
-        httpx.TimeoutException,
+
+
+def is_http_status_error(exc: BaseException) -> bool:
+    """Return whether an exception is an httpx2 or legacy-httpx status error."""
+    return isinstance(exc, httpx2.HTTPStatusError) or _is_legacy_httpx_exception(
+        exc, "HTTPStatusError"
     )
-    REQUEST_ERRORS: tuple[type[BaseException], ...] = (
-        httpx2.RequestError,
-        httpx.RequestError,
+
+
+def get_http_status_code(exc: BaseException) -> int | None:
+    """Return the response status code from a recognized HTTP status error."""
+    if not is_http_status_error(exc):
+        return None
+    status_code = getattr(getattr(exc, "response", None), "status_code", None)
+    return status_code if isinstance(status_code, int) else None
+
+
+def is_timeout_error(exc: BaseException) -> bool:
+    """Return whether an exception is an httpx2 or legacy-httpx timeout."""
+    return isinstance(exc, httpx2.TimeoutException) or _is_legacy_httpx_exception(
+        exc, "TimeoutException"
     )
-except ImportError:
-    HTTP_STATUS_ERRORS = (httpx2.HTTPStatusError,)
-    TIMEOUT_ERRORS = (httpx2.TimeoutException,)
-    REQUEST_ERRORS = (httpx2.RequestError,)
+
+
+def is_request_error(exc: BaseException) -> bool:
+    """Return whether an exception is an httpx2 or legacy-httpx request error."""
+    return isinstance(exc, httpx2.RequestError) or _is_legacy_httpx_exception(
+        exc, "RequestError"
+    )
 
 
 def iter_exc(group: BaseExceptionGroup):

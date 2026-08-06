@@ -5,17 +5,29 @@ icon: "sparkles"
 tag: NEW
 ---
 
+<Update label="FastMCP 3.4.6" description="August 5, 2026" tags={["Releases"]}>
+<Card
+title="FastMCP v3.4.6: Trust, but Proxy"
+href="https://github.com/PrefectHQ/fastmcp/releases/tag/v3.4.6"
+cta="Read the release notes"
+>
+FastMCP 3.4.6 adds trusted-proxy support for SSRF-protected OAuth metadata and JWKS fetches on the 3.x line. Deployments can route these requests through a mandated corporate proxy while preserving custom CA certificates, and FastMCP refuses the fetch when no proxy is configured instead of risking an unprotected direct request.
+</Card>
+</Update>
+
 <Update label="FastMCP 4.0.0b1" description="July 28, 2026" tags={["Releases"]}>
 <Card
 title="FastMCP v4.0.0b1: Fourgone Conclusion"
 href="https://github.com/PrefectHQ/fastmcp/releases/tag/v4.0.0b1"
 cta="Read the release notes"
 >
-FastMCP 4 rebuilds the framework on the MCP Python SDK v2, and this beta is the first release to run on the SDK's stable 2.0. The engine underneath changed completely, but FastMCP absorbs nearly all of it — most FastMCP 3 servers run untouched.
+FastMCP 4 makes stateful MCP applications work on the sessionless protocol while one deployment continues serving handshake-era clients. The engine underneath changed completely, but FastMCP absorbs nearly all of it — most FastMCP 3 servers upgrade untouched.
 
 🌐 **Every protocol era** — one server answers both the sessionless `2026-07-28` protocol and the older session-based handshake, negotiated per connection.
 
-💾 **State without a session** — `UserSession` and `SessionId` give tools durable state on a protocol that deliberately has none, keyed per user when the request is authenticated.
+💬 **Interactive tools** — tools ask follow-up questions across complete request-response rounds, with shared request-state keys for load balancing and worker restarts.
+
+💾 **State without a session** — `UserSession` and `SessionId` give tools explicit server-side state on a protocol that deliberately has none, keyed per user when the request is authenticated.
 
 ⏳ **Background tasks** — the `io.modelcontextprotocol/tasks` extension in the new `fastmcp-tasks` package, on the same Docket engine FastMCP 3 used.
 

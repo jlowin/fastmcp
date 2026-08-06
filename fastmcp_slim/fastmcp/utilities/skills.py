@@ -205,7 +205,7 @@ async def download_skill(
 
         # Write content
         if isinstance(content, mcp_types.TextResourceContents):
-            file_path.write_text(content.text)
+            file_path.write_text(content.text, encoding="utf-8")
         elif isinstance(content, mcp_types.BlobResourceContents):
             file_path.write_bytes(base64.b64decode(content.blob))
         else:

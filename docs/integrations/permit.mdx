@@ -300,10 +300,12 @@ For advanced configuration options and custom middleware extensions, see [Advanc
 See the [example server](https://github.com/permitio/permit-fastmcp/blob/main/permit_fastmcp/example_server/example.py) for a full implementation with JWT-based authentication. For additional examples and usage patterns, see [Example Server](https://github.com/permitio/permit-fastmcp/blob/main/permit_fastmcp/example_server/):
 
 ```python
+import os
+import datetime
+
+import jwt
 from fastmcp import FastMCP, Context
 from permit_fastmcp.middleware.middleware import PermitMcpMiddleware
-import jwt
-import datetime
 
 # Configure JWT identity extraction
 os.environ["PERMIT_MCP_IDENTITY_MODE"] = "jwt"

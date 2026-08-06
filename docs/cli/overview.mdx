@@ -89,10 +89,10 @@ To skip authentication entirely — useful for local development servers — pas
 fastmcp call http://localhost:8000/mcp my_tool --auth none
 ```
 
-You can also pass a bearer token directly:
+You can also pass a bearer token directly. Give the token value on its own; FastMCP adds the `Bearer` prefix when it builds the `Authorization` header.
 
 ```bash
-fastmcp list http://localhost:8000/mcp --auth "Bearer sk-..."
+fastmcp list http://localhost:8000/mcp --auth "sk-..."
 ```
 
 ## Transport Override

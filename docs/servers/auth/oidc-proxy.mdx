@@ -155,7 +155,7 @@ Set this if your provider requires a specific authentication method and the defa
 <ParamField body="jwt_signing_key" type="str | bytes | None">
 
 <VersionBadge version="2.13.0" />
-  Secret used to sign FastMCP JWT tokens issued to clients. Accepts any string or bytes - will be derived into a proper 32-byte cryptographic key using HKDF.
+  Secret used to sign FastMCP JWT tokens issued to clients. **`bytes`** are used as-is, with no stretching, so supply at least 32 bytes of high-entropy key material. With the default file-backed client storage, the bytes must also decode as UTF-8; use `secrets.token_urlsafe(32).encode()` instead of raw `secrets.token_bytes()`, or configure `client_storage` explicitly. **A string** is stretched into a 32-byte key with PBKDF2 (1,000,000 iterations), since a supplied string may be low-entropy.
 
   **Default behavior (`None`):**
   The key is deterministically derived from `client_secret` using HKDF, on every platform. Because the derivation is deterministic, the same key is produced across restarts as long as `client_secret` doesn't change, so tokens remain valid without any extra configuration. This convenience makes it **only** suitable for development and local testing.
@@ -206,7 +206,7 @@ auth = OIDCProxy(
 </ParamField>
 
 <ParamField body="require_authorization_consent" type='bool | Literal["remember", "external"]' default="True">
-  Consent screen behavior for authorization requests. Accepts `True` (default; always prompt — strongest protection), `"remember"` (silent consent on return visits via signed cookie, gated by `Sec-Fetch-Site` to block AS-in-the-middle attacks), `"external"` (consent handled by upstream IdP or custom page), or `False` (disable entirely; local/testing only). See the [OAuthProxy documentation](/servers/auth/oauth-proxy) for full details on each mode and the security trade-offs.
+  Consent screen behavior for authorization requests. Accepts `True` (default; always prompt — strongest protection), `"remember"` (silent consent on return visits via signed cookie, gated by `Sec-Fetch-Site` to block AS-in-the-middle attacks), `"external"` (same authorization path as `False`, but the warning is suppressed because the operator asserts that equivalent protections are enforced externally), or `False` (disable entirely; local/testing only). See the [OAuthProxy documentation](/servers/auth/oauth-proxy) for full details on each mode and the security trade-offs.
 </ParamField>
 
 <ParamField body="consent_csp_policy" type="str | None" default="None">
