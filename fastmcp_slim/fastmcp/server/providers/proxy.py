@@ -12,6 +12,7 @@ import inspect
 import time
 import warnings
 from collections.abc import Awaitable, Callable, Sequence
+from copy import deepcopy
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, Literal, cast
 
@@ -1119,10 +1120,13 @@ class _UpstreamServerMetadata:
         result: mcp_types.InitializeResult | mcp_types.DiscoverResult,
         server_info: mcp_types.Implementation | None,
     ) -> _UpstreamServerMetadata:
+        """Detach forwarded values from the backend session's adopted result."""
         return cls(
             instructions=result.instructions,
-            server_info=server_info,
-            meta=dict(result.meta or {}),
+            server_info=(
+                server_info.model_copy(deep=True) if server_info is not None else None
+            ),
+            meta=deepcopy(result.meta or {}),
         )
 
     @classmethod
