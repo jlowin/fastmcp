@@ -10,6 +10,7 @@ from __future__ import annotations
 import base64
 import inspect
 import time
+import warnings
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, Literal, cast
@@ -31,6 +32,7 @@ from mcp_types import (
 from mcp_types.version import MODERN_PROTOCOL_VERSIONS
 from pydantic.networks import AnyUrl
 
+from fastmcp._warnings import FastMCPDeprecationWarning
 from fastmcp.client.client import Client, SDKServer, _connection_failure
 from fastmcp.client.elicitation import ElicitResult, create_elicitation_callback
 from fastmcp.client.logging import LogMessage, create_log_callback
@@ -1139,13 +1141,34 @@ class ProxyMetadataMiddleware(Middleware):
     async def on_discover(
         self,
         context: MiddlewareContext[mcp_types.DiscoverRequest],
-        call_next: CallNext[mcp_types.DiscoverRequest, mcp_types.DiscoverResult],
-    ) -> mcp_types.DiscoverResult:
+        call_next: CallNext[
+            mcp_types.DiscoverRequest,
+            mcp_types.DiscoverResult | dict[str, Any],
+        ],
+    ) -> mcp_types.DiscoverResult | dict[str, Any]:
         result = await call_next(context)
+        if not isinstance(result, mcp_types.DiscoverResult):
+            return result
         upstream = await self._read_upstream(context.fastmcp_context)
         if upstream is None:
             return result
         return result.model_copy(update=self._updates(result, upstream))
+
+
+class ProxyInitializeMiddleware(ProxyMetadataMiddleware):
+    """Deprecated compatibility name for ``ProxyMetadataMiddleware``."""
+
+    def __init__(self, proxy: FastMCPProxy) -> None:
+        warnings.warn(
+            "`ProxyInitializeMiddleware` is deprecated and will be removed in a "
+            "future release. `FastMCPProxy` now installs "
+            "`ProxyMetadataMiddleware` automatically.",
+            FastMCPDeprecationWarning,
+            stacklevel=2,
+        )
+        self.proxy = proxy
+        self.client_factory = proxy.client_factory
+        self.identity: ProxyIdentity = "proxy"
 
 
 # -----------------------------------------------------------------------------

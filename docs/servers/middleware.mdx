@@ -312,11 +312,15 @@ Rejection works only **before** `call_next()`. Raising `McpError` afterward logs
 
 #### on_discover
 
-Called when a modern client negotiates through `server/discover`. The returned `DiscoverResult` can be modified before it is sent to the client.
+Called when a modern client negotiates through `server/discover`. Core discovery responses are returned as `DiscoverResult`; extension-owned result types are returned as dictionaries and should be passed through unless the middleware handles that extension.
 
 ```python
+from mcp_types import DiscoverResult
+
 async def on_discover(self, context, call_next):
     result = await call_next(context)
+    if not isinstance(result, DiscoverResult):
+        return result
     return result.model_copy(update={"instructions": "Custom instructions"})
 ```
 

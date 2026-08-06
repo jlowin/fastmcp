@@ -340,7 +340,7 @@ class FastMCPServerMiddleware:
 
         async def call_original_handler(
             _mw_ctx: MiddlewareContext,
-        ) -> mcp_types.DiscoverResult:
+        ) -> mcp_types.DiscoverResult | dict[str, Any]:
             message = _mw_ctx.message
             params = (
                 message.params.model_dump(by_alias=True, mode="json", exclude_none=True)
@@ -351,7 +351,14 @@ class FastMCPServerMiddleware:
             if isinstance(raw, mcp_types.DiscoverResult):
                 return raw
             if isinstance(raw, Mapping):
-                return mcp_types.DiscoverResult.model_validate(dict(raw))
+                result = dict(raw)
+                result_type = result.get("resultType")
+                if (
+                    isinstance(result_type, str)
+                    and result_type not in mcp_types.CORE_RESULT_TYPES
+                ):
+                    return result
+                return mcp_types.DiscoverResult.model_validate(result)
             raise TypeError(
                 "server/discover handler returned "
                 f"{type(raw).__name__}; expected DiscoverResult or mapping"

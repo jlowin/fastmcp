@@ -8,13 +8,15 @@ import pytest
 from mcp import MCPError
 from mcp_types.version import MODERN_PROTOCOL_VERSIONS
 
-from fastmcp import Client, FastMCP
+from fastmcp import Client, FastMCP, FastMCPDeprecationWarning
 from fastmcp.client.logging import LogMessage
 from fastmcp.client.transports import StreamableHttpTransport
 from fastmcp.server import create_proxy
 from fastmcp.server.middleware import CallNext, Middleware, MiddlewareContext
 from fastmcp.server.providers.proxy import (
+    FastMCPProxy,
     ProxyClient,
+    ProxyInitializeMiddleware,
     ProxyMetadataMiddleware,
     ProxyProvider,
 )
@@ -79,9 +81,14 @@ class UpstreamMetadataMiddleware(Middleware):
     async def on_discover(
         self,
         context: MiddlewareContext[mcp_types.DiscoverRequest],
-        call_next: CallNext[mcp_types.DiscoverRequest, mcp_types.DiscoverResult],
-    ) -> mcp_types.DiscoverResult:
+        call_next: CallNext[
+            mcp_types.DiscoverRequest,
+            mcp_types.DiscoverResult | dict[str, Any],
+        ],
+    ) -> mcp_types.DiscoverResult | dict[str, Any]:
         result = await call_next(context)
+        if not isinstance(result, mcp_types.DiscoverResult):
+            return result
         return result.model_copy(update=self._updates(result))
 
 
@@ -113,9 +120,14 @@ class FrontendMetadataMiddleware(Middleware):
     async def on_discover(
         self,
         context: MiddlewareContext[mcp_types.DiscoverRequest],
-        call_next: CallNext[mcp_types.DiscoverRequest, mcp_types.DiscoverResult],
-    ) -> mcp_types.DiscoverResult:
+        call_next: CallNext[
+            mcp_types.DiscoverRequest,
+            mcp_types.DiscoverResult | dict[str, Any],
+        ],
+    ) -> mcp_types.DiscoverResult | dict[str, Any]:
         result = await call_next(context)
+        if not isinstance(result, mcp_types.DiscoverResult):
+            return result
         return self._update(result)
 
 
@@ -325,6 +337,38 @@ async def test_unavailable_backend_does_not_block_connection(frontend_mode: str)
             await client.list_tools()
 
 
+async def test_extension_owned_discovery_result_bypasses_metadata_forwarding():
+    factory_called = False
+
+    def broken_factory() -> Client:
+        nonlocal factory_called
+        factory_called = True
+        raise RuntimeError("metadata should not be read")
+
+    async def custom_discover(_ctx, _params):
+        return {
+            "resultType": "com.example/custom",
+            "payload": {"enabled": True},
+        }
+
+    provider = ProxyProvider(broken_factory)
+    gateway = FastMCP(
+        "extension-gateway",
+        middleware=[ProxyMetadataMiddleware(provider)],
+    )
+    gateway._mcp_server.add_request_handler(
+        "server/discover", mcp_types.RequestParams, custom_discover
+    )
+
+    version = MODERN_PROTOCOL_VERSIONS[0]
+    async with Client(gateway, mode=version) as client:
+        result = await client.session.send_discover(version)
+
+    assert isinstance(result, dict)
+    assert result["payload"] == {"enabled": True}
+    assert not factory_called
+
+
 def test_gateway_construction_does_not_create_backend_client():
     calls = 0
 
@@ -341,6 +385,22 @@ def test_gateway_construction_does_not_create_backend_client():
     )
 
     assert calls == 0
+
+
+def test_proxy_initialize_middleware_is_deprecated():
+    def client_factory() -> ProxyClient:
+        return ProxyClient(make_upstream())
+
+    proxy = FastMCPProxy(name="compatibility-proxy", client_factory=client_factory)
+
+    with pytest.warns(
+        FastMCPDeprecationWarning,
+        match="`ProxyInitializeMiddleware` is deprecated",
+    ):
+        middleware = ProxyInitializeMiddleware(proxy)
+
+    assert middleware.proxy is proxy
+    assert middleware.client_factory is client_factory
 
 
 async def test_fastmcp_proxy_uses_public_metadata_middleware():
