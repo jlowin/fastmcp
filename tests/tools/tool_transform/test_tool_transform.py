@@ -7,7 +7,7 @@ from typing import Annotated, Any
 
 import pytest
 from mcp_types import TextContent
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, with_config
 
 from fastmcp import FastMCP
 from fastmcp.client.client import Client
@@ -726,7 +726,6 @@ async def test_transform_fn_wrapped_result_respects_serialize_by_alias():
 
 async def test_transform_fn_configured_dataclass_respects_serialize_by_alias():
     """A transform uses its return annotation for nested dataclass serialization."""
-    from pydantic import ConfigDict, with_config
 
     @with_config(ConfigDict(serialize_by_alias=True))
     @dataclass

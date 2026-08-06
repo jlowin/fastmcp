@@ -174,87 +174,6 @@ class _ToolOutputSchemaGenerator(GenerateJsonSchema):
             self.by_alias = previous_by_alias
 
 
-def _has_contextual_alias_conflict(schema: core_schema.CoreSchema) -> bool:
-    """Whether one structural type is serialized under conflicting alias modes."""
-    schema_refs: dict[str, dict[str, Any]] = {}
-
-    def collect(value: Any) -> None:
-        if isinstance(value, dict):
-            ref = value.get("ref")
-            if isinstance(ref, str):
-                schema_refs[ref] = value
-            for child in value.values():
-                collect(child)
-        elif isinstance(value, list | tuple):
-            for child in value:
-                collect(child)
-
-    def has_alias(value: dict[str, Any]) -> bool:
-        if value.get("type") == "dataclass":
-            fields = value.get("schema", {}).get("fields", [])
-            return any(
-                field.get("serialization_alias") not in (None, field.get("name"))
-                for field in fields
-            )
-
-        fields = value.get("fields", {})
-        return any(
-            field.get("serialization_alias") not in (None, name)
-            for name, field in fields.items()
-        )
-
-    collect(schema)
-    alias_contexts: dict[str, set[bool]] = {}
-
-    def visit(value: Any, by_alias: bool, active: set[str]) -> bool:
-        if isinstance(value, list | tuple):
-            return any(visit(child, by_alias, active) for child in value)
-        if not isinstance(value, dict):
-            return False
-
-        schema_type = value.get("type")
-        if schema_type == "definitions":
-            return visit(value.get("schema"), by_alias, active)
-        if schema_type == "definition-ref":
-            ref = value.get("schema_ref")
-            target = schema_refs.get(ref)
-            return target is not None and visit(target, by_alias, active)
-
-        next_by_alias = by_alias
-        if schema_type == "model":
-            configured = (value.get("config") or {}).get("serialize_by_alias")
-            next_by_alias = False if configured is None else configured
-        elif schema_type == "dataclass":
-            configured = (value.get("config") or {}).get("serialize_by_alias")
-            if configured is not None:
-                next_by_alias = configured
-
-        ref = value.get("ref")
-        if (
-            isinstance(schema_type, str)
-            and schema_type in {"dataclass", "typed-dict"}
-            and isinstance(ref, str)
-            and has_alias(value)
-        ):
-            contexts = alias_contexts.setdefault(ref, set())
-            contexts.add(next_by_alias)
-            if len(contexts) > 1:
-                return True
-
-        if isinstance(ref, str):
-            if ref in active:
-                return False
-            active = active | {ref}
-
-        return any(
-            visit(child, next_by_alias, active)
-            for key, child in value.items()
-            if key not in {"cls", "config", "metadata", "ref"}
-        )
-
-    return visit(schema, False, set())
-
-
 T = TypeVarExt("T", default=Any)
 
 logger = get_logger(__name__)
@@ -518,43 +437,24 @@ class ParsedFunction:
                     schema_generator=_ToolOutputSchemaGenerator,
                 )
 
-                if _has_contextual_alias_conflict(type_adapter.core_schema):
-                    logger.debug(
-                        "Unable to generate one output schema for contextual "
-                        "serialization aliases in type %r",
-                        output_type,
+                # Generate schema for wrapped type if it's non-object
+                # because MCP requires that output schemas are objects
+                # Check if schema is an object type, resolving $ref references
+                # (self-referencing types use $ref at root level)
+                if wrap_non_object_output_schema and not _is_object_schema(base_schema):
+                    # Use the wrapped result schema directly
+                    wrapped_type = _WrappedResult[clean_output_type]
+                    wrapped_adapter = get_cached_typeadapter(wrapped_type)
+                    output_schema = wrapped_adapter.json_schema(
+                        mode="serialization",
+                        by_alias=False,
+                        schema_generator=_ToolOutputSchemaGenerator,
                     )
-                    if _is_object_schema(base_schema):
-                        output_schema = {"type": "object"}
-                    elif wrap_non_object_output_schema:
-                        output_schema = {
-                            "type": "object",
-                            "properties": {"result": {}},
-                            "required": ["result"],
-                            "x-fastmcp-wrap-result": True,
-                        }
+                    output_schema["x-fastmcp-wrap-result"] = True
                 else:
-                    # Generate schema for wrapped type if it's non-object
-                    # because MCP requires that output schemas are objects
-                    # Check if schema is an object type, resolving $ref references
-                    # (self-referencing types use $ref at root level)
-                    if wrap_non_object_output_schema and not _is_object_schema(
-                        base_schema
-                    ):
-                        # Use the wrapped result schema directly
-                        wrapped_type = _WrappedResult[clean_output_type]
-                        wrapped_adapter = get_cached_typeadapter(wrapped_type)
-                        output_schema = wrapped_adapter.json_schema(
-                            mode="serialization",
-                            by_alias=False,
-                            schema_generator=_ToolOutputSchemaGenerator,
-                        )
-                        output_schema["x-fastmcp-wrap-result"] = True
-                    else:
-                        output_schema = base_schema
+                    output_schema = base_schema
 
-                if output_schema is not None:
-                    output_schema = compress_schema(output_schema, prune_titles=True)
+                output_schema = compress_schema(output_schema, prune_titles=True)
 
             except PydanticSchemaGenerationError as e:
                 if "_UnserializableType" not in str(e):
