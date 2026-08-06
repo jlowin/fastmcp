@@ -1079,7 +1079,7 @@ class ProxyMetadataMiddleware(Middleware):
         if (
             not connected
             and client.mode in MODERN_PROTOCOL_VERSIONS
-            and client._prior_discover is None
+            and client.prior_discover is None
         ):
             client = client.new()
             client.mode = "auto"
