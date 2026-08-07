@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import functools
 import inspect
+import json
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -134,6 +135,54 @@ def _strict_input_validation() -> bool:
     if context is None:
         return False
     return context.fastmcp.strict_input_validation
+
+
+def _coerce_json_string_arguments(
+    arguments: dict[str, Any], errors: list[Any]
+) -> dict[str, Any] | None:
+    """Decode top-level arguments that failed validation as a JSON string.
+
+    Some MCP clients serialize structured arguments (lists, dicts, models) as
+    JSON strings instead of native JSON values. Pydantic's lax mode already
+    coerces string scalars (e.g. the string ``"7"`` into an ``int``); this
+    extends the same leniency to structural types that lax mode can't coerce
+    on its own. Returns ``None`` if no argument could be decoded, so the
+    caller raises the original error unchanged. See #553.
+    """
+    coerced: dict[str, Any] | None = None
+    for error in errors:
+        loc = error["loc"]
+        if len(loc) != 1:
+            continue  # only top-level arguments; nested errors aren't ours to fix
+        name = loc[0]
+        value = arguments.get(name)
+        if not isinstance(name, str) or not isinstance(value, str):
+            continue
+        try:
+            decoded = json.loads(value)
+        except ValueError:
+            continue
+        if coerced is None:
+            coerced = dict(arguments)
+        coerced[name] = decoded
+    return coerced
+
+
+def _validate_call_arguments(
+    type_adapter: TypeAdapter[Any], arguments: dict[str, Any], *, strict: bool
+) -> Any:
+    """Validate call arguments, retrying with JSON-decoded values for any
+    argument that arrived as a JSON string but failed structural validation.
+    """
+    try:
+        return type_adapter.validate_python(arguments, strict=strict)
+    except PydanticValidationError as original:
+        if strict:
+            raise
+        coerced = _coerce_json_string_arguments(arguments, original.errors())
+        if coerced is None:
+            raise
+        return type_adapter.validate_python(coerced, strict=strict)
 
 
 F = TypeVar("F", bound=Callable[..., Any])
@@ -464,21 +513,23 @@ class FunctionTool(Tool):
 
         When ``strict`` is set (server-level ``strict_input_validation``),
         pydantic validates in strict mode, so lax coercions such as the JSON
-        string ``"10"`` into an ``int`` are rejected rather than coerced.
+        string ``"10"`` into an ``int`` are rejected rather than coerced. In
+        non-strict mode, ``_validate_call_arguments`` also decodes structural
+        arguments (list/dict/model) sent as a JSON string.
         """
         # Combining timeout with run_in_thread=False on a sync function is
         # rejected at registration (see FunctionTool.from_function), so this only
         # needs to handle async and threadpool-sync under a timeout.
         if exec_is_async:
             # Argument validation is synchronous; the body runs on await below.
-            result = type_adapter.validate_python(arguments, strict=strict)
+            result = _validate_call_arguments(type_adapter, arguments, strict=strict)
         elif self.run_in_thread:
             # Sync function: run in threadpool to avoid blocking the event loop.
             result = await call_sync_fn_in_threadpool(
-                type_adapter.validate_python, arguments, strict=strict
+                _validate_call_arguments, type_adapter, arguments, strict=strict
             )
         else:
-            result = type_adapter.validate_python(arguments, strict=strict)
+            result = _validate_call_arguments(type_adapter, arguments, strict=strict)
 
         try:
             if inspect.isawaitable(result):

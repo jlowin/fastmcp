@@ -131,12 +131,13 @@ class TestPydanticModelArguments:
             assert "Alice" in result.content[0].text
             assert "30" in result.content[0].text
 
-    async def test_stringified_json_not_auto_parsed_for_pydantic_models(self):
-        """Stringified JSON is rejected for Pydantic model parameters.
+    async def test_stringified_json_auto_parsed_for_pydantic_models(self):
+        """Stringified JSON is decoded for Pydantic model parameters.
 
         Some LLM clients send stringified JSON (a JSON string containing a
-        JSON object) instead of a proper JSON object.  FastMCP does not
-        auto-parse these; callers get a validation error.
+        JSON object) instead of a proper JSON object.  Without strict
+        validation, FastMCP decodes it before validating, the same leniency
+        already applied to scalar coercion (e.g. ``"7"`` -> ``int``). See #553.
         """
         mcp = FastMCP("TestServer", strict_input_validation=False)
 
@@ -150,8 +151,39 @@ class TestPydanticModelArguments:
                 {"name": "Bob", "age": 25, "email": "bob@example.com"}
             )
 
+            result = await client.call_tool("create_user", {"profile": stringified})
+            assert isinstance(result.content[0], TextContent)
+            assert "Bob" in result.content[0].text
+
+    async def test_stringified_json_rejected_with_strict_validation(self):
+        """Stringified JSON is still rejected for Pydantic models under strict validation."""
+        mcp = FastMCP("TestServer", strict_input_validation=True)
+
+        @mcp.tool
+        def create_user(profile: UserProfile) -> str:
+            """Create a user from a profile."""
+            return f"Created user {profile.name}, age {profile.age}"
+
+        async with Client(mcp) as client:
+            stringified = json.dumps(
+                {"name": "Bob", "age": 25, "email": "bob@example.com"}
+            )
+
             with pytest.raises(ToolError, match="validation"):
                 await client.call_tool("create_user", {"profile": stringified})
+
+    async def test_invalid_stringified_json_still_raises_clear_error(self):
+        """A string that isn't valid JSON still surfaces the original error."""
+        mcp = FastMCP("TestServer", strict_input_validation=False)
+
+        @mcp.tool
+        def create_user(profile: UserProfile) -> str:
+            """Create a user from a profile."""
+            return f"Created user {profile.name}, age {profile.age}"
+
+        async with Client(mcp) as client:
+            with pytest.raises(ToolError, match="validation"):
+                await client.call_tool("create_user", {"profile": "not json"})
 
     async def test_pydantic_model_with_coercion(self):
         """Pydantic models should benefit from coercion without strict validation."""
@@ -200,6 +232,118 @@ class TestPydanticModelArguments:
                         }
                     },
                 )
+
+
+class TestStructuralArgumentsAsJsonStrings:
+    """Some LLM clients serialize list/dict/set arguments as JSON strings
+    instead of native JSON values. Without strict validation, FastMCP decodes
+    them before validating, extending the existing scalar coercion leniency
+    (e.g. ``"7"`` -> ``int``) to structural types. See #553.
+    """
+
+    async def test_list_argument_as_json_string(self):
+        mcp = FastMCP("TestServer", strict_input_validation=False)
+
+        @mcp.tool
+        def total(values: list[int]) -> int:
+            return sum(values)
+
+        async with Client(mcp) as client:
+            result = await client.call_tool("total", {"values": "[1, 2, 3]"})
+            assert result.data == 6
+
+    async def test_optional_list_argument_as_json_string(self):
+        mcp = FastMCP("TestServer", strict_input_validation=False)
+
+        @mcp.tool
+        def total(values: list[int] | None = None) -> int:
+            return sum(values) if values else 0
+
+        async with Client(mcp) as client:
+            result = await client.call_tool("total", {"values": "[1, 2, 3]"})
+            assert result.data == 6
+
+    async def test_dict_argument_as_json_string(self):
+        mcp = FastMCP("TestServer", strict_input_validation=False)
+
+        @mcp.tool
+        def get_keys(mapping: dict) -> list[str]:
+            return sorted(mapping.keys())
+
+        async with Client(mcp) as client:
+            result = await client.call_tool("get_keys", {"mapping": '{"a": 1, "b": 2}'})
+            assert result.data == ["a", "b"]
+
+    async def test_set_argument_as_json_string(self):
+        mcp = FastMCP("TestServer", strict_input_validation=False)
+
+        @mcp.tool
+        def count_unique(values: set[int]) -> int:
+            return len(values)
+
+        async with Client(mcp) as client:
+            result = await client.call_tool("count_unique", {"values": "[1, 2, 2]"})
+            assert result.data == 2
+
+    async def test_native_structural_argument_still_works(self):
+        """Passing the already-decoded value must keep working (no regression)."""
+        mcp = FastMCP("TestServer", strict_input_validation=False)
+
+        @mcp.tool
+        def total(values: list[int]) -> int:
+            return sum(values)
+
+        async with Client(mcp) as client:
+            result = await client.call_tool("total", {"values": [1, 2, 3]})
+            assert result.data == 6
+
+    async def test_structural_argument_as_json_string_rejected_with_strict_validation(
+        self,
+    ):
+        mcp = FastMCP("TestServer", strict_input_validation=True)
+
+        @mcp.tool
+        def total(values: list[int]) -> int:
+            return sum(values)
+
+        async with Client(mcp) as client:
+            with pytest.raises(ToolError, match="validation"):
+                await client.call_tool("total", {"values": "[1, 2, 3]"})
+
+    async def test_plain_string_argument_unaffected(self):
+        """A plain ``str`` parameter must never be decoded as JSON."""
+        mcp = FastMCP("TestServer", strict_input_validation=False)
+
+        @mcp.tool
+        def echo(value: str) -> str:
+            return value
+
+        async with Client(mcp) as client:
+            result = await client.call_tool("echo", {"value": "[1, 2, 3]"})
+            assert result.data == "[1, 2, 3]"
+
+    async def test_optional_string_argument_keeps_literal_null_string(self):
+        """A ``str | None`` parameter must not confuse the string "null" with None."""
+        mcp = FastMCP("TestServer", strict_input_validation=False)
+
+        @mcp.tool
+        def echo(value: str | None = None) -> str | None:
+            return value
+
+        async with Client(mcp) as client:
+            result = await client.call_tool("echo", {"value": "null"})
+            assert result.data == "null"
+
+    async def test_invalid_json_string_for_list_argument_raises_clear_error(self):
+        mcp = FastMCP("TestServer", strict_input_validation=False)
+
+        @mcp.tool
+        def total(values: list[int]) -> int:
+            return sum(values)
+
+        async with Client(mcp) as client:
+            with pytest.raises(ToolError, match="validation"):
+                await client.call_tool("total", {"values": "not json"})
 
 
 class TestValidationErrorMessages:
