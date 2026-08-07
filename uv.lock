@@ -1089,6 +1089,7 @@ name = "fastmcp-tasks"
 source = { editable = "fastmcp_tasks" }
 dependencies = [
     { name = "burner-redis", marker = "sys_platform == 'win32'" },
+    { name = "cryptography" },
     { name = "fastmcp-slim", extra = ["server"] },
     { name = "pydocket" },
 ]
@@ -1096,6 +1097,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "burner-redis", marker = "sys_platform == 'win32'", specifier = "<0.1.7" },
+    { name = "cryptography", specifier = ">=43.0.0" },
     { name = "fastmcp-slim", extras = ["server"], editable = "fastmcp_slim" },
     { name = "pydocket", specifier = ">=0.20.0" },
 ]

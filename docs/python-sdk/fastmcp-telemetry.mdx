@@ -31,7 +31,52 @@ Example usage with SDK:
 
 ## Functions
 
-### `get_tracer` <sup><a href="https://github.com/PrefectHQ/fastmcp/blob/main/fastmcp_slim/fastmcp/telemetry.py#L81" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+### `telemetry_mode` <sup><a href="https://github.com/PrefectHQ/fastmcp/blob/main/fastmcp_slim/fastmcp/telemetry.py#L86" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+
+```python
+telemetry_mode() -> 'TelemetryMode'
+```
+
+
+Resolve the effective telemetry mode for the current context.
+
+This is `fastmcp.settings.telemetry_mode`, except that an active
+`suppress_fastmcp_telemetry()` block downgrades `native` to
+`propagation_only`. Suppression never upgrades or overrides `off`: `off`
+means FastMCP touches nothing, and a narrower request to skip FastMCP's
+spans cannot re-enable the context propagation `off` deliberately omits.
+
+
+### `native_spans_enabled` <sup><a href="https://github.com/PrefectHQ/fastmcp/blob/main/fastmcp_slim/fastmcp/telemetry.py#L103" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+
+```python
+native_spans_enabled() -> bool
+```
+
+
+Whether FastMCP should create its own spans right now.
+
+
+### `suppress_fastmcp_telemetry` <sup><a href="https://github.com/PrefectHQ/fastmcp/blob/main/fastmcp_slim/fastmcp/telemetry.py#L109" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+
+```python
+suppress_fastmcp_telemetry() -> Iterator[None]
+```
+
+
+Suppress FastMCP's own spans without disabling trace propagation.
+
+Scoped equivalent of `telemetry_mode="propagation_only"`, for callers that
+embed FastMCP inside their own instrumented stack and want to own the MCP
+span hierarchy for a specific block. Narrower than OpenTelemetry's global
+instrumentation suppression: only FastMCP's spans are skipped, so nested
+instrumentation (HTTP clients, databases) keeps emitting, and trace context
+still flows through `_meta` so those spans are parented correctly.
+
+Has no effect when `telemetry_mode` is already `off`.
+
+
+### `get_tracer` <sup><a href="https://github.com/PrefectHQ/fastmcp/blob/main/fastmcp_slim/fastmcp/telemetry.py#L128" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
 
 ```python
 get_tracer(version: str | None = None) -> Tracer
@@ -42,21 +87,22 @@ Get the FastMCP tracer for creating spans.
 
 Instrumentation is on by default. FastMCP uses only the OpenTelemetry API,
 so span creation is a no-op with negligible overhead unless an OpenTelemetry
-SDK and exporter are configured. Set `fastmcp.settings.enable_telemetry` to
-False (env `FASTMCP_ENABLE_TELEMETRY=false`) to turn instrumentation off
-entirely, in which case this returns a pass-through tracer that leaves the
-current OTel context untouched even when an SDK is configured.
+SDK and exporter are configured. When `fastmcp.settings.telemetry_mode` is
+`propagation_only` or `off` — or the caller is inside a
+`suppress_fastmcp_telemetry()` block — this returns a pass-through tracer
+that creates no spans and leaves the current OTel context untouched even
+when an SDK is configured.
 
 **Args:**
 - `version`: Optional version string for the instrumentation
 
 **Returns:**
-- A tracer instance. Returns a non-attaching pass-through tracer if
-- telemetry is disabled; span creation is otherwise a no-op unless an SDK
-- is configured.
+- A tracer instance. Returns a non-attaching pass-through tracer when
+- FastMCP's own spans are disabled; span creation is otherwise a no-op
+- unless an SDK is configured.
 
 
-### `inject_trace_context` <sup><a href="https://github.com/PrefectHQ/fastmcp/blob/main/fastmcp_slim/fastmcp/telemetry.py#L106" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+### `inject_trace_context` <sup><a href="https://github.com/PrefectHQ/fastmcp/blob/main/fastmcp_slim/fastmcp/telemetry.py#L152" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
 
 ```python
 inject_trace_context(meta: dict[str, Any] | None = None) -> dict[str, Any] | None
@@ -73,7 +119,7 @@ Inject current trace context into a meta dict for MCP request propagation.
 - or None if no trace context to inject and meta was None
 
 
-### `record_span_error` <sup><a href="https://github.com/PrefectHQ/fastmcp/blob/main/fastmcp_slim/fastmcp/telemetry.py#L132" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+### `record_span_error` <sup><a href="https://github.com/PrefectHQ/fastmcp/blob/main/fastmcp_slim/fastmcp/telemetry.py#L183" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
 
 ```python
 record_span_error(span: Span, exception: BaseException) -> None
@@ -83,7 +129,7 @@ record_span_error(span: Span, exception: BaseException) -> None
 Record an exception on a span and set error status.
 
 
-### `restore_dropped_attributes` <sup><a href="https://github.com/PrefectHQ/fastmcp/blob/main/fastmcp_slim/fastmcp/telemetry.py#L158" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+### `restore_dropped_attributes` <sup><a href="https://github.com/PrefectHQ/fastmcp/blob/main/fastmcp_slim/fastmcp/telemetry.py#L209" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
 
 ```python
 restore_dropped_attributes(span: Span, attrs: Mapping[str, otel_types.AttributeValue]) -> None
@@ -133,7 +179,7 @@ kept at call sites so it reads alongside the sibling `is_recording()`
 guards already in those functions.
 
 
-### `extract_trace_context` <sup><a href="https://github.com/PrefectHQ/fastmcp/blob/main/fastmcp_slim/fastmcp/telemetry.py#L212" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+### `extract_trace_context` <sup><a href="https://github.com/PrefectHQ/fastmcp/blob/main/fastmcp_slim/fastmcp/telemetry.py#L263" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
 
 ```python
 extract_trace_context(meta: dict[str, Any] | None) -> Context

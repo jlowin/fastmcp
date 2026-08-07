@@ -22,7 +22,7 @@ from typing import Any
 import pytest
 from mcp import ClientSession
 from mcp.shared.exceptions import MCPError
-from mcp_types import METHOD_NOT_FOUND
+from mcp_types import METHOD_NOT_FOUND, DiscoverResult, ServerCapabilities
 from mcp_types.version import LATEST_HANDSHAKE_VERSION, LATEST_MODERN_VERSION
 from typing_extensions import Unpack
 
@@ -242,6 +242,19 @@ class TestNonConformantModernPeer:
 
 
 class TestPinnedMode:
+    def test_prior_discover_is_exposed(self, fastmcp_server):
+        prior = DiscoverResult(
+            supported_versions=[LATEST_MODERN_VERSION],
+            capabilities=ServerCapabilities(),
+        )
+        client = Client(
+            fastmcp_server,
+            mode=LATEST_MODERN_VERSION,
+            prior_discover=prior,
+        )
+
+        assert client.prior_discover is prior
+
     async def test_pinned_modern_adopts_without_probe(self, fastmcp_server):
         """Pinning the modern version adopts it directly; a synthesized
         DiscoverResult carries no identity, so server_info is absent."""
