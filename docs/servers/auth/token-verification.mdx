@@ -80,6 +80,19 @@ This configuration creates a server that validates JWTs issued by `auth.yourcomp
 
 The `issuer` parameter ensures tokens come from your trusted authentication system, while `audience` validation prevents tokens intended for other services from being accepted by your MCP server.
 
+`JWTVerifier` accepts RSA (`RS*` and `PS*`), ECDSA (`ES*`), and Edwards-curve (`Ed25519` and `Ed448`) signatures from JWKS endpoints. Set `algorithm` when your issuer does not use the default `RS256`:
+
+```python
+verifier = JWTVerifier(
+    jwks_uri="https://auth.yourcompany.com/.well-known/jwks.json",
+    issuer="https://auth.yourcompany.com",
+    audience="mcp-production-api",
+    algorithm="Ed25519",
+)
+```
+
+The legacy `EdDSA` identifier is also accepted for compatibility with identity providers that have not yet adopted the fully specified identifiers from RFC 9864.
+
 ### Symmetric Key Verification (HMAC)
 
 Symmetric key verification uses a shared secret for both signing and validation, making it ideal for internal microservices and trusted environments where the same secret can be securely distributed to both token issuers and validators.
@@ -121,7 +134,7 @@ The parameter is named `public_key` for backwards compatibility, but when using 
 
 ### Static Public Key Verification
 
-Static public key verification works when you have a fixed RSA or ECDSA signing key and don't need automatic key rotation. This approach is primarily useful for development environments or controlled deployments where JWKS endpoints aren't available.
+Static public key verification works when you have a fixed RSA, ECDSA, or EdDSA signing key and don't need automatic key rotation. This approach is primarily useful for development environments or controlled deployments where JWKS endpoints aren't available.
 
 ```python
 from fastmcp import FastMCP
@@ -141,7 +154,7 @@ verifier = JWTVerifier(
 mcp = FastMCP(name="Protected API", auth=verifier)
 ```
 
-This configuration validates tokens using a specific RSA or ECDSA public key. The key must correspond to the private key used by your token issuer. While less flexible than JWKS endpoints, this approach can be useful in development environments or when testing with fixed keys.
+This configuration validates tokens using a specific RSA, ECDSA, or EdDSA public key. The key must correspond to the private key used by your token issuer. While less flexible than JWKS endpoints, this approach can be useful in development environments or when testing with fixed keys.
 ## Opaque Token Verification
 
 Many authorization servers issue opaque tokens rather than self-contained JWTs. Opaque tokens are random strings that carry no information themselves - the authorization server maintains their state and validation requires querying the server. FastMCP supports opaque token validation through OAuth 2.0 Token Introspection (RFC 7662).
@@ -425,4 +438,3 @@ mcp = FastMCP(name="Production API", auth=verifier)
 This keeps configuration out of your codebase while maintaining explicit setup.
 
 This approach enables the same codebase to run across development, staging, and production environments with different authentication requirements. Development might use static tokens while production uses JWT verification, all controlled through environment configuration.
-

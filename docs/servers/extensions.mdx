@@ -1,0 +1,166 @@
+---
+title: Server Extensions
+sidebarTitle: Extensions
+description: Add negotiated protocol features to a server without forking the framework.
+icon: plug
+---
+
+import { VersionBadge } from "/snippets/version-badge.mdx"
+
+<VersionBadge version="4.0.0" />
+
+An MCP extension is a protocol feature that lives outside the core spec, named by a reverse-DNS identifier and negotiated as a capability. A server advertises the extensions it implements, and a client advertises the ones it understands. That negotiation is per request: a client repeats its extension capabilities in every request's `_meta`, so a handler can always tell whether the caller opted in to this particular call.
+
+Honoring that opt-in is the extension's job, not the framework's. FastMCP advertises your capability and routes your methods, but it does not filter callers for you, so an extension that changes behavior must check before it acts. The [tool-call interceptor](#intercepting-tool-calls) below shows the check.
+
+FastMCP 4 makes extensions a first-class surface. `FastMCP.add_extension()` takes an object that can advertise a capability, serve new request methods, wrap every `tools/call`, and own resources for the life of the server. [Background tasks](/servers/tasks) are built this way, on the same public interface available to you, so a cross-cutting protocol feature becomes a plugin rather than a change to FastMCP itself.
+
+## Writing an extension
+
+Subclass `ServerExtension` and set an `identifier`. The identifier must carry a reverse-DNS prefix in `vendor-prefix/name` form, which FastMCP validates when the class is defined, so a malformed one fails immediately rather than at connection time. Everything else is optional: each contribution method has a working default, and a useful extension often overrides just one.
+
+Registering the extension binds it to the server and advertises its capability. The capability is advertised only while the extension is registered, and registering two extensions with the same identifier is an error.
+
+```python
+from fastmcp import FastMCP
+from fastmcp.server.extensions import ServerExtension
+
+
+class CallCounterExtension(ServerExtension):
+    identifier = "com.example/call-counter"
+
+    def __init__(self) -> None:
+        self.count = 0
+
+
+mcp = FastMCP("Demo")
+mcp.add_extension(CallCounterExtension())
+```
+
+Register extensions before the server starts. Adding one after the lifespan is running raises, because the extension's own lifespan could no longer run and it would end up silently half-active.
+
+An extension reaches the rest of the server through `self.server`, which is the `FastMCP` instance it was registered on. That is how handlers and interceptors get at the component registry, the request [`Context`](/servers/context), and the authenticated caller.
+
+## Advertising settings
+
+Some extensions need to tell the client how they are configured: a size limit, a supported mode, a flag. Override `settings()` to return a JSON-serializable dict, and it appears on the wire under `capabilities.extensions[identifier]`. The default is an empty dict, which advertises the extension with no settings attached.
+
+```python
+from typing import Any
+
+from fastmcp import FastMCP
+from fastmcp.server.extensions import ServerExtension
+
+
+class UploadExtension(ServerExtension):
+    identifier = "com.example/uploads"
+
+    def settings(self) -> dict[str, Any]:
+        return {"maxBytes": 10_000_000, "resumable": True}
+
+
+mcp = FastMCP("Demo")
+mcp.add_extension(UploadExtension())
+```
+
+A client reads these alongside the capability itself, so it can adapt before making a single call.
+
+## Adding request methods
+
+An extension can serve request methods the core spec does not define. Return a `MethodBinding` from `methods()` naming the wire method, the Pydantic model its params validate against, and the handler to run.
+
+Extension methods are strictly additive. Binding a spec-defined method like `tools/call` raises at construction, because doing so would silently shadow the server's own handler. To change how a core method behaves, use [middleware](/servers/middleware) or the tool-call interceptor below.
+
+The params model should subclass `RequestParams` so `_meta` parses uniformly, and the handler receives the request context and the validated params.
+
+```python
+from typing import Any
+
+from mcp.types import RequestParams
+from fastmcp.server.extensions import MethodBinding, ServerExtension
+
+
+class GetCallCountParams(RequestParams):
+    pass
+
+
+class CallCounterExtension(ServerExtension):
+    identifier = "com.example/call-counter"
+
+    def __init__(self) -> None:
+        self.count = 0
+
+    def methods(self) -> list[MethodBinding]:
+        return [
+            MethodBinding(
+                method="callCounter/get",
+                params_type=GetCallCountParams,
+                handler=self.get_count,
+            )
+        ]
+
+    async def get_count(self, ctx, params: GetCallCountParams) -> dict[str, Any]:
+        return {"count": self.count}
+```
+
+Setting `protocol_versions` on a binding restricts the method to specific wire versions, and a request at any other version is rejected as `METHOD_NOT_FOUND`. Leaving it unset, the default, serves the method on every version.
+
+## Intercepting tool calls
+
+Override `intercept_tool_call()` to wrap every `tools/call` the server handles. The interceptor runs after the FastMCP middleware chain and immediately before the tool body, making it the last gate before execution. Await `call_next()` to let the call proceed, or return a result without awaiting it to short-circuit.
+
+Every registered interceptor runs on every tool call, including calls from clients that never advertised your extension. FastMCP does not gate this for you, so an interceptor that changes what the caller gets back must first confirm the caller opted in. `context.client_extension_settings(identifier)` returns the settings the client declared for this request, or `None` when it declared nothing.
+
+```python
+from fastmcp import FastMCP
+from fastmcp.server.extensions import ServerExtension
+
+
+class CallCounterExtension(ServerExtension):
+    identifier = "com.example/call-counter"
+
+    def __init__(self) -> None:
+        self.count = 0
+
+    async def intercept_tool_call(self, params, context, call_next):
+        if context.client_extension_settings(self.identifier) is None:
+            return await call_next()
+        self.count += 1
+        return await call_next()
+
+
+mcp = FastMCP("Demo")
+mcp.add_extension(CallCounterExtension())
+```
+
+Counting is harmless either way, so this example passes unaware callers straight through. The check becomes essential the moment an interceptor short-circuits: returning an extension-specific result to a client that never negotiated the extension hands it a shape it has no way to understand. Request methods have the same requirement, and `self.client_settings(ctx)` is the equivalent inside a handler.
+
+`params` holds the validated `tools/call` params, and `context` is the FastMCP `Context`, so the tool being invoked is reachable as `context.fastmcp.get_tool(params.name)` along with auth scope and the server itself. When several extensions intercept, they nest with the first-registered outermost.
+
+Reach for middleware when you want to observe or modify requests generally; reach for an interceptor when the behavior belongs to a negotiated capability and should exist only while that extension is registered.
+
+## Owning resources
+
+An extension that owns something with a lifecycle, such as a connection pool or a background worker, overrides `lifespan()` to return an async context manager. FastMCP enters it with the server's own [lifespan](/servers/lifespan) and exits it on shutdown, so setup and teardown stay with the extension that needs them rather than leaking into the application's startup code.
+
+The lifespan is entered once per runtime tree, at the root. This matters when you compose servers: extensions are served by the server they are registered on, and a mounted child's extensions do not propagate upward. The root server owns the wire, so only root-registered extensions advertise capabilities and answer methods. Register extensions on the server you actually run.
+
+## Client extensions
+
+The client half of an extension is what makes negotiation two-sided. Pass `ClientExtension` instances to `Client(extensions=...)` and each contributes its capability advertisement, its result claims, and its notification bindings to the underlying session. A claimed `call_tool` result is then resolved transparently through the extension that owns it.
+
+When a client needs only to say it understands an extension, without implementing behavior for it, `advertise()` produces an advertise-only entry.
+
+```python
+from fastmcp import Client
+from mcp.client import advertise
+
+client = Client(
+    "https://example.com/mcp",
+    extensions=[advertise("com.example/uploads", {"maxBytes": 10_000_000})],
+)
+```
+
+Advertise only what you genuinely support: the advertisement asserts wire compatibility, and claiming an extension you have not implemented invites the server to use a feature you cannot answer. For anything behavioral, construct the real extension instead.
+
+Claimed result shapes are a modern-protocol feature and stay inert on a legacy connection, so an extension-aware client is still safe to point at an older server.

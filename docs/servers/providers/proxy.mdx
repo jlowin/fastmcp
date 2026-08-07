@@ -240,6 +240,10 @@ proxy = create_proxy(
 
 A modern client here reaches both `weather` and `calendar` on modern sessions, so a guard tool on either one round-trips end to end. An explicit `mode` pins every backend in the configuration, the same way it pins a single one.
 
+### Request Metadata
+
+Request `_meta` follows the same connection boundary. Progress tokens, tracing, task state, and application or vendor metadata pass through the proxy to the backend. The connection-owned keys — protocol version, client identity, and client capabilities — never copy from the frontend connection: a modern backend session stamps its own negotiated values, and a handshake-era backend receives none. This holds even when the two connections negotiate different eras, such as a modern client reaching a handshake-only backend through an explicit `mode`.
+
 ## Configuration-Based Proxies
 
 <VersionBadge version="2.4.0" />

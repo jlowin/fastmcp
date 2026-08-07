@@ -8,14 +8,18 @@ icon: arrow-down-to-line
 We recommend using [uv](https://docs.astral.sh/uv/getting-started/installation/) to install and manage FastMCP.
 
 ```bash
+uv add fastmcp
+```
+
+Or with pip:
+
+```bash
 pip install fastmcp
 ```
 
-Or with uv:
-
-```bash
-uv add fastmcp
-```
+<Note>
+**FastMCP 4 is in prerelease.** The commands above install the latest stable release, which is still 3.x. To get v4, pin the beta explicitly with `pip install "fastmcp==4.0.0b1"`, or see [Install the v4 Prerelease](/getting-started/upgrading/from-fastmcp-3#install-the-v4-prerelease) for the uv constraint you'll need.
+</Note>
 
 ### Optional Dependencies
 
@@ -40,8 +44,8 @@ You should see output like the following:
 ```bash
 $ fastmcp version
 
-FastMCP version:                           3.0.0
-MCP version:                               1.25.0
+FastMCP version:                         4.0.0b1
+MCP version:                                2.0.0
 Python version:                            3.12.2
 Platform:            macOS-15.3.1-arm64-arm-64bit
 FastMCP root path:            ~/Developer/fastmcp
@@ -61,6 +65,10 @@ pip install "cyclopts>=5.0.0a1"
 Alternatively, wait for the stable v5 release. See [this issue](https://github.com/BrianPugh/cyclopts/issues/672) for details.
 </Info>
 ## Upgrading
+
+### From FastMCP 3.0
+
+Most FastMCP 3 servers run on 4 without changes. See [Upgrading from FastMCP 3](/getting-started/upgrading/from-fastmcp-3) for the breaks that do exist, and [What's New](/getting-started/whats-new) for what the new version adds.
 
 ### From FastMCP 2.0
 
@@ -107,16 +115,12 @@ FastMCP follows semantic versioning with pragmatic adaptations for the rapidly e
 
 For production use, always pin to exact versions:
 ```
-fastmcp==3.0.0  # Good
-fastmcp>=3.0.0  # Bad - may install breaking changes
+fastmcp==4.0.0b1  # Good - an exact version
+fastmcp>=4.0.0    # Bad - may install breaking changes
 ```
 
 See the full [versioning and release policy](/development/releases#versioning-policy) for details on our public API, deprecation practices, and breaking change philosophy.
 
 ## Contributing to FastMCP
 
-Interested in contributing to FastMCP? See the [Contributing Guide](/development/contributing) for details on:
-- Setting up your development environment
-- Running tests and pre-commit hooks
-- Submitting issues and pull requests
-- Code standards and review process
+The [Contributing Guide](/development/contributing) covers setting up a development environment, running the test suite and pre-commit hooks, and the standards we hold contributed code to.

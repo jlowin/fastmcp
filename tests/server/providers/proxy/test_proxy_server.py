@@ -172,13 +172,7 @@ async def proxy_server(fastmcp_server):
     raw `FastMCP`/URL/etc.) means `create_proxy` reuses that client as-is
     instead of building one through the era-mirroring factory — so this
     backend stays pinned to `ProxyClient`'s own default of `mode="legacy"`
-    regardless of what era the front client negotiates. A test that actually
-    forwards a tool *call* through this fixture (not just a listing) needs
-    its own front `Client` pinned to `mode="legacy"` too: otherwise a modern
-    front's request `_meta` carries the reserved modern-envelope keys, which
-    `ProxyTool.run`'s legacy-backend path forwards verbatim onto this
-    legacy-locked backend session, and the backend server rejects it as a
-    protocol violation.
+    regardless of what era the front client negotiates.
     """
     return create_proxy(ProxyClient(transport=FastMCPTransport(fastmcp_server)))
 
@@ -1250,11 +1244,7 @@ class TestProxyOutputSchemaEnforcement:
         # This proxy's backend is built via `ProxyProvider(lambda: ProxyClient(...))`
         # directly rather than through `create_proxy`'s era-mirroring factory, so it
         # stays pinned to `ProxyClient`'s own default of `mode="legacy"` regardless
-        # of the front era (see the `proxy_server` fixture docstring above for the
-        # full explanation). Pin the end client to match: a modern front's request
-        # `_meta` carries reserved modern-envelope keys that `ProxyTool.run`'s
-        # legacy-backend path forwards verbatim, and this legacy-locked backend
-        # session rejects them as a protocol violation.
+        # of the front era (see the `proxy_server` fixture docstring above).
         client = Client(server, mode="legacy")
         client._transport_options = TransportOptions(
             session_class=_ForwardingClientSession
@@ -1428,10 +1418,7 @@ class TestProxyForwardingAppliesToEveryBackendClient:
         # era. A multi-server config instead mounts a router with a
         # StatefulProxyClient per configured server leg — an already-constructed
         # ProxyClient subclass, same as the `proxy_server` fixture above, pinned
-        # to `mode="legacy"` regardless of the front. Callers with that backend
-        # shape must pin the end client to legacy too, for the reason explained
-        # there (a modern front's request `_meta` gets forwarded verbatim onto a
-        # legacy-locked backend session and rejected as a protocol violation).
+        # to `mode="legacy"` regardless of the front.
         client = Client(server, mode=mode)
         client._transport_options = TransportOptions(
             session_class=_ForwardingClientSession

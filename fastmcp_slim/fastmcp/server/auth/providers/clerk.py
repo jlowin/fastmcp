@@ -327,8 +327,9 @@ class ClerkProvider(OAuthProxy):
                 into a 32-byte key. If not provided, the upstream client secret will be used to
                 derive a 32-byte key using PBKDF2.
             require_authorization_consent: Whether to require user consent before authorizing
-                clients (default True). When "external", the built-in consent screen is skipped
-                but no warning is logged, indicating that consent is handled externally by Clerk.
+                clients (default True). When "external", authorization follows the same direct
+                path as False, but the warning is suppressed as an operator acknowledgment that
+                equivalent protections are enforced externally.
             consent_csp_policy: Custom CSP policy for the consent page.
             extra_authorize_params: Additional parameters to forward to Clerk's authorization
                 endpoint. Example: {"prompt": "login"} to force re-authentication.

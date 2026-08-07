@@ -74,7 +74,7 @@ def search_products_implementation(query: str, category: str | None = None) -> l
 </ParamField>
 
 <ParamField body="title" type="str | None">
-  A human-readable display title for the tool. If omitted, FastMCP falls back to `annotations.title` when present.
+  A human-readable display title for the tool. If omitted, FastMCP falls back to `annotations.title` when present, then to a title derived from the tool's name (e.g. `find_products` becomes "Find Products") — some MCP clients drop tools that have no title at all.
 </ParamField>
 
 <ParamField body="tags" type="set[str] | None">
@@ -431,7 +431,7 @@ def get_user_details(user_id: str = Depends(get_user_id)) -> str:
     return f"Details for {user_id}"
 ```
 
-See [Custom Dependencies](/servers/context#custom-dependencies) for more details on dependency injection.
+See [Custom Dependencies](/servers/dependency-injection#custom-dependencies) for more details on dependency injection.
 
 ## Return Values
 
@@ -1081,22 +1081,22 @@ For full documentation on the Context object and all its capabilities, see the [
 
 <VersionBadge version="2.1.0" />
 
-You can control how the FastMCP server behaves if you try to register multiple tools with the same name. This is configured using the `on_duplicate_tools` argument when creating the `FastMCP` instance.
+You can control how the FastMCP server behaves if you register the same component twice. Identity is the component's type, name, and version together, so a tool and a prompt may share a name, and two versions of one tool coexist. Only an exact repeat of all three counts as a duplicate. The `on_duplicate` argument sets that policy once for every component type.
 
 ```python
 from fastmcp import FastMCP
 
 mcp = FastMCP(
     name="StrictServer",
-    # Configure behavior for duplicate tool names
-    on_duplicate_tools="error"
+    # Configure behavior for exact component duplicates
+    on_duplicate="error"
 )
 
 @mcp.tool
 def my_tool(): return "Version 1"
 
 # This will now raise a ValueError because 'my_tool' already exists
-# and on_duplicate_tools is set to "error".
+# and on_duplicate is set to "error".
 # @mcp.tool
 # def my_tool(): return "Version 2"
 ```

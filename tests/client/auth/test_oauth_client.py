@@ -96,9 +96,11 @@ async def test_unauthorized(client_unauthorized: Client):
     SDK v2 surfaces the server's 401 as an MCPError ("Server returned an error
     response") rather than re-raising the raw httpx2.HTTPStatusError.
     """
-    with pytest.raises(MCPError, match="error response"):
+    with pytest.raises(MCPError, match="error response") as exc_info:
         async with client_unauthorized:
             pass
+
+    assert exc_info.value.__cause__ is not exc_info.value
 
 
 async def test_ping(streamable_http_server: str):

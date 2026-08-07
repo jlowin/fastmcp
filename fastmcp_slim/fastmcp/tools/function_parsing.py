@@ -18,6 +18,7 @@ from fastmcp.tools.base import ToolResult, resolve_serialize_by_alias
 from fastmcp.utilities.docstring_parsing import ParsedDocstring, parse_docstring
 from fastmcp.utilities.json_schema import compress_schema
 from fastmcp.utilities.logging import get_logger
+from fastmcp.utilities.prefab import is_prefab_type
 from fastmcp.utilities.types import (
     Audio,
     File,
@@ -26,14 +27,6 @@ from fastmcp.utilities.types import (
     is_class_member_of_type,
     replace_type,
 )
-
-try:
-    from prefab_ui.app import PrefabApp as _PrefabApp
-    from prefab_ui.components.base import Component as _PrefabComponent
-
-    _PREFAB_TYPES: tuple[type, ...] = (_PrefabApp, _PrefabComponent)
-except ImportError:
-    _PREFAB_TYPES = ()
 
 
 def _contains_bytes_type(tp: Any) -> bool:
@@ -48,7 +41,7 @@ def _contains_bytes_type(tp: Any) -> bool:
 
 def _contains_prefab_type(tp: Any) -> bool:
     """Check if *tp* is or contains a prefab type, recursing through unions and Annotated."""
-    if isinstance(tp, type) and issubclass(tp, _PREFAB_TYPES):
+    if is_prefab_type(tp):
         return True
     origin = get_origin(tp)
     if origin is Union or origin is types.UnionType or origin is Annotated:
@@ -419,7 +412,7 @@ class ParsedFunction:
             # so we handle subclass matching explicitly here.  We also need
             # to handle composite types like ``Column | None`` and
             # ``Annotated[PrefabApp, ...]`` by recursing into their args.
-            if _PREFAB_TYPES and _contains_prefab_type(output_type):
+            if _contains_prefab_type(output_type):
                 output_type = _UnserializableType
 
             # ToolResult subclasses should suppress schema generation just
@@ -464,7 +457,6 @@ class ParsedFunction:
                         # A guard tool's suspend signal is control flow, not
                         # output data (any residual bare arm is suppressed).
                         mcp_types.InputRequiredResult,
-                        *_PREFAB_TYPES,
                     ),
                     _UnserializableType,
                 ),

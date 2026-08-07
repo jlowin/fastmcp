@@ -653,13 +653,6 @@ class TestOpenAPIComprehensive:
         mock_response.json.return_value = {"code": 404, "message": "User not found"}
         mock_response.text = json.dumps({"code": 404, "message": "User not found"})
 
-        # Configure raise_for_status to raise HTTPStatusError
-        def raise_for_status():
-            raise httpx2.HTTPStatusError(
-                "404 Not Found", request=Mock(), response=mock_response
-            )
-
-        mock_response.raise_for_status = raise_for_status
         mock_client.send = AsyncMock(return_value=mock_response)
 
         server = create_openapi_server(

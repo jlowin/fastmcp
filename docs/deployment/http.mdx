@@ -103,7 +103,7 @@ If you're mounting an authenticated server under a path prefix, see [Mounting Au
 
 ### Host and Origin Protection
 
-FastMCP can validate `Host` and browser `Origin` headers for Streamable HTTP requests before they reach MCP session handling. This request guard protects localhost-bound servers from DNS rebinding attacks, and it remains opt-in in FastMCP 3.x to preserve compatibility with existing ASGI, serverless, and reverse-proxy deployments.
+FastMCP can validate `Host` and browser `Origin` headers for Streamable HTTP requests before they reach MCP session handling. This request guard protects localhost-bound servers from DNS rebinding attacks, and it stays opt-in to preserve compatibility with existing ASGI, serverless, and reverse-proxy deployments.
 
 Think of this as a request guard rather than CORS middleware. It decides whether a request can reach MCP session handling. CORS remains a separate browser response-header policy; configure CORS middleware separately when browser JavaScript must read cross-origin responses.
 
@@ -188,7 +188,7 @@ def query_tenant(
 A gateway can now route on `Mcp-Param-Tenant` — for example, pinning each tenant to a dedicated backend — without inspecting the request body. The annotation is only permitted on `string`, `integer`, and `boolean` parameters. These headers advertise routing intent; treat them as untrusted hints, since the server still validates the request body as the source of truth.
 
 <Tip>
-When you put a FastMCP [proxy](/servers/proxy) in front of another server, the proxy re-advertises each backend tool's `x-mcp-header` annotation, so routing headers work across the proxy hop as well. The headers themselves are regenerated per hop rather than forwarded verbatim, since each describes a single HTTP request.
+When you put a FastMCP [proxy](/servers/providers/proxy) in front of another server, the proxy re-advertises each backend tool's `x-mcp-header` annotation, so routing headers work across the proxy hop as well. The headers themselves are regenerated per hop rather than forwarded verbatim, since each describes a single HTTP request.
 </Tip>
 
 ### Health Checks

@@ -3,7 +3,12 @@ from __future__ import annotations
 from collections import defaultdict
 from typing import Any
 
-from jsonref import JsonRefError, replace_refs
+
+def replace_refs(*args: Any, **kwargs: Any) -> Any:
+    """Call jsonref lazily while preserving the module's patchable boundary."""
+    from jsonref import replace_refs as _replace_refs
+
+    return _replace_refs(*args, **kwargs)
 
 
 def _copy_schema(schema: dict[str, Any]) -> dict[str, Any]:
@@ -220,6 +225,10 @@ def dereference_refs(schema: dict[str, Any]) -> dict[str, Any]:
     # Detect cycles up front and fall back to root-only resolution.
     if _defs_have_cycles(schema.get("$defs", {})):
         return resolve_root_ref(schema)
+
+    # Most schema operations do not dereference. Keep jsonref (and its requests
+    # dependency tree) out of server startup until a schema actually needs it.
+    from jsonref import JsonRefError
 
     try:
         # Use jsonref to resolve all $ref references

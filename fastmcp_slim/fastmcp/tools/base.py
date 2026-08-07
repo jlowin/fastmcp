@@ -26,6 +26,11 @@ from pydantic.json_schema import SkipJsonSchema
 from fastmcp.utilities.authorization import AuthCheck
 from fastmcp.utilities.components import FastMCPComponent
 from fastmcp.utilities.logging import get_logger
+from fastmcp.utilities.prefab import (
+    is_prefab_app,
+    is_prefab_component,
+    prefab_app_from_component,
+)
 from fastmcp.utilities.tasks import TaskConfig
 from fastmcp.utilities.types import (
     Audio,
@@ -35,14 +40,6 @@ from fastmcp.utilities.types import (
     NotSetT,
 )
 
-try:
-    from prefab_ui.app import PrefabApp as _PrefabApp
-    from prefab_ui.components.base import Component as _PrefabComponent
-
-    _HAS_PREFAB = True
-except ImportError:
-    _HAS_PREFAB = False
-
 if TYPE_CHECKING:
     from fastmcp.tools.function_tool import FunctionTool
     from fastmcp.tools.tool_transform import ArgTransform, TransformedTool
@@ -50,6 +47,16 @@ if TYPE_CHECKING:
 # Re-export from function_tool module
 
 logger = get_logger(__name__)
+
+
+def _default_title(name: str) -> str:
+    """Derive a display title from a tool name.
+
+    The MCP spec says clients should fall back to `name` for display when
+    `title` is absent, but some clients (e.g. ChatGPT) instead drop the tool
+    entirely. Always emitting a title avoids depending on that fallback.
+    """
+    return name.replace("_", " ").replace("-", " ").title()
 
 
 def resolve_serialize_by_alias(value: Any) -> bool:
@@ -118,13 +125,12 @@ class ToolResult(BaseModel):
         if structured_content is not None:
             # Convert Prefab types to their wire-format envelope before
             # generic serialization, so the renderer gets the right shape.
-            if _HAS_PREFAB:
-                if isinstance(structured_content, _PrefabApp):
-                    structured_content = _prefab_to_json(structured_content)
-                elif isinstance(structured_content, _PrefabComponent):
-                    structured_content = _prefab_to_json(
-                        _PrefabApp(view=structured_content)
-                    )
+            if is_prefab_app(structured_content):
+                structured_content = _prefab_to_json(structured_content)
+            elif is_prefab_component(structured_content):
+                structured_content = _prefab_to_json(
+                    prefab_app_from_component(structured_content)
+                )
 
             try:
                 structured_content = pydantic_core.to_jsonable_python(
@@ -263,21 +269,28 @@ class Tool(FastMCPComponent):
         **overrides: Any,
     ) -> MCPTool:
         """Convert the FastMCP tool to an MCP tool."""
-        title = None
+        # Title precedence follows the effective (post-override) values, so a
+        # caller renaming or re-annotating a tool doesn't get a stale title.
+        name = overrides.get("name", self.name)
+        annotations = overrides.get("annotations", self.annotations)
+        if isinstance(annotations, dict):
+            annotations = ToolAnnotations(**annotations)
 
         if self.title:
             title = self.title
-        elif self.annotations and self.annotations.title:
-            title = self.annotations.title
+        elif annotations and annotations.title:
+            title = annotations.title
+        else:
+            title = _default_title(name)
 
         mcp_tool = MCPTool(
-            name=overrides.get("name", self.name),
+            name=name,
             title=overrides.get("title", title),
             description=overrides.get("description", self.description),
             input_schema=overrides.get("inputSchema", self.parameters),
             output_schema=overrides.get("outputSchema", self.output_schema),
             icons=overrides.get("icons", self.icons),
-            annotations=overrides.get("annotations", self.annotations),
+            annotations=annotations,
             execution=overrides.get("execution", self.execution),
             _meta=overrides.get(  # type: ignore[call-arg]  # _meta is Pydantic alias for meta field
                 "_meta", self.get_meta()
@@ -362,17 +375,16 @@ class Tool(FastMCPComponent):
         if isinstance(raw_value, CallToolResult):
             return ToolResult.from_mcp_result(raw_value)
 
-        if _HAS_PREFAB:
-            if isinstance(raw_value, _PrefabApp):
-                return _prefab_to_tool_result(
-                    raw_value,
-                    fastmcp_app_name=_get_fastmcp_app_name(self),
-                )
-            if isinstance(raw_value, _PrefabComponent):
-                return _prefab_to_tool_result(
-                    _PrefabApp(view=raw_value),
-                    fastmcp_app_name=_get_fastmcp_app_name(self),
-                )
+        if is_prefab_app(raw_value):
+            return _prefab_to_tool_result(
+                raw_value,
+                fastmcp_app_name=_get_fastmcp_app_name(self),
+            )
+        if is_prefab_component(raw_value):
+            return _prefab_to_tool_result(
+                prefab_app_from_component(raw_value),
+                fastmcp_app_name=_get_fastmcp_app_name(self),
+            )
 
         content = _convert_to_content(raw_value)
 

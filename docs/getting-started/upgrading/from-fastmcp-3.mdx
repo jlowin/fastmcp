@@ -5,7 +5,7 @@ description: What changes when you upgrade to FastMCP 4, which builds on the MCP
 icon: up
 ---
 
-FastMCP 4 builds on the MCP Python SDK v2, and that is the source of every change in this guide. The SDK v2 makes two sweeping changes to the protocol layer: it moves the protocol types into a standalone `mcp_types` package (still importable as `mcp.types`), and it renames every protocol field from camelCase to snake_case (`inputSchema` → `input_schema`, `mimeType` → `mime_type`, `isError` → `is_error`, and so on).
+FastMCP 4 builds on the MCP Python SDK v2, and that is the source of every change in this guide. The SDK v2 makes two sweeping changes to the protocol layer: it moves the protocol types into a standalone `mcp_types` package (still importable as `mcp.types`), and it renames every model field from camelCase to snake_case in Python (`inputSchema` → `input_schema`, `mimeType` → `mime_type`, `isError` → `is_error`, and so on). The wire format does not change: the models keep their camelCase aliases and serialize under them, so this renames the attributes your code reads, not the JSON on the connection.
 
 FastMCP 4 absorbs almost all of this for you. Field access is bridged so your existing reads keep working, and the imports you were taught have a stable home in FastMCP itself. What the SDK cannot hide is the protocol's own direction: the new sessionless era removes the server's ability to call back into a client mid-request, and background tasks moved out of the core spec into an extension. Those two shape the changes a working server is most likely to feel.
 
@@ -209,7 +209,7 @@ transport = StreamableHttpTransport(
 )
 ```
 
-The `client` you pass to `FastMCP.from_openapi(client=...)` (and `OpenAPIProvider(client=...)`) is now type-hinted `httpx2.AsyncClient`. FastMCP does not gate on the type, so an existing `httpx.AsyncClient` keeps working at runtime via duck-typing this release — but switching it to `httpx2.AsyncClient` clears the type hint and is the supported path going forward. HTTP made inside your own tools is entirely yours and is unaffected either way.
+The `client` you pass to `FastMCP.from_openapi(client=...)` (and `OpenAPIProvider(client=...)`) should now be an `httpx2.AsyncClient`. Existing `httpx.AsyncClient` instances remain temporarily accepted via duck typing, but emit a `FastMCPDeprecationWarning` and will be rejected in a future release. HTTP made inside your own tools is entirely yours and is unaffected.
 
 **The subtlest break is exception handlers, and no type checker will catch it.** `httpx` very likely remains installed in your environment (the Anthropic, OpenAI, and Google SDKs all depend on it), so code that catches old-httpx exceptions around FastMCP calls still imports and still type-checks — it just never matches, because FastMCP now raises `httpx2` exceptions. The handler silently becomes dead code:
 
