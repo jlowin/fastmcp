@@ -172,13 +172,7 @@ async def proxy_server(fastmcp_server):
     raw `FastMCP`/URL/etc.) means `create_proxy` reuses that client as-is
     instead of building one through the era-mirroring factory — so this
     backend stays pinned to `ProxyClient`'s own default of `mode="legacy"`
-    regardless of what era the front client negotiates. A test that actually
-    forwards a tool *call* through this fixture (not just a listing) needs
-    its own front `Client` pinned to `mode="legacy"` too: otherwise a modern
-    front's request `_meta` carries the reserved modern-envelope keys, which
-    `ProxyTool.run`'s legacy-backend path forwards verbatim onto this
-    legacy-locked backend session, and the backend server rejects it as a
-    protocol violation.
+    regardless of what era the front client negotiates.
     """
     return create_proxy(ProxyClient(transport=FastMCPTransport(fastmcp_server)))
 
@@ -210,13 +204,7 @@ async def test_create_proxy_with_transport(fastmcp_server):
 
 
 async def test_proxy_forwards_upstream_instructions():
-    """A proxy should surface the upstream server's instructions in the handshake.
-
-    `FastMCPProxy` registers a `server/discover` handler that forwards the
-    upstream's instructions, mirroring what `ProxyInitializeMiddleware.on_initialize`
-    already does for the legacy handshake, so `client.session.instructions`
-    (era-neutral) resolves the same way on both protocol eras.
-    """
+    """The metadata middleware forwards upstream instructions."""
     upstream = FastMCP(name="upstream", instructions="USE_THIS_MARKER_123")
     proxy = create_proxy(upstream, name="proxy")
 
@@ -280,35 +268,25 @@ async def test_proxy_ping_surfaces_wrong_remote_path():
     async with run_server_async(remote, transport="http") as url:
         proxy = create_proxy(StreamableHttpTransport(url.removesuffix("/mcp")))
 
-        # This asserts the error surfaces from merely *connecting* to the proxy,
-        # with no operation performed. That only happens on the legacy handshake:
-        # `ProxyInitializeMiddleware.on_initialize` eagerly probes the backend
-        # during the front's own `initialize` call. A modern front negotiates
-        # `server/discover` instead, which never runs that middleware hook, so
-        # connecting succeeds regardless of backend health and the failure would
-        # only surface on first real use. Pinned because the subject here is
-        # that eager, handshake-time probe.
-        #
-        # SDK v2 surfaces a wrong remote path as an HTTP "Not Found" rather than
-        # the v1 "Session terminated" message.
-        with pytest.raises(MCPError, match="Not Found"):
-            async with Client(proxy, mode="legacy"):
-                pass
+        # Optional metadata lookup is best-effort, so the client can connect. The
+        # first real proxied operation reports the bad backend path instead.
+        async with Client(proxy, mode="legacy") as client:
+            with pytest.raises(MCPError, match="Not Found"):
+                await client.ping()
 
 
-async def test_proxy_initialize_forwards_remote_connection_error():
+async def test_proxy_initialize_defers_remote_connection_error():
     port = find_available_port()
     proxy = create_proxy(
         StreamableHttpTransport(f"http://127.0.0.1:{port}/mcp"),
         provider_error_strategy="raise",
     )
 
-    # Same reasoning as test_proxy_ping_surfaces_wrong_remote_path above: the
-    # error surfaces from connecting alone only via the legacy handshake's
-    # eager backend probe in `ProxyInitializeMiddleware.on_initialize`.
-    with pytest.raises(MCPError, match="Client failed to connect"):
-        async with Client(proxy, mode="legacy"):
-            pass
+    # The client can connect without optional backend metadata; the first
+    # component operation reports the unavailable backend.
+    async with Client(proxy, mode="legacy") as client:
+        with pytest.raises(MCPError, match="Client failed to connect"):
+            await client.list_tools()
 
 
 async def test_proxy_list_tools_surfaces_remote_connection_error():
@@ -330,13 +308,10 @@ async def test_proxy_list_tools_surfaces_remote_connection_error():
 
 
 async def test_proxy_list_tools_client_surfaces_remote_connection_error():
-    """With a modern front, connecting succeeds (no eager backend probe — see
-    test_proxy_ping_surfaces_wrong_remote_path) and the failure only surfaces
-    once `list_tools()` actually hits the dead backend. `ProxyProvider._list_tools`
-    now normalizes the raw `httpx2.ConnectError` from the failed backend connect
-    into the `MCPError("Client failed to connect...")` this test expects, the
-    same way `ProxyInitializeMiddleware.on_initialize` and `ProxyTool.run`
-    already did.
+    """Connecting succeeds and the first component operation reports the backend.
+
+    `ProxyProvider._list_tools` normalizes the raw transport failure into the
+    `MCPError("Client failed to connect...")` this test expects.
     """
     port = find_available_port()
     proxy = create_proxy(
@@ -1250,11 +1225,7 @@ class TestProxyOutputSchemaEnforcement:
         # This proxy's backend is built via `ProxyProvider(lambda: ProxyClient(...))`
         # directly rather than through `create_proxy`'s era-mirroring factory, so it
         # stays pinned to `ProxyClient`'s own default of `mode="legacy"` regardless
-        # of the front era (see the `proxy_server` fixture docstring above for the
-        # full explanation). Pin the end client to match: a modern front's request
-        # `_meta` carries reserved modern-envelope keys that `ProxyTool.run`'s
-        # legacy-backend path forwards verbatim, and this legacy-locked backend
-        # session rejects them as a protocol violation.
+        # of the front era (see the `proxy_server` fixture docstring above).
         client = Client(server, mode="legacy")
         client._transport_options = TransportOptions(
             session_class=_ForwardingClientSession
@@ -1428,10 +1399,7 @@ class TestProxyForwardingAppliesToEveryBackendClient:
         # era. A multi-server config instead mounts a router with a
         # StatefulProxyClient per configured server leg — an already-constructed
         # ProxyClient subclass, same as the `proxy_server` fixture above, pinned
-        # to `mode="legacy"` regardless of the front. Callers with that backend
-        # shape must pin the end client to legacy too, for the reason explained
-        # there (a modern front's request `_meta` gets forwarded verbatim onto a
-        # legacy-locked backend session and rejected as a protocol violation).
+        # to `mode="legacy"` regardless of the front.
         client = Client(server, mode=mode)
         client._transport_options = TransportOptions(
             session_class=_ForwardingClientSession
@@ -1472,13 +1440,7 @@ class TestProxyForwardingAppliesToEveryBackendClient:
 
 
 class TestProxyModernEraInstructions:
-    """Upstream instructions must reach a client on the modern era too.
-
-    `ProxyInitializeMiddleware.on_initialize` only fires for the legacy
-    handshake. A `mode="auto"` client negotiates via `server/discover`, which
-    the SDK builds from the low-level server's own `instructions`, so without a
-    discover-side hook the proxy drops its upstream's instructions entirely.
-    """
+    """Upstream instructions must reach a client on the modern era too."""
 
     async def test_proxy_forwards_upstream_instructions_on_modern_era(self):
         upstream = FastMCP(name="upstream", instructions="USE_THIS_MARKER_123")
@@ -1504,13 +1466,7 @@ class TestProxyModernEraInstructions:
 
 
 class TestProxyProviderTransportErrors:
-    """A dead backend must surface as an MCPError, not a raw transport error.
-
-    `ProxyTool.run` and `ProxyInitializeMiddleware.on_initialize` normalize
-    connection failures into `MCPError`; the provider's list methods caught
-    only `MCPError`, so an `httpx2.ConnectError` (or the `RuntimeError` the
-    client wraps a failed connect in) escaped unwrapped to the caller.
-    """
+    """A dead backend must surface as an MCPError, not a raw transport error."""
 
     @pytest.fixture
     def unreachable_provider(self) -> ProxyProvider:

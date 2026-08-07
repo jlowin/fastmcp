@@ -197,7 +197,6 @@ def _resolve_param_hints(fn: Callable[..., Any]) -> dict[str, Any]:
 
 class FunctionTool(Tool):
     fn: SkipJsonSchema[Callable[..., Any]]
-    return_type: Annotated[SkipJsonSchema[Any], Field(exclude=True)] = None
     run_in_thread: Annotated[
         bool,
         Field(

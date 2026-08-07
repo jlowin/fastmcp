@@ -5,6 +5,8 @@ from typing import Any
 
 from mcp_types import INTERNAL_ERROR, INVALID_PARAMS, ErrorData
 
+from fastmcp import _warnings
+
 try:
     from mcp import MCPError
 except ImportError:
@@ -30,14 +32,7 @@ except ImportError:
 # see the migration notes.
 McpError = MCPError
 
-
-class FastMCPDeprecationWarning(DeprecationWarning):
-    """Deprecation warning for FastMCP APIs.
-
-    Subclass of DeprecationWarning so that standard warning filters
-    still apply, but FastMCP can selectively enable its own warnings
-    without affecting other libraries in the process.
-    """
+FastMCPDeprecationWarning = _warnings.FastMCPDeprecationWarning
 
 
 class FastMCPError(Exception):

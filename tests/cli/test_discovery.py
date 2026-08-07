@@ -140,6 +140,30 @@ class TestParseMcpConfig:
         servers = _parse_mcp_config(path, "test")
         assert servers == []
 
+    def test_invalid_server_does_not_hide_valid_servers(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ):
+        path = tmp_path / "config.json"
+        _write_config(
+            path,
+            {
+                "mcpServers": {
+                    "working": {
+                        "command": "python",
+                        "args": ["server.py"],
+                    },
+                    "broken": {
+                        "args": ["missing-command.py"],
+                    },
+                }
+            },
+        )
+
+        servers = _parse_mcp_config(path, "test")
+
+        assert [server.name for server in servers] == ["working"]
+        assert "broken" in caplog.text
+
     def test_remote_server(self, tmp_path: Path):
         path = tmp_path / "config.json"
         _write_config(path, _REMOTE_CONFIG)

@@ -10,14 +10,17 @@ from dataclasses import dataclass
 from typing import Annotated, Any, Generic, Union, get_args, get_origin, get_type_hints
 
 import mcp_types
-from pydantic import BaseModel, PydanticSchemaGenerationError
+from pydantic import PydanticSchemaGenerationError
+from pydantic.json_schema import GenerateJsonSchema, JsonSchemaValue
+from pydantic_core import core_schema
 from typing_extensions import TypeAliasType
 from typing_extensions import TypeVar as TypeVarExt
 
-from fastmcp.tools.base import ToolResult, resolve_serialize_by_alias
+from fastmcp.tools.base import ToolResult
 from fastmcp.utilities.docstring_parsing import ParsedDocstring, parse_docstring
 from fastmcp.utilities.json_schema import compress_schema
 from fastmcp.utilities.logging import get_logger
+from fastmcp.utilities.prefab import is_prefab_type
 from fastmcp.utilities.types import (
     Audio,
     File,
@@ -26,14 +29,6 @@ from fastmcp.utilities.types import (
     is_class_member_of_type,
     replace_type,
 )
-
-try:
-    from prefab_ui.app import PrefabApp as _PrefabApp
-    from prefab_ui.components.base import Component as _PrefabComponent
-
-    _PREFAB_TYPES: tuple[type, ...] = (_PrefabApp, _PrefabComponent)
-except ImportError:
-    _PREFAB_TYPES = ()
 
 
 def _contains_bytes_type(tp: Any) -> bool:
@@ -48,7 +43,7 @@ def _contains_bytes_type(tp: Any) -> bool:
 
 def _contains_prefab_type(tp: Any) -> bool:
     """Check if *tp* is or contains a prefab type, recursing through unions and Annotated."""
-    if isinstance(tp, type) and issubclass(tp, _PREFAB_TYPES):
+    if is_prefab_type(tp):
         return True
     origin = get_origin(tp)
     if origin is Union or origin is types.UnionType or origin is Annotated:
@@ -153,51 +148,30 @@ def _strip_input_required(tp: Any) -> Any:
     return Union[tuple(residual)]  # noqa: UP007
 
 
-def _unwrap_model(tp: Any) -> type[BaseModel] | None:
-    """Unwrap ``Annotated`` and return the underlying Pydantic model, if any."""
-    if get_origin(tp) is Annotated:
-        return _unwrap_model(get_args(tp)[0])
-    if isinstance(tp, type) and issubclass(tp, BaseModel):
-        return tp
-    return None
+class _ToolOutputSchemaGenerator(GenerateJsonSchema):
+    """Generate each model's schema with its configured serialization aliases.
 
-
-def _resolve_output_by_alias(tp: Any) -> bool:
-    """Resolve ``by_alias`` for the output schema of return type *tp*.
-
-    Unwraps ``Annotated`` and ``Optional``/``Union`` wrappers to find the
-    underlying Pydantic model so the generated schema honors the model's
-    ``serialize_by_alias`` config — keeping it consistent with how the runtime
-    result is serialized. Containers (``list[Model]`` etc.) are not unwrapped:
-    their schema keeps the default, matching the runtime path which only
-    special-cases a directly-returned model.
-
-    Known limitation: a single schema is generated with one ``by_alias`` value,
-    while the runtime resolves the alias mode per returned value. They cannot
-    diverge for a plain single-model return, but a union return can produce more
-    than one runtime alias mode that no single schema can describe:
-
-    - distinct models with *conflicting* ``serialize_by_alias`` (e.g. ``A | B``
-      where ``A`` opts out but ``B`` opts in), and
-    - a model arm alongside a container arm (e.g. ``Model | list[Model]``):
-      a directly-returned model honors its config, but a returned ``list`` is
-      serialized with the default alias mode, so the two variants disagree.
-
-    Pydantic's schema generator does not consult per-model ``serialize_by_alias``
-    and the runtime does not recurse into containers, so honoring every variant
-    would require per-arm schema assembly. This is an accepted edge; single-model
-    returns and unions whose arms all resolve to the same mode are consistent.
+    Pydantic's serializer consults ``serialize_by_alias`` per model, while its
+    JSON Schema API otherwise applies one ``by_alias`` value to the whole tree.
     """
-    origin = get_origin(tp)
-    if origin is Annotated:
-        return _resolve_output_by_alias(get_args(tp)[0])
-    if origin is Union or origin is types.UnionType:
-        for arg in get_args(tp):
-            model = _unwrap_model(arg)
-            if model is not None:
-                return resolve_serialize_by_alias(model)
-        return True
-    return resolve_serialize_by_alias(tp)
+
+    def model_schema(self, schema: core_schema.ModelSchema) -> JsonSchemaValue:
+        previous_by_alias = self.by_alias
+        configured = schema["cls"].model_config.get("serialize_by_alias")
+        self.by_alias = False if configured is None else configured
+        try:
+            return super().model_schema(schema)
+        finally:
+            self.by_alias = previous_by_alias
+
+    def dataclass_schema(self, schema: core_schema.DataclassSchema) -> JsonSchemaValue:
+        previous_by_alias = self.by_alias
+        configured = (schema.get("config") or {}).get("serialize_by_alias")
+        self.by_alias = False if configured is None else configured
+        try:
+            return super().dataclass_schema(schema)
+        finally:
+            self.by_alias = previous_by_alias
 
 
 T = TypeVarExt("T", default=Any)
@@ -405,7 +379,7 @@ class ParsedFunction:
             # so we handle subclass matching explicitly here.  We also need
             # to handle composite types like ``Column | None`` and
             # ``Annotated[PrefabApp, ...]`` by recursing into their args.
-            if _PREFAB_TYPES and _contains_prefab_type(output_type):
+            if _contains_prefab_type(output_type):
                 output_type = _UnserializableType
 
             # ToolResult subclasses should suppress schema generation just
@@ -450,19 +424,17 @@ class ParsedFunction:
                         # A guard tool's suspend signal is control flow, not
                         # output data (any residual bare arm is suppressed).
                         mcp_types.InputRequiredResult,
-                        *_PREFAB_TYPES,
                     ),
                     _UnserializableType,
                 ),
             )
 
             try:
-                # Honor the model's serialize_by_alias config so the schema's
-                # field names match the serialized result (see base.py).
-                by_alias = _resolve_output_by_alias(clean_output_type)
                 type_adapter = get_cached_typeadapter(clean_output_type)
                 base_schema = type_adapter.json_schema(
-                    mode="serialization", by_alias=by_alias
+                    mode="serialization",
+                    by_alias=False,
+                    schema_generator=_ToolOutputSchemaGenerator,
                 )
 
                 # Generate schema for wrapped type if it's non-object
@@ -474,7 +446,9 @@ class ParsedFunction:
                     wrapped_type = _WrappedResult[clean_output_type]
                     wrapped_adapter = get_cached_typeadapter(wrapped_type)
                     output_schema = wrapped_adapter.json_schema(
-                        mode="serialization", by_alias=by_alias
+                        mode="serialization",
+                        by_alias=False,
+                        schema_generator=_ToolOutputSchemaGenerator,
                     )
                     output_schema["x-fastmcp-wrap-result"] = True
                 else:

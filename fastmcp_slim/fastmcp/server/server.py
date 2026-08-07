@@ -20,9 +20,6 @@ from typing import TYPE_CHECKING, Any, Generic, Literal, TypeVar, cast, overload
 
 import httpx2
 import mcp_types
-from key_value.aio.adapters.pydantic import PydanticAdapter
-from key_value.aio.protocols import AsyncKeyValue
-from key_value.aio.stores.memory import MemoryStore
 from mcp.server.lowlevel.server import LifespanResultT
 from mcp.server.request_state import RequestStateSecurity
 from mcp.shared.exceptions import MCPError
@@ -91,7 +88,7 @@ from fastmcp.tools.base import Tool, ToolResult
 from fastmcp.tools.function_tool import FunctionTool
 from fastmcp.tools.tool_transform import ToolTransformConfig
 from fastmcp.utilities.components import FastMCPComponent, _coerce_version
-from fastmcp.utilities.exceptions import HTTP_STATUS_ERRORS, TIMEOUT_ERRORS
+from fastmcp.utilities.exceptions import get_http_status_code, is_timeout_error
 from fastmcp.utilities.logging import get_logger
 from fastmcp.utilities.tasks import TaskConfig
 from fastmcp.utilities.types import AnyFunction, FastMCPBaseModel, NotSet, NotSetT
@@ -101,6 +98,9 @@ from fastmcp.utilities.versions import (
 )
 
 if TYPE_CHECKING:
+    from key_value.aio.adapters.pydantic import PydanticAdapter
+    from key_value.aio.protocols import AsyncKeyValue
+
     from fastmcp.client import Client
     from fastmcp.client.client import SDKServer
     from fastmcp.client.transports import ClientTransport, ClientTransportT
@@ -111,11 +111,6 @@ if TYPE_CHECKING:
     from fastmcp.server.providers.proxy import FastMCPProxy
 
 logger = get_logger(__name__)
-
-# Both-library catch tuples for user-supplied code that may still raise legacy
-# httpx exceptions; see fastmcp.utilities.exceptions for the defensive import.
-_ACTIONABLE_HTTP_STATUS_ERRORS = HTTP_STATUS_ERRORS
-_ACTIONABLE_TIMEOUT_ERRORS = TIMEOUT_ERRORS
 
 
 def _version_request_meta(
@@ -333,12 +328,8 @@ class FastMCP(
         self._additional_http_routes: list[BaseRoute] = []
 
         # Session-scoped state store (shared across all requests)
-        self._state_storage: AsyncKeyValue = session_state_store or MemoryStore()
-        self._state_store: PydanticAdapter[StateValue] = PydanticAdapter[StateValue](
-            key_value=self._state_storage,
-            pydantic_model=StateValue,
-            default_collection="fastmcp_state",
-        )
+        self._state_storage: AsyncKeyValue | None = session_state_store
+        self.__state_store: PydanticAdapter[StateValue] | None = None
 
         # Create LocalProvider for local components
         self._local_provider: LocalProvider = LocalProvider(
@@ -495,6 +486,22 @@ class FastMCP(
 
     def __repr__(self) -> str:
         return f"{type(self).__name__}({self.name!r})"
+
+    @property
+    def _state_store(self) -> PydanticAdapter[StateValue]:
+        """Create the session-state adapter only when state is first used."""
+        if self.__state_store is None:
+            from key_value.aio.adapters.pydantic import PydanticAdapter
+            from key_value.aio.stores.memory import MemoryStore
+
+            if self._state_storage is None:
+                self._state_storage = MemoryStore()
+            self.__state_store = PydanticAdapter[StateValue](
+                key_value=self._state_storage,
+                pydantic_model=StateValue,
+                default_collection="fastmcp_state",
+            )
+        return self.__state_store
 
     @property
     def name(self) -> str:
@@ -1534,15 +1541,11 @@ class FastMCP(
                     logger.exception(f"Error calling tool {name!r}")
                     # Handle actionable errors that should reach the LLM
                     # even when masking is enabled
-                    if isinstance(e, _ACTIONABLE_HTTP_STATUS_ERRORS):
-                        if (
-                            cast("httpx2.HTTPStatusError", e).response.status_code
-                            == 429
-                        ):
-                            raise ToolError(
-                                "Rate limited by upstream API, please retry later"
-                            ) from e
-                    if isinstance(e, _ACTIONABLE_TIMEOUT_ERRORS):
+                    if get_http_status_code(e) == 429:
+                        raise ToolError(
+                            "Rate limited by upstream API, please retry later"
+                        ) from e
+                    if is_timeout_error(e):
                         raise ToolError(
                             "Upstream request timed out, please retry"
                         ) from e
@@ -1637,15 +1640,11 @@ class FastMCP(
                     except Exception as e:
                         logger.exception(f"Error reading resource {uri!r}")
                         # Handle actionable errors that should reach the LLM
-                        if isinstance(e, _ACTIONABLE_HTTP_STATUS_ERRORS):
-                            if (
-                                cast("httpx2.HTTPStatusError", e).response.status_code
-                                == 429
-                            ):
-                                raise ResourceError(
-                                    "Rate limited by upstream API, please retry later"
-                                ) from e
-                        if isinstance(e, _ACTIONABLE_TIMEOUT_ERRORS):
+                        if get_http_status_code(e) == 429:
+                            raise ResourceError(
+                                "Rate limited by upstream API, please retry later"
+                            ) from e
+                        if is_timeout_error(e):
                             raise ResourceError(
                                 "Upstream request timed out, please retry"
                             ) from e
@@ -1700,15 +1699,11 @@ class FastMCP(
                 except Exception as e:
                     logger.exception(f"Error reading resource {uri!r}")
                     # Handle actionable errors that should reach the LLM
-                    if isinstance(e, _ACTIONABLE_HTTP_STATUS_ERRORS):
-                        if (
-                            cast("httpx2.HTTPStatusError", e).response.status_code
-                            == 429
-                        ):
-                            raise ResourceError(
-                                "Rate limited by upstream API, please retry later"
-                            ) from e
-                    if isinstance(e, _ACTIONABLE_TIMEOUT_ERRORS):
+                    if get_http_status_code(e) == 429:
+                        raise ResourceError(
+                            "Rate limited by upstream API, please retry later"
+                        ) from e
+                    if is_timeout_error(e):
                         raise ResourceError(
                             "Upstream request timed out, please retry"
                         ) from e
@@ -2400,10 +2395,10 @@ class FastMCP(
         Args:
             openapi_spec: OpenAPI schema as a dictionary
             client: Optional httpx2 AsyncClient for making HTTP requests.
-                An httpx (v1) AsyncClient is also accepted and works via
-                duck-typing. If not provided, a default client is created
-                using the first
+                If not provided, a default client is created using the first
                 server URL from the OpenAPI spec with a 30-second timeout.
+                Legacy httpx clients are temporarily accepted with a deprecation
+                warning.
             name: Name for the MCP server
             route_maps: Optional list of RouteMap objects defining route mappings
             route_map_fn: Optional callable for advanced route type mapping

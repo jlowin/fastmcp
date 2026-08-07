@@ -658,6 +658,11 @@ class Client(
         return self._session_state.session
 
     @property
+    def prior_discover(self) -> mcp_types.DiscoverResult | None:
+        """The configured result to adopt when `mode` pins a modern version."""
+        return self._prior_discover
+
+    @property
     def initialize_result(self) -> mcp_types.InitializeResult | None:
         """Get the result of the initialization request.
 
@@ -1022,7 +1027,10 @@ class Client(
                         raise RuntimeError(
                             "Session task completed without exception but connection failed"
                         )
-                    raise _connection_failure(exception) from exception
+                    failure = _connection_failure(exception)
+                    if failure is exception:
+                        raise exception
+                    raise failure from exception
 
             self._session_state.nesting_counter += 1
 
