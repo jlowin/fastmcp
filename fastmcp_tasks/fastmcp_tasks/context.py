@@ -16,6 +16,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from fastmcp_tasks.encryption import SnapshotDecryptionError, snapshot_codec
 from fastmcp_tasks.keys import (
     leg_number_from_key,
     parse_task_key,
@@ -133,6 +134,28 @@ def get_task_leg_number() -> int:
         return 1
 
 
+def _snapshot_redis_key(docket: Docket, task_scope: str | None, task_id: str) -> str:
+    """The Redis key holding a task's context snapshot."""
+    return docket.key(f"{task_redis_prefix(task_scope)}:{task_id}:snapshot")
+
+
+async def refresh_snapshot_ttl(
+    docket: Docket, task_scope: str | None, task_id: str, ttl_seconds: int
+) -> None:
+    """Slide the snapshot key's TTL alongside the task's routing keys.
+
+    An actively polled task refreshes its metadata and leg pointers on every
+    ``tasks/get``, and the snapshot must live just as long: a re-entered leg
+    restores the submitting caller from it. Without the refresh, a task parked
+    on input past the snapshot's creation-time TTL loses the caller, which
+    means an unauthenticated run without encryption and a failed task with it.
+    """
+    async with docket.redis() as redis:
+        await redis.expire(
+            _snapshot_redis_key(docket, task_scope, task_id), ttl_seconds
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class TaskContextSnapshot:
     """All context data snapshotted at task-submission time.
@@ -226,10 +249,17 @@ class TaskContextSnapshot:
         task_id: str,
         ttl_seconds: int,
     ) -> None:
-        """Store this snapshot as a single Redis key."""
-        key = docket.key(f"{task_redis_prefix(task_scope)}:{task_id}:snapshot")
+        """Store this snapshot as a single Redis key.
+
+        The stored value is encrypted when a ``FASTMCP_TASKS_ENCRYPTION_KEY`` is
+        configured: this payload carries the caller's bearer token and headers,
+        and a distributed backend keeps it where the backend's operators can
+        read it (#4747).
+        """
+        key = _snapshot_redis_key(docket, task_scope, task_id)
+        payload = snapshot_codec().encode(self.to_json())
         async with docket.redis() as redis:
-            await redis.set(key, self.to_json(), ex=ttl_seconds)
+            await redis.set(key, payload, ex=ttl_seconds)
 
 
 # Cache keyed by task_id so stale entries from previous tasks in the same
@@ -285,6 +315,12 @@ async def restore_task_snapshot(key: str = TaskKey()) -> None:
     backend work transparently (#3897).  Failures are non-fatal: the task
     still runs, and sync helpers return ``None`` as they would have before
     the snapshot was captured.
+
+    Configuring an encryption key changes that contract. The operator asked for
+    fail-closed protection, so any failure to retrieve, decrypt, parse, or apply
+    the snapshot, including a snapshot that is simply missing, escapes this
+    dependency and fails the task, rather than running the tool without the
+    submitting caller's identity (#4747).
     """
     try:
         parts = parse_task_key(key)
@@ -295,6 +331,11 @@ async def restore_task_snapshot(key: str = TaskKey()) -> None:
     from fastmcp.server.dependencies import get_server
     from fastmcp_tasks.dependencies import _current_docket
 
+    # Resolved before anything can fail: a misconfigured key (e.g. an empty
+    # string) raises here and fails the task, and the branches below read
+    # `codec.protected` to pick between the fail-open and fail-closed contracts.
+    codec = snapshot_codec()
+
     try:
         docket = get_server()._docket
     except RuntimeError:
@@ -302,24 +343,53 @@ async def restore_task_snapshot(key: str = TaskKey()) -> None:
     if docket is None:
         docket = _current_docket.get()
     if docket is None:
+        if codec.protected:
+            raise RuntimeError(
+                "No Docket backend is available to retrieve the protected "
+                "task snapshot, so the submitting caller cannot be recovered."
+            )
         return
 
     task_scope = parts["task_scope"]
     task_id = parts["client_task_id"]
     try:
         async with docket.redis() as redis:
-            raw = await redis.get(
-                docket.key(f"{task_redis_prefix(task_scope)}:{task_id}:snapshot")
-            )
+            raw = await redis.get(_snapshot_redis_key(docket, task_scope, task_id))
         if raw is None:
-            return
-        snapshot = TaskContextSnapshot.from_json(raw)
+            if not codec.protected:
+                return
+            raise RuntimeError(
+                "The task's context snapshot is missing (its TTL may have "
+                "expired), so the submitting caller cannot be recovered."
+            )
+        snapshot = TaskContextSnapshot.from_json(codec.decode(raw))
         _remember_snapshot(task_id, snapshot)
         # Restore the ambient request context (auth token, headers) so core's
         # get_access_token()/get_http_headers() see the submitting caller inside
         # the worker, exactly as a normal request would.
         _apply_snapshot_to_context(snapshot)
+    except SnapshotDecryptionError:
+        # Docket reports this to the client as a generic dependency-resolution
+        # failure, so name the cause here. A key mismatch across servers and
+        # workers is the likely reason and is not guessable from the wire error.
+        _logger.error(
+            "Failed to decrypt the task snapshot for %s. Every server and worker "
+            "on this queue must share the same FASTMCP_TASKS_ENCRYPTION_KEY. The "
+            "task will fail rather than run without the submitting caller's "
+            "identity.",
+            key,
+        )
+        raise
     except Exception:
+        if codec.protected:
+            _logger.error(
+                "Failed to restore the protected task snapshot for %s. The task "
+                "will fail rather than run without the submitting caller's "
+                "identity.",
+                key,
+                exc_info=True,
+            )
+            raise
         _logger.warning("Failed to restore task snapshot for %s", key, exc_info=True)
 
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 from collections.abc import Callable
 from typing import (
     TYPE_CHECKING,
@@ -20,7 +21,13 @@ from mcp_types import (
     ToolExecution,
 )
 from mcp_types import Tool as MCPTool
-from pydantic import BaseModel, Field, PrivateAttr, model_validator
+from pydantic import (
+    BaseModel,
+    Field,
+    PrivateAttr,
+    PydanticSchemaGenerationError,
+    model_validator,
+)
 from pydantic.json_schema import SkipJsonSchema
 
 from fastmcp.utilities.authorization import AuthCheck
@@ -38,6 +45,7 @@ from fastmcp.utilities.types import (
     Image,
     NotSet,
     NotSetT,
+    get_cached_typeadapter,
 )
 
 if TYPE_CHECKING:
@@ -47,6 +55,8 @@ if TYPE_CHECKING:
 # Re-export from function_tool module
 
 logger = get_logger(__name__)
+
+_JSONABLE_ADAPTER = get_cached_typeadapter(Any)
 
 
 def _default_title(name: str) -> str:
@@ -59,34 +69,27 @@ def _default_title(name: str) -> str:
     return name.replace("_", " ").replace("-", " ").title()
 
 
-def resolve_serialize_by_alias(value: Any) -> bool:
-    """Resolve the effective ``by_alias`` setting for serializing *value*.
-
-    Pydantic's low-level serialization helpers (``to_json``,
-    ``to_jsonable_python``) default ``by_alias`` to ``True``, which silently
-    ignores a model's ``serialize_by_alias`` config. When *value* is a Pydantic
-    model we consult that config instead, falling back to ``True`` to preserve
-    FastMCP's longstanding default of emitting aliases when no preference is
-    declared.
-    """
-    if isinstance(value, type):
-        model = value if issubclass(value, BaseModel) else None
-    elif isinstance(value, BaseModel):
-        model = type(value)
-    else:
-        model = None
-
-    if model is None:
-        return True
-
-    configured = model.model_config.get("serialize_by_alias")
-    return True if configured is None else configured
-
-
 def default_serializer(data: Any) -> str:
-    return pydantic_core.to_json(
-        data, fallback=str, by_alias=resolve_serialize_by_alias(data)
-    ).decode()
+    return _JSONABLE_ADAPTER.dump_json(data, fallback=str).decode()
+
+
+def _serialize_to_jsonable(data: Any, annotation: Any = Any) -> Any:
+    """Serialize through Pydantic, falling back for unsupported annotations."""
+    if (
+        annotation is inspect.Signature.empty
+        or annotation is None
+        or annotation is Any
+        or annotation is ...
+        or isinstance(annotation, str)
+    ):
+        adapter = _JSONABLE_ADAPTER
+    else:
+        try:
+            return get_cached_typeadapter(annotation).dump_python(data, mode="json")
+        except PydanticSchemaGenerationError:
+            adapter = _JSONABLE_ADAPTER
+
+    return adapter.dump_python(data, mode="json")
 
 
 class ToolResult(BaseModel):
@@ -133,10 +136,7 @@ class ToolResult(BaseModel):
                 )
 
             try:
-                structured_content = pydantic_core.to_jsonable_python(
-                    value=structured_content,
-                    by_alias=resolve_serialize_by_alias(structured_content),
-                )
+                structured_content = _serialize_to_jsonable(structured_content)
             except pydantic_core.PydanticSerializationError as e:
                 logger.error(
                     f"Could not serialize structured content. If this is unexpected, set your tool's output_schema to None to disable automatic serialization: {e}"
@@ -233,6 +233,7 @@ class Tool(FastMCPComponent):
 
     KEY_PREFIX: ClassVar[str] = "tool"
 
+    return_type: Annotated[SkipJsonSchema[Any], Field(exclude=True)] = None
     parameters: Annotated[
         dict[str, Any], Field(description="JSON schema for tool parameters")
     ]
@@ -392,23 +393,28 @@ class Tool(FastMCPComponent):
         if isinstance(raw_value, bytes):
             return ToolResult(content=content)
 
+        is_content_result = isinstance(
+            raw_value, ContentBlock | Audio | Image | File
+        ) or (
+            isinstance(raw_value, list | tuple)
+            and any(
+                isinstance(item, ContentBlock | Audio | Image | File)
+                for item in raw_value
+            )
+        )
+
         # Skip structured content for ContentBlock types only if no output_schema
         # (if output_schema exists, MCP SDK requires structured_content)
-        if self.output_schema is None and (
-            isinstance(raw_value, ContentBlock | Audio | Image | File)
-            or (
-                isinstance(raw_value, list | tuple)
-                and any(isinstance(item, ContentBlock) for item in raw_value)
-            )
-        ):
+        if self.output_schema is None and is_content_result:
             return ToolResult(content=content)
 
         try:
-            structured = pydantic_core.to_jsonable_python(
-                raw_value, by_alias=resolve_serialize_by_alias(raw_value)
-            )
+            structured = _serialize_to_jsonable(raw_value, self.return_type)
         except (pydantic_core.PydanticSerializationError, UnicodeDecodeError):
             return ToolResult(content=content)
+
+        if not is_content_result:
+            content = _convert_to_content(structured)
 
         if self.output_schema is None:
             # No schema - only use structured_content for dicts

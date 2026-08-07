@@ -170,6 +170,8 @@ class Middleware:
             match context.method:
                 case "initialize":
                     handler = make_handler_wrapper(self.on_initialize, handler)
+                case "server/discover":
+                    handler = make_handler_wrapper(self.on_discover, handler)
                 case "tools/call":
                     handler = make_handler_wrapper(self.on_call_tool, handler)
                 case "resources/read":
@@ -225,6 +227,13 @@ class Middleware:
         context: MiddlewareContext[mt.InitializeRequest],
         call_next: CallNext[mt.InitializeRequest, mt.InitializeResult | None],
     ) -> mt.InitializeResult | None:
+        return await call_next(context)
+
+    async def on_discover(
+        self,
+        context: MiddlewareContext[mt.DiscoverRequest],
+        call_next: CallNext[mt.DiscoverRequest, mt.DiscoverResult | dict[str, Any]],
+    ) -> mt.DiscoverResult | dict[str, Any]:
         return await call_next(context)
 
     async def on_call_tool(
