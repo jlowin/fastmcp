@@ -1,8 +1,11 @@
 """Unit tests for OpenAPI parser."""
 
+import json
+
 import pytest
 
 from fastmcp.utilities.openapi.parser import parse_openapi_to_http_routes
+from fastmcp.utilities.openapi.schemas import _combine_schemas_and_map_params
 
 
 class TestOpenAPIParser:
@@ -458,3 +461,153 @@ class TestErrorHandling:
         routes = parse_openapi_to_http_routes(spec_with_broken_ref)
         # May have empty routes or skip the broken operation
         assert isinstance(routes, list)
+
+
+class TestParameterExamples:
+    """Test parameter-level example and examples propagation."""
+
+    def test_parameter_example_and_examples_propagation(self):
+        """Test parameter example and examples precedence and schema propagation."""
+        spec = {
+            "openapi": "3.1.0",
+            "info": {"title": "Example Drop Demo", "version": "1.0.0"},
+            "components": {
+                "examples": {
+                    "RefExample": {
+                        "summary": "Ref Example Summary",
+                        "value": "REF_VALUE",
+                    }
+                }
+            },
+            "paths": {
+                "/trade": {
+                    "get": {
+                        "operationId": "get_trade",
+                        "summary": "Monthly trade totals",
+                        "parameters": [
+                            {
+                                "name": "startYearMonth",
+                                "in": "query",
+                                "required": True,
+                                "description": "Start month, YYYYMM.",
+                                "example": "201601",
+                                "schema": {"type": "string"},
+                            },
+                            {
+                                "name": "pageNo",
+                                "in": "query",
+                                "required": False,
+                                "description": "Page number.",
+                                "example": 3,
+                                "schema": {"type": "integer", "default": 1},
+                            },
+                            {
+                                "name": "override",
+                                "in": "query",
+                                "required": False,
+                                "description": "Parameter example must override the schema example.",
+                                "examples": {
+                                    "paramLevel": {
+                                        "summary": "Parameter level example",
+                                        "value": "PARAM_LEVEL",
+                                    }
+                                },
+                                "schema": {
+                                    "type": "string",
+                                    "examples": ["SCHEMA_LEVEL"],
+                                },
+                            },
+                            {
+                                "name": "status",
+                                "in": "query",
+                                "required": False,
+                                "description": "Filter trades by status.",
+                                "schema": {"type": "string"},
+                                "examples": {
+                                    "settled": {
+                                        "summary": "Settled trades",
+                                        "value": "SETTLED",
+                                    },
+                                    "pending": {
+                                        "summary": "Pending trades",
+                                        "value": "PENDING",
+                                    },
+                                },
+                            },
+                            {
+                                "name": "format",
+                                "in": "query",
+                                "required": False,
+                                "description": "Output response format.",
+                                "example": "csv",
+                                "schema": {"type": "string", "default": "hellos"},
+                                "examples": {
+                                    "jsonFormat": {
+                                        "summary": "JSON Output",
+                                        "value": "json",
+                                    },
+                                    "xmlFormat": {
+                                        "summary": "XML Output",
+                                        "value": "xml",
+                                    },
+                                },
+                            },
+                            {
+                                "name": "refParam",
+                                "in": "query",
+                                "examples": {
+                                    "refEx": {
+                                        "$ref": "#/components/examples/RefExample"
+                                    }
+                                },
+                                "schema": {"type": "string"},
+                            },
+                        ],
+                        "responses": {
+                            "200": {
+                                "description": "OK",
+                                "content": {
+                                    "application/json": {"schema": {"type": "object"}}
+                                },
+                            }
+                        },
+                    }
+                }
+            },
+        }
+
+        routes = parse_openapi_to_http_routes(spec)
+        assert len(routes) == 1
+        route = routes[0]
+
+        schema, _ = _combine_schemas_and_map_params(route)
+        props = schema["properties"]
+
+        # Ensure json serializable without crashing
+        json_repr = json.dumps(props)
+        assert json_repr is not None
+
+        # 1. Parameter example propagated
+        assert props["startYearMonth"]["example"] == "201601"
+
+        # 2. Parameter example + schema default preserved
+        assert props["pageNo"]["example"] == 3
+        assert props["pageNo"]["default"] == 1
+
+        # 3. Parameter-level examples overrides schema-level examples
+        assert "paramLevel" in props["override"]["examples"]
+        assert props["override"]["examples"]["paramLevel"]["value"] == "PARAM_LEVEL"
+        assert "SCHEMA_LEVEL" not in json_repr
+
+        # 4. Parameter-level examples map
+        assert "settled" in props["status"]["examples"]
+        assert "pending" in props["status"]["examples"]
+
+        # 5. Parameter-level examples takes precedence over parameter-level example
+        assert "examples" in props["format"]
+        assert "example" not in props["format"]
+        assert props["format"]["examples"]["jsonFormat"]["value"] == "json"
+
+        # 6. Parameter-level example with $ref resolved
+        assert "refEx" in props["refParam"]["examples"]
+        assert props["refParam"]["examples"]["refEx"]["value"] == "REF_VALUE"

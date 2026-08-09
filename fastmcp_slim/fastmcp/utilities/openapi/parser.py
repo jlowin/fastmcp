@@ -318,6 +318,38 @@ class OpenAPIParser(
                         ):
                             param_schema_dict["default"] = resolved_media_schema.default
 
+                param_examples = getattr(parameter, "examples", None)
+                param_example = getattr(parameter, "example", None)
+
+                # Extract examples and example, providing priority to examples over example
+                # and parameter-level over schema-level as per OpenAPI specification.
+                if param_examples is not None:
+                    param_schema_dict.pop("example", None)
+                    param_schema_dict.pop("examples", None)
+                    resolved_examples = {}
+                    if isinstance(param_examples, dict):
+                        for name, ex_obj in param_examples.items():
+                            resolved_ex = self._resolve_ref(ex_obj)
+                            if isinstance(resolved_ex, BaseModel):
+                                resolved_examples[name] = resolved_ex.model_dump(
+                                    mode="json", by_alias=True, exclude_none=True
+                                )
+                            elif isinstance(resolved_ex, dict):
+                                resolved_examples[name] = resolved_ex
+                            else:
+                                resolved_examples[name] = resolved_ex
+                    param_schema_dict["examples"] = resolved_examples
+                elif param_example is not None:
+                    param_schema_dict.pop("example", None)
+                    param_schema_dict.pop("examples", None)
+                    resolved_ex = self._resolve_ref(param_example)
+                    if isinstance(resolved_ex, BaseModel):
+                        param_schema_dict["example"] = resolved_ex.model_dump(
+                            mode="json", by_alias=True, exclude_none=True
+                        )
+                    else:
+                        param_schema_dict["example"] = resolved_ex
+
                 # Extract explode and style properties if present
                 explode = getattr(parameter, "explode", None)
                 style = getattr(parameter, "style", None)
