@@ -323,32 +323,52 @@ class OpenAPIParser(
 
                 # Extract examples and example, providing priority to examples over example
                 # and parameter-level over schema-level as per OpenAPI specification.
+                # Convert OpenAPI named examples map to JSON Schema-compatible array of values.
+                # Per-example try-except blocks ensure resolution failures (e.g. broken or external $ref)
+                # do not abort parameter extraction.
                 if param_examples is not None:
-                    param_schema_dict.pop("example", None)
-                    param_schema_dict.pop("examples", None)
-                    resolved_examples = {}
+                    example_values = []
                     if isinstance(param_examples, dict):
-                        for name, ex_obj in param_examples.items():
-                            resolved_ex = self._resolve_ref(ex_obj)
-                            if isinstance(resolved_ex, BaseModel):
-                                resolved_examples[name] = resolved_ex.model_dump(
-                                    mode="json", by_alias=True, exclude_none=True
+                        for ex_obj in param_examples.values():
+                            try:
+                                resolved_ex = self._resolve_ref(ex_obj)
+                                if isinstance(resolved_ex, BaseModel):
+                                    ex_dict = resolved_ex.model_dump(
+                                        mode="json", by_alias=True, exclude_none=True
+                                    )
+                                elif isinstance(resolved_ex, dict):
+                                    ex_dict = resolved_ex
+                                else:
+                                    ex_dict = resolved_ex
+
+                                if isinstance(ex_dict, dict) and "value" in ex_dict:
+                                    example_values.append(ex_dict["value"])
+                                else:
+                                    example_values.append(ex_dict)
+                            except Exception as e:
+                                logger.debug(
+                                    f"Failed to resolve parameter example reference: {e}"
                                 )
-                            elif isinstance(resolved_ex, dict):
-                                resolved_examples[name] = resolved_ex
-                            else:
-                                resolved_examples[name] = resolved_ex
-                    param_schema_dict["examples"] = resolved_examples
+                    if example_values:
+                        param_schema_dict.pop("example", None)
+                        param_schema_dict.pop("examples", None)
+                        param_schema_dict["examples"] = example_values
                 elif param_example is not None:
-                    param_schema_dict.pop("example", None)
-                    param_schema_dict.pop("examples", None)
-                    resolved_ex = self._resolve_ref(param_example)
-                    if isinstance(resolved_ex, BaseModel):
-                        param_schema_dict["example"] = resolved_ex.model_dump(
-                            mode="json", by_alias=True, exclude_none=True
+                    try:
+                        resolved_ex = self._resolve_ref(param_example)
+                        if isinstance(resolved_ex, BaseModel):
+                            ex_val = resolved_ex.model_dump(
+                                mode="json", by_alias=True, exclude_none=True
+                            )
+                        else:
+                            ex_val = resolved_ex
+                        param_schema_dict.pop("example", None)
+                        param_schema_dict.pop("examples", None)
+                        param_schema_dict["example"] = ex_val
+                    except Exception as e:
+                        logger.debug(
+                            f"Failed to resolve parameter example reference: {e}"
                         )
-                    else:
-                        param_schema_dict["example"] = resolved_ex
 
                 # Extract explode and style properties if present
                 explode = getattr(parameter, "explode", None)

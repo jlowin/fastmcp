@@ -594,20 +594,80 @@ class TestParameterExamples:
         assert props["pageNo"]["example"] == 3
         assert props["pageNo"]["default"] == 1
 
-        # 3. Parameter-level examples overrides schema-level examples
-        assert "paramLevel" in props["override"]["examples"]
-        assert props["override"]["examples"]["paramLevel"]["value"] == "PARAM_LEVEL"
+        # 3. Parameter-level examples overrides schema-level examples (as array of values)
+        assert props["override"]["examples"] == ["PARAM_LEVEL"]
         assert "SCHEMA_LEVEL" not in json_repr
 
-        # 4. Parameter-level examples map
-        assert "settled" in props["status"]["examples"]
-        assert "pending" in props["status"]["examples"]
+        # 4. Parameter-level examples map converted to array of values
+        assert props["status"]["examples"] == ["SETTLED", "PENDING"]
 
         # 5. Parameter-level examples takes precedence over parameter-level example
         assert "examples" in props["format"]
         assert "example" not in props["format"]
-        assert props["format"]["examples"]["jsonFormat"]["value"] == "json"
+        assert props["format"]["examples"] == ["json", "xml"]
 
-        # 6. Parameter-level example with $ref resolved
-        assert "refEx" in props["refParam"]["examples"]
-        assert props["refParam"]["examples"]["refEx"]["value"] == "REF_VALUE"
+        # 6. Parameter-level example with $ref resolved into array of values
+        assert props["refParam"]["examples"] == ["REF_VALUE"]
+
+    def test_broken_or_external_example_ref_does_not_drop_parameter(self):
+        """Test that unresolvable example $ref does not drop parameter, while good $ref resolves."""
+        spec = {
+            "openapi": "3.1.0",
+            "info": {"title": "Broken Example Ref Test", "version": "1.0.0"},
+            "components": {
+                "examples": {
+                    "GoodExample": {
+                        "summary": "Good Example",
+                        "value": "GOOD_REF_VALUE",
+                    }
+                }
+            },
+            "paths": {
+                "/test": {
+                    "get": {
+                        "operationId": "test_op",
+                        "parameters": [
+                            {
+                                "name": "paramWithBrokenExampleRef",
+                                "in": "query",
+                                "required": True,
+                                "description": "Required parameter with broken example ref.",
+                                "examples": {
+                                    "validEx": {"summary": "Valid", "value": "VALID"},
+                                    "goodRefEx": {
+                                        "$ref": "#/components/examples/GoodExample"
+                                    },
+                                    "brokenEx": {
+                                        "$ref": "#/components/examples/NonExistent"
+                                    },
+                                    "externalEx": {
+                                        "$ref": "external-file.json#/examples/External"
+                                    },
+                                },
+                                "schema": {"type": "string"},
+                            }
+                        ],
+                        "responses": {"200": {"description": "OK"}},
+                    }
+                }
+            },
+        }
+
+        routes = parse_openapi_to_http_routes(spec)
+        assert len(routes) == 1
+        route = routes[0]
+
+        # Parameter must NOT be dropped
+        assert len(route.parameters) == 1
+        param = route.parameters[0]
+        assert param.name == "paramWithBrokenExampleRef"
+        assert param.required is True
+
+        schema, _ = _combine_schemas_and_map_params(route)
+        props = schema["properties"]
+        assert "paramWithBrokenExampleRef" in props
+        # Valid literal example and good $ref example are extracted while broken/external $refs are skipped
+        assert props["paramWithBrokenExampleRef"]["examples"] == [
+            "VALID",
+            "GOOD_REF_VALUE",
+        ]
