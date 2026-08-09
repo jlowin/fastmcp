@@ -964,21 +964,19 @@ Client-specific behavior:
 
 <VersionBadge version="2.9.1" />
 
-FastMCP automatically sends `notifications/tools/list_changed` notifications to connected clients when tools are added, removed, enabled, or disabled. This allows clients to stay up-to-date with the current tool set without manually polling for changes.
+Per-session visibility changes made with `ctx.enable_components()` or `ctx.disable_components()` automatically send `notifications/tools/list_changed` to the current client. Server-level changes made with `mcp.add_tool()`, `mcp.enable()`, `mcp.disable()`, or `mcp.local_provider.remove_tool()` do not send notifications automatically because they are not associated with a client session.
 
 ```python
-@mcp.tool
-def example_tool() -> str:
-    return "Hello!"
+import mcp.types
 
-# These operations trigger notifications:
-mcp.add_tool(example_tool)              # Sends tools/list_changed notification
-mcp.disable(keys={"tool:example_tool"}) # Sends tools/list_changed notification
-mcp.enable(keys={"tool:example_tool"})  # Sends tools/list_changed notification
-mcp.local_provider.remove_tool("example_tool")  # Sends tools/list_changed notification
+@mcp.tool
+async def disable_example(ctx: Context) -> str:
+    mcp.disable(keys={"tool:example_tool"})
+    await ctx.send_notification(mcp.types.ToolListChangedNotification())
+    return "Disabled example_tool"
 ```
 
-Notifications are only sent when these operations occur within an active MCP request context (e.g., when called from within a tool or other MCP operation). Operations performed during server initialization do not trigger notifications.
+Explicit notifications require an active MCP request context and notify that request's client. Operations performed during server initialization have no client session to notify.
 
 Clients can handle these notifications using a [message handler](/clients/notifications) to automatically refresh their tool lists or update their interfaces.
 

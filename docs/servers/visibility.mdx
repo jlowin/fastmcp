@@ -409,16 +409,19 @@ Sessions start seeing only the activation tools. Calling `activate_finance` reve
 
 ## Client Notifications
 
-When visibility state changes, FastMCP automatically notifies connected clients. Clients supporting the MCP notification protocol receive `list_changed` events and can refresh their component lists.
-
-This happens automatically. You don't need to trigger notifications manually.
+Per-session visibility changes made with `ctx.enable_components()`, `ctx.disable_components()`, or `ctx.reset_visibility()` automatically notify the current client. Server-level changes made with `mcp.enable()` or `mcp.disable()` do not automatically broadcast notifications because they are not associated with a client session.
 
 ```python
-# This automatically notifies clients
-mcp.disable(tags={"maintenance"})
+import mcp.types
 
-# Clients receive: tools/list_changed, resources/list_changed, etc.
+@mcp.tool
+async def start_maintenance(ctx: Context) -> str:
+    mcp.disable(tags={"maintenance"})
+    await ctx.send_notification(mcp.types.ToolListChangedNotification())
+    return "Maintenance tools disabled"
 ```
+
+Explicit notifications require an active MCP request context and notify that request's client. Operations performed during server initialization have no client session to notify.
 
 ## Filtering Logic
 
