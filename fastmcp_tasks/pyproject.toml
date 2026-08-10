@@ -56,10 +56,12 @@ dependencies = [
     # Fernet and the PBKDF2 key derivation behind FASTMCP_TASKS_ENCRYPTION_KEY,
     # which encrypts task context snapshots at rest.
     "cryptography>=43.0.0",
-    # pydocket 0.24.0 resolves CallArgument references through uncalled-for's
-    # call-scoped frames. Windows keeps the older floor because the
-    # burner-redis pin below transitively caps pydocket to <0.20.2 there.
-    "pydocket>=0.24.0; sys_platform != 'win32'",
+    # pydocket 0.24.1 resolves CallArgument references through uncalled-for's
+    # call-scoped frames and shuts its worker down reliably when run_forever
+    # is cancelled on Python 3.10/3.11, which our lifespan does on every
+    # server shutdown. Windows keeps the older floor because the burner-redis
+    # pin below transitively caps pydocket to <0.20.2 there.
+    "pydocket>=0.24.1; sys_platform != 'win32'",
     "pydocket>=0.20.0; sys_platform == 'win32'",
     # burner-redis 0.1.7's Windows build crashes the interpreter (native fault,
     # no Python traceback) running the memory:// backend under pytest-xdist —

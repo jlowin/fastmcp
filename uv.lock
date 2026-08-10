@@ -1122,7 +1122,7 @@ dependencies = [
     { name = "cryptography" },
     { name = "fastmcp-slim", extra = ["server"] },
     { name = "pydocket", version = "0.20.1", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'win32'" },
-    { name = "pydocket", version = "0.24.0", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'win32'" },
+    { name = "pydocket", version = "0.24.1", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'win32'" },
 ]
 
 [package.metadata]
@@ -1130,7 +1130,7 @@ requires-dist = [
     { name = "burner-redis", marker = "sys_platform == 'win32'", specifier = "<0.1.7" },
     { name = "cryptography", specifier = ">=43.0.0" },
     { name = "fastmcp-slim", extras = ["server"], editable = "fastmcp_slim" },
-    { name = "pydocket", marker = "sys_platform != 'win32'", specifier = ">=0.24.0" },
+    { name = "pydocket", marker = "sys_platform != 'win32'", specifier = ">=0.24.1" },
     { name = "pydocket", marker = "sys_platform == 'win32'", specifier = ">=0.20.0" },
 ]
 
@@ -2435,7 +2435,7 @@ wheels = [
 
 [[package]]
 name = "pydocket"
-version = "0.24.0"
+version = "0.24.1"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
     "python_full_version >= '3.14' and sys_platform != 'win32'",
@@ -2459,9 +2459,9 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "uncalled-for" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/d6/c8/9682aa7c84a540feb722062cb3f5495bc7cbee71e145e0ef4880dfc17725/pydocket-0.24.0.tar.gz", hash = "sha256:6065b7d584992385d309c99d4b1e282a404e9027c3a6f8df054603beda750fcb", size = 429205, upload-time = "2026-08-10T18:16:24.653Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/b7/6b/a87c6e3fd197807f630af4270aa2ce8f4c1fca4e43bba783f273d298d646/pydocket-0.24.1.tar.gz", hash = "sha256:477d77be1fcfd10ee0c2d0b8aa8c6e97851b9c7f39bb6f2b4e6d42e9b4d6e95a", size = 430759, upload-time = "2026-08-10T19:50:03.368Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/e5/34/200c7f136d9d99042f0c2b8f056f3f6bc69a3db5d6cd94b84ed017a26370/pydocket-0.24.0-py3-none-any.whl", hash = "sha256:257ef7037a8bb1de0a7bf087a3d01fb0c676dde71c14b99422c4804d9e1cab9e", size = 129931, upload-time = "2026-08-10T18:16:23.216Z" },
+    { url = "https://files.pythonhosted.org/packages/a7/05/4e3b902bc0ca407188aa5fe38af49be634487aec242a77287103242e11b2/pydocket-0.24.1-py3-none-any.whl", hash = "sha256:1faa6c3d566f1f0431e35dfa12db4ccee515d945b913b516ee3e6279afb9e789", size = 130249, upload-time = "2026-08-10T19:50:01.627Z" },
 ]
 
 [[package]]
