@@ -8,6 +8,7 @@ AsyncKeyValue protocol, allowing users to configure any compatible backend
 
 from __future__ import annotations
 
+import asyncio
 from uuid import uuid4
 
 from key_value.aio.adapters.pydantic import PydanticAdapter
@@ -29,6 +30,9 @@ logger = get_logger(__name__)
 # In the v2 SDK `JSONRPCMessage` is a bare union (no `.model_validate`); use a
 # TypeAdapter to validate a stored dict back into the correct member.
 _jsonrpc_message_adapter: TypeAdapter[JSONRPCMessage] = TypeAdapter(JSONRPCMessage)
+
+# Number of striped locks guarding stream event lists. See EventStore.__init__.
+_LOCK_STRIPES = 64
 
 
 class EventEntry(FastMCPBaseModel):
@@ -84,6 +88,20 @@ class EventStore(SDKEventStore):
         self._storage: AsyncKeyValue = storage or MemoryStore()
         self._max_events_per_stream = max_events_per_stream
         self._ttl = ttl
+        # Serializes the read-modify-write of each stream's event list. A fixed
+        # set of striped locks rather than one lock per stream: a single store is
+        # shared by every session, so a store-wide lock would serialize unrelated
+        # streams across a Redis round-trip, while a per-stream map would grow
+        # with every session and need its own eviction. Two streams only contend
+        # when their IDs collide on the same stripe.
+        #
+        # In-process locks are enough because a stream list only ever has
+        # in-process writers: every transport gets its own SessionScopedEventStore
+        # with a random per-session prefix, so no two servers sharing one backend
+        # address the same stream key. Coordinating across processes would need a
+        # compare-and-swap or transactional update, which AsyncKeyValue does not
+        # expose -- it offers only get/put/delete/ttl.
+        self._stream_locks = tuple(asyncio.Lock() for _ in range(_LOCK_STRIPES))
 
         # PydanticAdapter for type-safe storage (following OAuth proxy pattern)
         self._event_store: PydanticAdapter[EventEntry] = PydanticAdapter[EventEntry](
@@ -121,22 +139,27 @@ class EventStore(SDKEventStore):
         )
         await self._event_store.put(key=event_id, value=entry, ttl=self._ttl)
 
-        # Update stream's event list
-        stream_data = await self._stream_store.get(key=stream_id)
-        event_ids = stream_data.event_ids if stream_data else []
-        event_ids.append(event_id)
+        # Update stream's event list. A session stores events from more than one
+        # task -- the SSE writer and the message router both do -- so this
+        # read-modify-write has to be serialized. Interleaved, each task reads the
+        # same list, appends only its own ID, and the later write drops the other
+        # event entirely while both tasks evict the same expired IDs.
+        async with self._stream_locks[hash(stream_id) % _LOCK_STRIPES]:
+            stream_data = await self._stream_store.get(key=stream_id)
+            event_ids = stream_data.event_ids if stream_data else []
+            event_ids.append(event_id)
 
-        # Trim to max events (delete old events)
-        if len(event_ids) > self._max_events_per_stream:
-            for old_id in event_ids[: -self._max_events_per_stream]:
-                await self._event_store.delete(key=old_id)
-            event_ids = event_ids[-self._max_events_per_stream :]
+            # Trim to max events (delete old events)
+            if len(event_ids) > self._max_events_per_stream:
+                for old_id in event_ids[: -self._max_events_per_stream]:
+                    await self._event_store.delete(key=old_id)
+                event_ids = event_ids[-self._max_events_per_stream :]
 
-        await self._stream_store.put(
-            key=stream_id,
-            value=StreamEventList(event_ids=event_ids),
-            ttl=self._ttl,
-        )
+            await self._stream_store.put(
+                key=stream_id,
+                value=StreamEventList(event_ids=event_ids),
+                ttl=self._ttl,
+            )
 
         return event_id
 

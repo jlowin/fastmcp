@@ -1,0 +1,106 @@
+---
+title: low_level
+sidebarTitle: low_level
+---
+
+# `fastmcp.server.low_level`
+
+## Functions
+
+### `client_supports_extension` <sup><a href="https://github.com/PrefectHQ/fastmcp/blob/main/fastmcp_slim/fastmcp/server/low_level.py#L111" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+
+```python
+client_supports_extension(session: ServerSession, extension_id: str) -> bool
+```
+
+
+Check whether the connected client supports a given MCP extension.
+
+Inspects the ``extensions`` capability on ``ClientCapabilities`` sent by the
+client during initialization. In v2 the client's initialize params are
+reachable via ``session.client_params``.
+
+SDK v2 declares ``extensions`` as a real field on ``ClientCapabilities``, so
+a client sending ``ClientCapabilities(extensions={...})`` populates the field
+directly. We read that field first and fall back to ``model_extra`` only for
+legacy-serialized clients that carried ``extensions`` as an extra key.
+
+
+## Classes
+
+### `FastMCPServerMiddleware` <sup><a href="https://github.com/PrefectHQ/fastmcp/blob/main/fastmcp_slim/fastmcp/server/low_level.py#L140" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+
+
+Root dispatch for the FastMCP middleware chain, in the SDK's middleware layer.
+
+v2 no longer lets FastMCP subclass ``ServerSession`` (the runner constructs
+it per request), so the old ``MiddlewareServerSession._received_request``
+override is replaced by a ``ServerMiddleware`` — an ordinary entry in the
+SDK's own middleware list. Sitting at the root of dispatch, this
+is the single entry point through which *every* inbound message flows —
+requests, notifications, cancellations, ``initialize``, and even malformed or
+unroutable messages the SDK can still hand us. It binds the FastMCP
+request-context ContextVar and re-applies the app-scoped ``SharedContext`` for
+the whole chain, then runs the FastMCP ``Middleware`` chain so
+``on_message`` / ``on_request`` / ``on_notification`` observe the message.
+
+Dispatch shapes:
+
+- Negotiation runs the *whole* FastMCP chain here: ``initialize`` dispatches
+  through ``on_initialize`` and ``server/discover`` through ``on_discover``.
+  Neither has an interior FastMCP handler adapter, and the SDK serializes both
+  results before returning through its middleware seam, so this root adapter
+  restores core results to typed models before FastMCP middleware observes them.
+- The component methods (``tools/call``, ``tools/list``, ``resources/read``,
+  ...) still run their FastMCP chain *interior*, in the handler adapter, where
+  ``on_call_tool`` receives the typed component result and a tool exception
+  propagates through ``on_message``/``on_request`` exactly where the built-in
+  error/logging/timing middleware expect it. The root dispatch does not re-run the
+  chain for these — it only steps in when such a request fails *before* the
+  interior runs (malformed params, routing), so ``on_message`` still observes
+  the failure.
+- Every other message — all notifications (including ``notifications/cancelled``
+  and ``notifications/initialized``), ``ping``, ``logging/setLevel``, and any
+  unroutable/non-component request — has no interior FastMCP dispatch, so the
+  root dispatch runs the ``"outer"`` pass (``on_message`` plus
+  ``on_request``/``on_notification``) here, wrapping the real SDK dispatch.
+  This closes the long-standing gap where these messages were invisible to
+  FastMCP middleware.
+
+
+### `LowLevelServer` <sup><a href="https://github.com/PrefectHQ/fastmcp/blob/main/fastmcp_slim/fastmcp/server/low_level.py#L455" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+
+**Methods:**
+
+#### `fastmcp` <sup><a href="https://github.com/PrefectHQ/fastmcp/blob/main/fastmcp_slim/fastmcp/server/low_level.py#L507" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+
+```python
+fastmcp(self) -> FastMCP
+```
+
+Get the FastMCP instance.
+
+
+#### `create_initialization_options` <sup><a href="https://github.com/PrefectHQ/fastmcp/blob/main/fastmcp_slim/fastmcp/server/low_level.py#L514" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+
+```python
+create_initialization_options(self, notification_options: NotificationOptions | None = None, experimental_capabilities: dict[str, dict[str, Any]] | None = None, extensions: dict[str, dict[str, Any]] | None = None) -> InitializationOptions
+```
+
+#### `get_capabilities` <sup><a href="https://github.com/PrefectHQ/fastmcp/blob/main/fastmcp_slim/fastmcp/server/low_level.py#L529" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+
+```python
+get_capabilities(self, notification_options: NotificationOptions | None = None, experimental_capabilities: dict[str, dict[str, Any]] | None = None, extensions: dict[str, dict[str, Any]] | None = None) -> mcp_types.ServerCapabilities
+```
+
+Override to advertise registered extensions and the MCP Apps UI extension.
+
+``ServerCapabilities.extensions`` is a real declared field in v2, so we
+update it directly. The
+`FastMCP(experimental_capabilities=...)` merge also lives here rather
+than in `create_initialization_options`: the modern `server/discover`
+handler calls this directly, without going through
+`create_initialization_options` at all, so merging there only reached
+the handshake-era `initialize` response and silently dropped
+constructor-configured experimental capabilities from `discover`.
+

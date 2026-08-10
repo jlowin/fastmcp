@@ -159,6 +159,23 @@ class TestUnroutableAndMalformed:
         assert ("on_message", "tools/call") in recorder.records
         assert ("on_call_tool", "tools/call") not in recorder.records
 
+    async def test_malformed_discover_params_observed_by_generic_hooks(self):
+        server = _adder()
+        recorder = HookRecorder()
+        server.add_middleware(recorder)
+
+        async with Client(server) as client:
+            recorder.records.clear()
+            with pytest.raises(MCPError):
+                await _raw_request(
+                    client,
+                    "server/discover",
+                    {"_meta": {"progressToken": []}},
+                )
+
+        assert ("on_message", "server/discover") in recorder.records
+        assert ("on_request", "server/discover") in recorder.records
+
 
 class TestSingleFire:
     async def test_each_hook_fires_once_per_component_call(self):

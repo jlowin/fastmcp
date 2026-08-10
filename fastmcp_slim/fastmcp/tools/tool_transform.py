@@ -8,7 +8,6 @@ from dataclasses import dataclass
 from typing import Annotated, Any, Literal, cast
 
 import mcp_types
-import pydantic_core
 from mcp_types import ToolAnnotations
 from pydantic import ConfigDict
 from pydantic.fields import Field
@@ -19,8 +18,6 @@ from fastmcp.tools.base import (
     InputRequiredToolResult,
     Tool,
     ToolResult,
-    _convert_to_content,
-    resolve_serialize_by_alias,
 )
 from fastmcp.tools.function_parsing import ParsedFunction
 from fastmcp.utilities.async_utils import (
@@ -394,40 +391,7 @@ class TransformedTool(Tool):
                 else:
                     return result
 
-            # Otherwise convert to content and create ToolResult with proper structured content
-
-            unstructured_result = _convert_to_content(result)
-
-            structured_output = None
-            # First handle structured content based on output schema, if any
-            if self.output_schema is not None:
-                if self.output_schema.get("x-fastmcp-wrap-result"):
-                    # Schema says wrap - serialize the inner result first (so its
-                    # serialize_by_alias config is honored) before nesting, since
-                    # wrapping in a dict would otherwise mask the model's config.
-                    structured_output = {
-                        "result": pydantic_core.to_jsonable_python(
-                            result, by_alias=resolve_serialize_by_alias(result)
-                        )
-                    }
-                else:
-                    structured_output = result
-            # If no output schema, try to serialize the result. If it is a dict, use
-            # it as structured content. If it is not a dict, ignore it.
-            if structured_output is None:
-                try:
-                    structured_output = pydantic_core.to_jsonable_python(
-                        result, by_alias=resolve_serialize_by_alias(result)
-                    )
-                    if not isinstance(structured_output, dict):
-                        structured_output = None
-                except Exception:
-                    pass
-
-            return ToolResult(
-                content=unstructured_result,
-                structured_content=structured_output,
-            )
+            return self.convert_result(result)
         finally:
             _current_tool.reset(token)
 
@@ -641,6 +605,7 @@ class TransformedTool(Tool):
 
         transformed_tool = cls(
             fn=final_fn,
+            return_type=parsed_fn.return_type if parsed_fn is not None else None,
             forwarding_fn=forwarding_fn,
             parent_tool=tool,
             name=final_name,

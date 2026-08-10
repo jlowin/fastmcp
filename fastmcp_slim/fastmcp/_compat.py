@@ -33,7 +33,7 @@ import warnings
 
 import mcp_types
 
-from fastmcp.exceptions import FastMCPDeprecationWarning
+from fastmcp._warnings import FastMCPDeprecationWarning
 
 # Map each SDK model class to the camelCase -> snake_case field reads we bridge.
 # Limited to fields FastMCP users actually read (docs boundary inventory).

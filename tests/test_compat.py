@@ -10,6 +10,7 @@ from mcp import MCPError as SDKMCPError
 import fastmcp
 import fastmcp._compat as _compat
 from fastmcp import Client, FastMCP
+from fastmcp import FastMCPDeprecationWarning as PublicWarning
 from fastmcp.client.transports import FastMCPTransport
 from fastmcp.exceptions import FastMCPDeprecationWarning, MCPError, McpError
 
@@ -28,6 +29,10 @@ def _reset_warn_once() -> None:
                 delattr(cls, camel)
     _compat._installed = False
     _compat.install()
+
+
+def test_deprecation_warning_is_same_from_public_imports() -> None:
+    assert PublicWarning is FastMCPDeprecationWarning
 
 
 @pytest.fixture(autouse=True)
