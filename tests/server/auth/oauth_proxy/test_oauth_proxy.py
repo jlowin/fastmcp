@@ -1,6 +1,7 @@
 """Tests for OAuth proxy initialization and configuration."""
 
 import time
+from unittest.mock import patch
 from urllib.parse import parse_qs, urlparse
 
 import httpx
@@ -8,7 +9,9 @@ import pytest
 from authlib.integrations.httpx_client import AsyncOAuth2Client
 from key_value.aio.stores.memory import MemoryStore
 from starlette.applications import Starlette
+from starlette.testclient import TestClient
 
+from fastmcp.server.auth.auth import PrivateKeyJWTClientAuthenticator
 from fastmcp.server.auth.oauth_proxy import OAuthProxy
 from fastmcp.server.auth.oauth_proxy.models import OAuthTransaction
 
@@ -412,3 +415,44 @@ class TestIdpCallbackErrorForwarding:
             )
 
         assert response.status_code == 400
+
+
+class TestCIMDTokenEndpointAudience:
+    """The `aud` expected on a CIMD assertion matches the advertised token endpoint."""
+
+    @pytest.mark.parametrize(
+        "base_url",
+        ["https://api.example.com", "https://api.example.com/api"],
+    )
+    def test_token_endpoint_url_matches_advertised_metadata(
+        self, jwt_verifier, base_url: str
+    ):
+        """A bare-authority base_url must not expect `aud` of `https://host//token`.
+
+        CIMD is enabled by default, and a spec-following client binds its
+        private_key_jwt assertion to the `token_endpoint` the metadata
+        advertises. If the proxy expects a different string, every such client
+        is rejected with invalid_client.
+        """
+        proxy = OAuthProxy(
+            upstream_authorization_endpoint="https://auth.example.com/authorize",
+            upstream_token_endpoint="https://auth.example.com/token",
+            upstream_client_id="client-123",
+            upstream_client_secret="secret-456",
+            token_verifier=jwt_verifier,
+            base_url=base_url,
+            jwt_signing_key="test-secret",
+            client_storage=MemoryStore(),
+        )
+
+        with patch(
+            "fastmcp.server.auth.oauth_proxy.proxy.PrivateKeyJWTClientAuthenticator",
+            wraps=PrivateKeyJWTClientAuthenticator,
+        ) as authenticator:
+            app = Starlette(routes=proxy.get_routes(mcp_path="/mcp"))
+
+        with TestClient(app) as client:
+            metadata = client.get("/.well-known/oauth-authorization-server").json()
+
+        expected_audience = authenticator.call_args.kwargs["token_endpoint_url"]
+        assert expected_audience == metadata["token_endpoint"]
