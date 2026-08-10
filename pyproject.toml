@@ -77,7 +77,7 @@ exclude-newer = "1 week"
 # MCP SDK, where a new major is the only version satisfying our floor and so
 # has nothing older to fall back to, and uncalled-for, the DI engine whose
 # releases we adopt deliberately.
-exclude-newer-package = { fastmcp = false, fastmcp-slim = false, fastmcp-remote = false, prefab-ui = false, mcp = false, mcp-types = false, uncalled-for = false }
+exclude-newer-package = { fastmcp = false, fastmcp-slim = false, fastmcp-remote = false, prefab-ui = false, mcp = false, mcp-types = false, uncalled-for = false, pydocket = false }
 
 [dependency-groups]
 dev = [
