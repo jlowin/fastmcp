@@ -699,6 +699,11 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
             )
         return self._jwt_issuer
 
+    @property
+    def token_endpoint_url(self) -> str:
+        """The token endpoint URL advertised in authorization server metadata."""
+        return f"{str(self.base_url).rstrip('/')}/token"
+
     # -------------------------------------------------------------------------
     # Upstream OAuth Client
     # -------------------------------------------------------------------------
@@ -2058,7 +2063,7 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
             ):
                 # Replace the token endpoint authenticator with one that supports
                 # private_key_jwt for CIMD clients
-                token_endpoint_url = f"{self.base_url}/token"
+                token_endpoint_url = self.token_endpoint_url
                 cimd_authenticator = PrivateKeyJWTClientAuthenticator(
                     provider=self,
                     cimd_manager=self._cimd_manager,

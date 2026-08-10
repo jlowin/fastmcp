@@ -1,6 +1,7 @@
 """Tests for OAuth proxy initialization and configuration."""
 
 import time
+from unittest.mock import patch
 from urllib.parse import parse_qs, urlparse
 
 import httpx
@@ -9,6 +10,7 @@ from authlib.integrations.httpx_client import AsyncOAuth2Client
 from key_value.aio.stores.memory import MemoryStore
 from starlette.applications import Starlette
 
+from fastmcp.server.auth.auth import PrivateKeyJWTClientAuthenticator
 from fastmcp.server.auth.oauth_proxy import OAuthProxy
 from fastmcp.server.auth.oauth_proxy.models import OAuthTransaction
 
@@ -412,3 +414,38 @@ class TestIdpCallbackErrorForwarding:
             )
 
         assert response.status_code == 400
+
+
+class TestCIMDTokenEndpointAudience:
+    @pytest.mark.parametrize(
+        "base_url",
+        ["https://api.example.com", "https://api.example.com/api"],
+    )
+    async def test_expected_audience_matches_advertised_token_endpoint(
+        self, jwt_verifier, base_url: str
+    ):
+        proxy = OAuthProxy(
+            upstream_authorization_endpoint="https://auth.example.com/authorize",
+            upstream_token_endpoint="https://auth.example.com/token",
+            upstream_client_id="client-123",
+            upstream_client_secret="secret-456",
+            token_verifier=jwt_verifier,
+            base_url=base_url,
+            jwt_signing_key="test-secret",
+            client_storage=MemoryStore(),
+        )
+
+        with patch(
+            "fastmcp.server.auth.oauth_proxy.proxy.PrivateKeyJWTClientAuthenticator",
+            wraps=PrivateKeyJWTClientAuthenticator,
+        ) as authenticator:
+            app = Starlette(routes=proxy.get_routes(mcp_path="/mcp"))
+
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(
+            transport=transport, base_url="https://api.example.com"
+        ) as client:
+            response = await client.get("/.well-known/oauth-authorization-server")
+
+        expected_audience = authenticator.call_args.kwargs["token_endpoint_url"]
+        assert expected_audience == response.json()["token_endpoint"]
