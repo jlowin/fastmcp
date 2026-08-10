@@ -7,14 +7,7 @@
 
   var CURRENT_LANGUAGE = "python";
 
-<<<<<<< HEAD
   var TYPESCRIPT_DOCS_URL = "https://fastmcp-ts.docs.prefect.io/";
-=======
-  // TODO: fastmcp-ts has no public docs site URL discoverable in either repo
-  // yet. Until it exists, point at the repo README (the same cross-link the
-  // welcome page uses), then replace with the real docs URL.
-  var TYPESCRIPT_DOCS_URL = "https://github.com/PrefectHQ/fastmcp-ts";
->>>>>>> 06fee6d30062adf7c1676a608d71fea4f79c0385
   var PYTHON_DOCS_URL = "https://gofastmcp.com";
 
   var URLS = { python: PYTHON_DOCS_URL, typescript: TYPESCRIPT_DOCS_URL };
@@ -31,11 +24,8 @@
   function buildDropdown() {
     var label = document.createElement("label");
     label.id = "language-switch";
-<<<<<<< HEAD
     // The CSS keys the trigger's language icon off this attribute.
     label.dataset.lang = CURRENT_LANGUAGE;
-=======
->>>>>>> 06fee6d30062adf7c1676a608d71fea4f79c0385
 
     var select = document.createElement("select");
     select.setAttribute("aria-label", "Switch documentation language");
@@ -52,10 +42,7 @@
     });
 
     select.addEventListener("change", function () {
-<<<<<<< HEAD
       label.dataset.lang = select.value;
-=======
->>>>>>> 06fee6d30062adf7c1676a608d71fea4f79c0385
       if (select.value === CURRENT_LANGUAGE) return;
       window.location.href = URLS[select.value];
     });
