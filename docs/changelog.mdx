@@ -5,6 +5,19 @@ rss: true
 tag: NEW
 ---
 
+<Update label="v3.4.7" description="2026-08-10">
+
+**[v3.4.7: Know Your Audience](https://github.com/PrefectHQ/fastmcp/releases/tag/v3.4.7)**
+
+FastMCP 3.4.7 fixes CIMD `private_key_jwt` authentication on bare-origin OAuth proxy deployments by validating client assertions against the exact token endpoint advertised in OAuth metadata.
+
+### Security 🔒
+* Backport CIMD assertion audience fix to v3 by [@jlowin](https://github.com/jlowin) in [#4799](https://github.com/PrefectHQ/fastmcp/pull/4799)
+
+**Full Changelog**: [v3.4.6...v3.4.7](https://github.com/PrefectHQ/fastmcp/compare/v3.4.6...v3.4.7)
+
+</Update>
+
 <Update label="v3.4.6" description="2026-08-05">
 
 **[v3.4.6: Trust, but Proxy](https://github.com/PrefectHQ/fastmcp/releases/tag/v3.4.6)**
