@@ -1,6 +1,7 @@
 """Tests for OAuth proxy initialization and configuration."""
 
 import time
+from unittest.mock import patch
 from urllib.parse import parse_qs, urlparse
 
 import httpx
@@ -10,6 +11,7 @@ from key_value.aio.stores.memory import MemoryStore
 from starlette.applications import Starlette
 from starlette.testclient import TestClient
 
+from fastmcp.server.auth.auth import PrivateKeyJWTClientAuthenticator
 from fastmcp.server.auth.oauth_proxy import OAuthProxy
 from fastmcp.server.auth.oauth_proxy.models import OAuthTransaction
 
@@ -443,8 +445,14 @@ class TestCIMDTokenEndpointAudience:
             client_storage=MemoryStore(),
         )
 
-        app = Starlette(routes=proxy.get_routes(mcp_path="/mcp"))
+        with patch(
+            "fastmcp.server.auth.oauth_proxy.proxy.PrivateKeyJWTClientAuthenticator",
+            wraps=PrivateKeyJWTClientAuthenticator,
+        ) as authenticator:
+            app = Starlette(routes=proxy.get_routes(mcp_path="/mcp"))
+
         with TestClient(app) as client:
             metadata = client.get("/.well-known/oauth-authorization-server").json()
 
-        assert proxy.token_endpoint_url == metadata["token_endpoint"]
+        expected_audience = authenticator.call_args.kwargs["token_endpoint_url"]
+        assert expected_audience == metadata["token_endpoint"]
