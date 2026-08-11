@@ -370,8 +370,16 @@ class ConsentMixin:
                 )
 
         # Need consent: issue CSRF token and show HTML
-        csrf_token = secrets.token_urlsafe(32)
-        csrf_expires_at = time.time() + 15 * 60
+        if (
+            txn_model.csrf_token
+            and txn_model.csrf_expires_at
+            and time.time() < txn_model.csrf_expires_at
+        ):
+            csrf_token = txn_model.csrf_token
+            csrf_expires_at = txn_model.csrf_expires_at
+        else:
+            csrf_token = secrets.token_urlsafe(32)
+            csrf_expires_at = time.time() + 15 * 60
 
         # Update transaction with CSRF token
         txn_model.csrf_token = csrf_token
