@@ -2,6 +2,7 @@
 
 import pytest
 
+from fastmcp.resources.base import Resource
 from fastmcp.server.transforms.visibility import Visibility, is_enabled
 from fastmcp.tools.base import Tool
 from fastmcp.utilities.versions import VersionSpec
@@ -313,6 +314,29 @@ class TestMalformedKeyWarning:
         message = str(record[0].message)
         assert "tool:bad" in message
         assert "tool:good@" not in message
+
+    async def test_warns_when_resource_uri_at_sign_hides_missing_delimiter(self):
+        """A missing delimiter is ambiguous when the resource URI contains '@'."""
+        resource = Resource(uri="data://user@example.com/profile")
+        visibility = Visibility(
+            False,
+            keys={"resource:data://user@example.com/profile"},
+        )
+
+        with pytest.warns(UserWarning, match="do not match any component"):
+            await visibility.list_resources([resource])
+
+    async def test_resource_uri_at_sign_with_delimiter_matches_without_warning(
+        self, recwarn
+    ):
+        """A canonical resource key remains valid when its URI contains '@'."""
+        resource = Resource(uri="data://user@example.com/profile")
+        visibility = Visibility(False, keys={resource.key})
+
+        result = await visibility.list_resources([resource])
+
+        assert [w for w in recwarn if issubclass(w.category, UserWarning)] == []
+        assert is_enabled(result[0]) is False
 
     def test_other_filters_do_not_warn(self, recwarn):
         """Only `keys` is subject to this validation."""

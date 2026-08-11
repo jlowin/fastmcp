@@ -102,6 +102,39 @@ class Visibility(Transform):
         self.tags = tags  # e.g., {"internal", "deprecated"}
         self.components = components  # e.g., {"tool", "prompt"}
         self.match_all = match_all
+        self._warned_unmatched_keys = {key for key in keys or () if "@" not in key}
+
+    def _warn_for_unmatched_keys(
+        self,
+        components: Sequence[FastMCPComponent],
+        component_type: Literal["tool", "resource", "template", "prompt"],
+    ) -> None:
+        """Warn when a key cannot match any component in a list operation.
+
+        The version delimiter cannot be validated from the key string alone:
+        resource URIs may contain ``@`` themselves. Compare keys with the
+        components after transforms have produced the current list instead.
+        """
+        if not self.keys or self.match_all:
+            return
+        if self.components is not None and component_type not in self.components:
+            return
+
+        prefix = f"{component_type}:"
+        keys = {key for key in self.keys if "@" in key and key.startswith(prefix)}
+        unmatched = sorted(keys - {component.key for component in components})
+        unmatched = [key for key in unmatched if key not in self._warned_unmatched_keys]
+        if not unmatched:
+            return
+
+        self._warned_unmatched_keys.update(unmatched)
+        warnings.warn(
+            f"Component keys do not match any component and will match nothing: "
+            f"{unmatched}. Read the value from `component.key`, or filter by "
+            f"`names` instead.",
+            UserWarning,
+            stacklevel=3,
+        )
 
     def __repr__(self) -> str:
         action = "enable" if self._enabled else "disable"
@@ -209,6 +242,7 @@ class Visibility(Transform):
 
     async def list_tools(self, tools: Sequence[Tool]) -> Sequence[Tool]:
         """Mark tools by visibility state."""
+        self._warn_for_unmatched_keys(tools, "tool")
         return [self._mark_component(t) for t in tools]
 
     async def get_tool(
@@ -226,6 +260,7 @@ class Visibility(Transform):
 
     async def list_resources(self, resources: Sequence[Resource]) -> Sequence[Resource]:
         """Mark resources by visibility state."""
+        self._warn_for_unmatched_keys(resources, "resource")
         return [self._mark_component(r) for r in resources]
 
     async def get_resource(
@@ -249,6 +284,7 @@ class Visibility(Transform):
         self, templates: Sequence[ResourceTemplate]
     ) -> Sequence[ResourceTemplate]:
         """Mark resource templates by visibility state."""
+        self._warn_for_unmatched_keys(templates, "template")
         return [self._mark_component(t) for t in templates]
 
     async def get_resource_template(
@@ -270,6 +306,7 @@ class Visibility(Transform):
 
     async def list_prompts(self, prompts: Sequence[Prompt]) -> Sequence[Prompt]:
         """Mark prompts by visibility state."""
+        self._warn_for_unmatched_keys(prompts, "prompt")
         return [self._mark_component(p) for p in prompts]
 
     async def get_prompt(
