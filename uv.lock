@@ -263,30 +263,8 @@ wheels = [
 
 [[package]]
 name = "burner-redis"
-version = "0.1.6"
-source = { registry = "https://pypi.org/simple" }
-resolution-markers = [
-    "python_full_version >= '3.14' and sys_platform == 'win32'",
-    "python_full_version == '3.13.*' and sys_platform == 'win32'",
-    "python_full_version >= '3.11' and python_full_version < '3.13' and sys_platform == 'win32'",
-    "python_full_version < '3.11' and sys_platform == 'win32'",
-]
-sdist = { url = "https://files.pythonhosted.org/packages/c8/6f/ec3eeb9e3e9d7fedc51fcb56dd09da0f164495ab6fdf4caaa3754ceed659/burner_redis-0.1.6.tar.gz", hash = "sha256:362091d98c09953ef99be8bd026d75fad42599a0f153211e1a22d3e3029c7cfb", size = 843118, upload-time = "2026-04-27T17:11:41.879Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/a0/8c/302638fdad4476d4760d477b0f3c6b96c0f88d3f278e5f14d06eb048f788/burner_redis-0.1.6-cp310-abi3-win_amd64.whl", hash = "sha256:98c6b6fc397617cd5a6778ac020e4ed9985c393ad204f9f5cf524b68ae16070b", size = 1103735, upload-time = "2026-04-27T17:11:38.38Z" },
-    { url = "https://files.pythonhosted.org/packages/c0/ba/18668d92e18210150f7f93e2930264ad77a82e4d3e5f74ca1aecc002f78f/burner_redis-0.1.6-cp310-abi3-win_arm64.whl", hash = "sha256:c2583e98f9a3836ac2c6243ea0c8d56b40e7017b46617991e329bc807c544bad", size = 1029386, upload-time = "2026-04-27T17:11:40.266Z" },
-]
-
-[[package]]
-name = "burner-redis"
 version = "0.1.7"
 source = { registry = "https://pypi.org/simple" }
-resolution-markers = [
-    "python_full_version >= '3.14' and sys_platform != 'win32'",
-    "python_full_version == '3.13.*' and sys_platform != 'win32'",
-    "python_full_version >= '3.11' and python_full_version < '3.13' and sys_platform != 'win32'",
-    "python_full_version < '3.11' and sys_platform != 'win32'",
-]
 sdist = { url = "https://files.pythonhosted.org/packages/52/89/54706febafc135095b2a9d797cfbd4eed2ab1ad7819808b99b587020471b/burner_redis-0.1.7.tar.gz", hash = "sha256:7474ff092669fd11ef765411572cdafcc3d89b8054aef4ca0617be6d6be4c680", size = 638644, upload-time = "2026-05-08T15:01:42.961Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/6c/5d/198bd1d22e504b3034353430703afbdb3efe6e25cb90bf52d896e1d266a7/burner_redis-0.1.7-cp310-abi3-macosx_10_12_x86_64.whl", hash = "sha256:f80c866996e0455d584eb3c0f3b067e411c632fb0519eab454e0968edf01e62c", size = 1288888, upload-time = "2026-05-08T15:01:26.103Z" },
@@ -295,6 +273,8 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/e1/32/95cfa1833316ca2b6b2e58150a4900bc1ad256043cdd36198f1887618ccc/burner_redis-0.1.7-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:39111467059b8a28f15ea061d2414ec25c3e57c65759983f90f4d358e7d6a72d", size = 1366800, upload-time = "2026-05-08T15:01:32.891Z" },
     { url = "https://files.pythonhosted.org/packages/34/ad/93c3916f053f89b7b5760da5bf855cd78b7885d480f9cfcc64f3732c1dc2/burner_redis-0.1.7-cp310-abi3-musllinux_1_2_aarch64.whl", hash = "sha256:9b5adfe99aeb8407f468078f3769b2a63e9168fea12f7709df5d2a3b152706e4", size = 1538160, upload-time = "2026-05-08T15:01:34.667Z" },
     { url = "https://files.pythonhosted.org/packages/5c/b9/19bae42cb124932d71168bc8e5bcb1da33aa62b908e5e632b3d298d7cb15/burner_redis-0.1.7-cp310-abi3-musllinux_1_2_x86_64.whl", hash = "sha256:591a9d20685f9d6d22bf0c863b50b12dfcf328b06111b3f62c33cd3185d48ce0", size = 1591491, upload-time = "2026-05-08T15:01:36.708Z" },
+    { url = "https://files.pythonhosted.org/packages/f5/30/207f47f406619a5b564355d2946c3171f84231a28b800709b5645b06a5ae/burner_redis-0.1.7-cp310-abi3-win_amd64.whl", hash = "sha256:f6cf4ac666766b32fd63940aad0c120847905fd3102c17e5b6b305f91a21d079", size = 1117564, upload-time = "2026-05-08T15:01:39.221Z" },
+    { url = "https://files.pythonhosted.org/packages/76/6f/e9beaf46c5e9fd10dfcdb889ebf7d3aa85142c650c0ab17ab284194f58e1/burner_redis-0.1.7-cp310-abi3-win_arm64.whl", hash = "sha256:458f88feeddfb40a586cc3fcbd8e9384bbdfd2a4512a695af4900e06052570d4", size = 1040407, upload-time = "2026-05-08T15:01:41.235Z" },
 ]
 
 [[package]]
@@ -1118,20 +1098,16 @@ provides-extras = ["anthropic", "apps", "azure", "client", "code-mode", "gemini"
 name = "fastmcp-tasks"
 source = { editable = "fastmcp_tasks" }
 dependencies = [
-    { name = "burner-redis", version = "0.1.6", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'win32'" },
     { name = "cryptography" },
     { name = "fastmcp-slim", extra = ["server"] },
-    { name = "pydocket", version = "0.20.1", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'win32'" },
-    { name = "pydocket", version = "0.24.1", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'win32'" },
+    { name = "pydocket" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "burner-redis", marker = "sys_platform == 'win32'", specifier = "<0.1.7" },
     { name = "cryptography", specifier = ">=43.0.0" },
     { name = "fastmcp-slim", extras = ["server"], editable = "fastmcp_slim" },
-    { name = "pydocket", marker = "sys_platform != 'win32'", specifier = ">=0.24.1" },
-    { name = "pydocket", marker = "sys_platform == 'win32'", specifier = ">=0.20.0" },
+    { name = "pydocket", specifier = ">=0.24.1" },
 ]
 
 [[package]]
@@ -2403,48 +2379,10 @@ wheels = [
 
 [[package]]
 name = "pydocket"
-version = "0.20.1"
-source = { registry = "https://pypi.org/simple" }
-resolution-markers = [
-    "python_full_version >= '3.14' and sys_platform == 'win32'",
-    "python_full_version == '3.13.*' and sys_platform == 'win32'",
-    "python_full_version >= '3.11' and python_full_version < '3.13' and sys_platform == 'win32'",
-    "python_full_version < '3.11' and sys_platform == 'win32'",
-]
-dependencies = [
-    { name = "burner-redis", version = "0.1.6", source = { registry = "https://pypi.org/simple" } },
-    { name = "cloudpickle" },
-    { name = "cronsim" },
-    { name = "exceptiongroup", marker = "python_full_version < '3.11'" },
-    { name = "opentelemetry-api" },
-    { name = "prometheus-client" },
-    { name = "py-key-value-aio", extra = ["memory", "redis"] },
-    { name = "python-json-logger" },
-    { name = "redis" },
-    { name = "rich" },
-    { name = "taskgroup", marker = "python_full_version < '3.11'" },
-    { name = "typer" },
-    { name = "typing-extensions" },
-    { name = "tzdata" },
-    { name = "uncalled-for" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/72/bf/7f1134e990855f373e5ee6ba316db8fe654a2d7dd852b41ab890fcfb91e3/pydocket-0.20.1.tar.gz", hash = "sha256:d72b3784e4b5069b39e5f49f599d54a891e1b6222c27a8bcfbd4dee0f57d4895", size = 361993, upload-time = "2026-05-06T14:06:25.956Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/9d/9d/1bd873a0ea480dec388c40ac1a7500c129efbb9d61e2fef6b97236703458/pydocket-0.20.1-py3-none-any.whl", hash = "sha256:c886ece90ac93018f069d1eef9443f888404081d7258955e16847752575c95ae", size = 102774, upload-time = "2026-05-06T14:06:24.548Z" },
-]
-
-[[package]]
-name = "pydocket"
 version = "0.24.1"
 source = { registry = "https://pypi.org/simple" }
-resolution-markers = [
-    "python_full_version >= '3.14' and sys_platform != 'win32'",
-    "python_full_version == '3.13.*' and sys_platform != 'win32'",
-    "python_full_version >= '3.11' and python_full_version < '3.13' and sys_platform != 'win32'",
-    "python_full_version < '3.11' and sys_platform != 'win32'",
-]
 dependencies = [
-    { name = "burner-redis", version = "0.1.7", source = { registry = "https://pypi.org/simple" } },
+    { name = "burner-redis" },
     { name = "cloudpickle" },
     { name = "cronsim" },
     { name = "exceptiongroup", marker = "python_full_version < '3.11'" },
@@ -2457,6 +2395,7 @@ dependencies = [
     { name = "taskgroup", marker = "python_full_version < '3.11'" },
     { name = "typer" },
     { name = "typing-extensions" },
+    { name = "tzdata", marker = "sys_platform == 'win32'" },
     { name = "uncalled-for" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/b7/6b/a87c6e3fd197807f630af4270aa2ce8f4c1fca4e43bba783f273d298d646/pydocket-0.24.1.tar.gz", hash = "sha256:477d77be1fcfd10ee0c2d0b8aa8c6e97851b9c7f39bb6f2b4e6d42e9b4d6e95a", size = 430759, upload-time = "2026-08-10T19:50:03.368Z" }
