@@ -379,9 +379,6 @@ jobs:
             async function enforceFailure(kind) {
               await addLabel();
 
-              const reason = kind === 'no-link'
-                ? "it doesn't reference a tracked issue assigned to you"
-                : "you aren't assigned to the issue it references";
               const steps = kind === 'no-link'
                 ? [
                     `1. Find or [open an issue](https://github.com/${owner}/${repo}/issues/new/choose) describing the change — if you open it, you have first claim on it.`,
@@ -393,9 +390,9 @@ jobs:
 
               const commentBody = [
                 MARKER,
-                "**Don't open a new pull request — this one reopens on its own.** It's closed for " +
-                  `now because ${reason}, but the moment that's fixed it reopens automatically. Keep this ` +
-                  'PR and edit it; opening a fresh duplicate just starts you over and creates more to triage.',
+                '**This pull request was closed because it must link to an issue assigned to you.** ' +
+                  'Once this PR links to an issue and a maintainer assigns that issue to you, it will ' +
+                  'reopen automatically. Please update this PR rather than opening a new one.',
                 '',
                 `Per [CONTRIBUTING.md](https://github.com/${owner}/${repo}/blob/main/CONTRIBUTING.md), an external PR must reference an issue that's assigned to its author. To get there:`,
                 '',
