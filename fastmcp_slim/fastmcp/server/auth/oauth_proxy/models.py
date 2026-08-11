@@ -58,16 +58,30 @@ class OAuthTransaction(BaseModel):
     created_at: float
     resource: str | None = None
     proxy_code_verifier: str | None = None
+    # Deprecated: consent CSRF tokens are now stored under their own keys (see
+    # ConsentCSRFToken) so that concurrent renders cannot overwrite each other.
+    # These two fields are only read, never written, and only to keep a consent
+    # flow that started before the upgrade submittable after it.
     csrf_token: str | None = None
-    # Every render of the consent page issues its own CSRF token, so that two
-    # renders of one transaction never share a token (the double-submit cookie
-    # check relies on a token being unique to the browser that received it).
-    # All tokens issued for this transaction stay valid until it expires,
-    # mirroring MCP_CONSENT_STATE, which already accumulates them client-side.
-    # `csrf_token` remains the most recently issued one.
-    csrf_tokens: list[str] = Field(default_factory=list)
     csrf_expires_at: float | None = None
     consent_token: str | None = None
+
+
+class ConsentCSRFToken(BaseModel):
+    """One CSRF token issued for one render of the consent page.
+
+    Stored under a key derived from the token itself rather than on the
+    transaction. Every render of a consent page issues its own token, and two
+    renders can be in flight at once (a reload, a browser preload, an extension
+    re-fetching the URL). Appending to a list on the transaction loses one of
+    them whenever that happens: `AsyncKeyValue` has no compare-and-swap, so two
+    handlers read the same transaction, each append their own token, and the
+    second write drops the first. Giving each token its own key makes the
+    writes independent, which holds across processes sharing one backend.
+    """
+
+    txn_id: str
+    expires_at: float
 
 
 class ClientCode(BaseModel):

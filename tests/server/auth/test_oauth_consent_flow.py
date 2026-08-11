@@ -12,11 +12,13 @@ This test suite verifies:
 9. Consent binding cookie prevents confused deputy attacks (GHSA-rww4-4w9c-7733)
 """
 
+import asyncio
 import re
 import secrets
 import time
 from urllib.parse import parse_qs, urlparse
 
+import httpx
 import pytest
 from key_value.aio.stores.memory import MemoryStore
 from mcp.server.auth.provider import AuthorizationParams
@@ -27,6 +29,10 @@ from starlette.testclient import TestClient
 
 from fastmcp.server.auth.auth import AccessToken, TokenVerifier
 from fastmcp.server.auth.oauth_proxy import OAuthProxy
+from fastmcp.server.auth.oauth_proxy.consent import (
+    _CONSENT_STATE_COOKIE_BASE,
+    _MAX_CSRF_TOKENS,
+)
 from fastmcp.server.auth.oauth_proxy.models import OAuthTransaction
 
 
@@ -165,6 +171,49 @@ def _extract_csrf(html: str) -> str | None:
     """Extract CSRF token from HTML form."""
     m = re.search(r"name=\"csrf_token\"\s+value=\"([^\"]+)\"", html)
     return m.group(1) if m else None
+
+
+def _consent_state_cookie_names(client: httpx.AsyncClient | TestClient) -> list[str]:
+    """Names of the per-token consent-state cookies currently held."""
+    prefix = f"__Host-{_CONSENT_STATE_COOKIE_BASE}_"
+    return [c.name for c in client.cookies.jar if c.name.startswith(prefix)]
+
+
+class _RenderGate:
+    """Holds arrivals until `parties` of them are waiting, then releases all.
+
+    asyncio.Barrier would do this, but it is 3.11+ and fastmcp supports 3.10.
+    Single-threaded event loop, so the counter needs no lock.
+    """
+
+    def __init__(self, parties: int) -> None:
+        self._parties = parties
+        self._arrived = 0
+        self._opened = asyncio.Event()
+
+    async def wait(self) -> None:
+        self._arrived += 1
+        if self._arrived >= self._parties:
+            self._opened.set()
+        await self._opened.wait()
+
+
+def _gate_transaction_reads(proxy: OAuthProxy, gate: _RenderGate) -> None:
+    """Hold every transaction read open until the gate releases.
+
+    Parks concurrent consent renders in the window where each has read the
+    transaction and none has stored its token yet. That interleaving is what
+    loses a token when tokens are appended to the transaction: both handlers
+    read the same value, both append, and the second write wins.
+    """
+    original_get = proxy._transaction_store.get
+
+    async def gated_get(*args, **kwargs):
+        result = await original_get(*args, **kwargs)
+        await gate.wait()
+        return result
+
+    proxy._transaction_store.get = gated_get  # ty: ignore[invalid-assignment]
 
 
 class TestServerSideStorage:
@@ -609,6 +658,174 @@ class TestConcurrentConsentRenders:
                 follow_redirects=False,
             )
             assert response.status_code == 403
+
+    @pytest.mark.parametrize("submitted", [0, 1])
+    async def test_overlapping_renders_both_submittable(
+        self, oauth_proxy_with_storage, submitted
+    ):
+        """Two renders in flight at once must both survive.
+
+        Sequential renders are the common case, but nothing serialises them.
+        Two handlers can read the same transaction before either has stored its
+        token, and if tokens live in a list on the transaction the second write
+        drops the first — there is no compare-and-swap on `AsyncKeyValue` to
+        catch it, and it happens across processes sharing one backend too.
+
+        The gate forces exactly that interleaving. Both responses are applied to
+        one cookie jar, the way a browser applies them, and then whichever form
+        the user happened to be looking at is submitted.
+        """
+        txn_id, _ = await _start_flow(
+            oauth_proxy_with_storage,
+            "overlapping-render-client",
+            "http://localhost:9090/callback",
+        )
+
+        gate = _RenderGate(2)
+        _gate_transaction_reads(oauth_proxy_with_storage, gate)
+
+        app = Starlette(routes=oauth_proxy_with_storage.get_routes())
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url="https://myserver.com",
+        ) as client:
+            first, second = await asyncio.gather(
+                client.get(f"/consent?txn_id={txn_id}"),
+                client.get(f"/consent?txn_id={txn_id}"),
+            )
+            tokens = [_extract_csrf(first.text), _extract_csrf(second.text)]
+            assert all(tokens)
+            # Each render still issues its own token, so a token stays unique
+            # to the browser it was handed to.
+            assert tokens[0] != tokens[1]
+            # Both responses left their own cookie; neither overwrote the other.
+            assert len(_consent_state_cookie_names(client)) == 2
+
+            response = await client.post(
+                "/consent",
+                data={
+                    "action": "approve",
+                    "txn_id": txn_id,
+                    "csrf_token": tokens[submitted],
+                },
+            )
+            assert response.status_code == 302
+
+
+class TestConsentStateCookieScope:
+    """Consent state is per transaction and bounded."""
+
+    async def test_completing_one_flow_leaves_another_submittable(
+        self, oauth_proxy_with_storage
+    ):
+        """Approving one transaction must not clear a different pending one.
+
+        A browser can have two consent flows open — two clients connecting, or
+        one client retried in a second tab. Consent state held as a single flat
+        list cannot express that: completing either flow wipes both, and the
+        one still on screen fails the double-submit check on Approve.
+        """
+        first_txn, _ = await _start_flow(
+            oauth_proxy_with_storage, "pending-flow-a", "http://localhost:9090/callback"
+        )
+        second_txn, _ = await _start_flow(
+            oauth_proxy_with_storage, "pending-flow-b", "http://localhost:9090/callback"
+        )
+
+        app = Starlette(routes=oauth_proxy_with_storage.get_routes())
+        with TestClient(app, base_url="https://myserver.com") as client:
+            first_token = _extract_csrf(client.get(f"/consent?txn_id={first_txn}").text)
+            second_token = _extract_csrf(
+                client.get(f"/consent?txn_id={second_txn}").text
+            )
+            assert first_token and second_token
+
+            completed = client.post(
+                "/consent",
+                data={
+                    "action": "approve",
+                    "txn_id": first_txn,
+                    "csrf_token": first_token,
+                },
+                follow_redirects=False,
+            )
+            assert completed.status_code == 302
+            # The flow still on screen is unaffected.
+            still_open = client.post(
+                "/consent",
+                data={
+                    "action": "approve",
+                    "txn_id": second_txn,
+                    "csrf_token": second_token,
+                },
+                follow_redirects=False,
+            )
+            assert still_open.status_code == 302
+
+            # Both flows are done, so nothing is left behind either.
+            assert _consent_state_cookie_names(client) == []
+
+    async def test_completing_a_flow_removes_only_its_own_state(
+        self, oauth_proxy_with_storage
+    ):
+        """Approve clears the transaction it completed and nothing else."""
+        first_txn, _ = await _start_flow(
+            oauth_proxy_with_storage, "scoped-flow-a", "http://localhost:9090/callback"
+        )
+        second_txn, _ = await _start_flow(
+            oauth_proxy_with_storage, "scoped-flow-b", "http://localhost:9090/callback"
+        )
+
+        app = Starlette(routes=oauth_proxy_with_storage.get_routes())
+        with TestClient(app, base_url="https://myserver.com") as client:
+            first_token = _extract_csrf(client.get(f"/consent?txn_id={first_txn}").text)
+            client.get(f"/consent?txn_id={second_txn}")
+            assert first_token
+            before = set(_consent_state_cookie_names(client))
+            assert len(before) == 2
+
+            client.post(
+                "/consent",
+                data={
+                    "action": "approve",
+                    "txn_id": first_txn,
+                    "csrf_token": first_token,
+                },
+                follow_redirects=False,
+            )
+
+            after = set(_consent_state_cookie_names(client))
+            assert len(after) == 1
+            assert after < before
+
+    async def test_consent_state_cookies_are_bounded(self, oauth_proxy_with_storage):
+        """Repeated renders must not grow the Cookie header without limit.
+
+        One cookie per issued token is what keeps concurrent renders from
+        overwriting each other, so the count has to be capped somewhere. The
+        newest render always survives the cull.
+        """
+        txn_id, _ = await _start_flow(
+            oauth_proxy_with_storage,
+            "bounded-render-client",
+            "http://localhost:9090/callback",
+        )
+
+        app = Starlette(routes=oauth_proxy_with_storage.get_routes())
+        with TestClient(app, base_url="https://myserver.com") as client:
+            newest = None
+            for _ in range(_MAX_CSRF_TOKENS + 3):
+                newest = _extract_csrf(client.get(f"/consent?txn_id={txn_id}").text)
+            assert newest
+
+            assert len(_consent_state_cookie_names(client)) <= _MAX_CSRF_TOKENS
+
+            response = client.post(
+                "/consent",
+                data={"action": "approve", "txn_id": txn_id, "csrf_token": newest},
+                follow_redirects=False,
+            )
+            assert response.status_code == 302
 
 
 class TestStoragePersistence:
