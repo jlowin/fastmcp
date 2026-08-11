@@ -20,7 +20,7 @@ from pydantic import AnyUrl
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, RedirectResponse
 
-from fastmcp.server.auth.oauth_proxy.models import ProxyDCRClient
+from fastmcp.server.auth.oauth_proxy.models import OAuthTransaction, ProxyDCRClient
 from fastmcp.server.auth.oauth_proxy.ui import create_consent_html
 from fastmcp.server.auth.redirect_validation import (
     build_client_redirect,
@@ -36,7 +36,25 @@ if TYPE_CHECKING:
 # Keeps the Cookie header bounded to avoid hitting reverse proxy header limits.
 _MAX_REMEMBERED_CLIENTS = 25
 
+# Maximum number of concurrently valid CSRF tokens per transaction. A handful
+# of renders is normal (reload, preload, a re-fetch); anything beyond this is
+# not a flow a user is going to complete, and the bound keeps both the stored
+# transaction and the MCP_CONSENT_STATE cookie from growing without limit.
+_MAX_CSRF_TOKENS = 10
+
 logger = get_logger(__name__)
+
+
+def _valid_csrf_tokens(txn_model: OAuthTransaction) -> list[str]:
+    """CSRF tokens currently accepted for a transaction, oldest first.
+
+    Falls back to the single `csrf_token` for transactions created before
+    `csrf_tokens` existed, so a consent flow already in progress survives an
+    upgrade instead of failing at the point the user clicks Approve.
+    """
+    if txn_model.csrf_tokens:
+        return txn_model.csrf_tokens
+    return [txn_model.csrf_token] if txn_model.csrf_token else []
 
 
 class ConsentMixin:
@@ -373,8 +391,22 @@ class ConsentMixin:
         csrf_token = secrets.token_urlsafe(32)
         csrf_expires_at = time.time() + 15 * 60
 
-        # Update transaction with CSRF token
+        # Update transaction with CSRF token. Previously issued tokens stay
+        # valid: a transaction can be rendered more than once (a reload, a
+        # browser preload, an extension re-fetching the URL), and dropping the
+        # earlier token invalidates a consent form the user may already be
+        # looking at. They then get "Invalid or expired consent token" on a
+        # flow that never expired, with no way to recover by retrying.
+        #
+        # Each render still gets its OWN token, so a token remains unique to
+        # the browser that received it and the double-submit cookie check below
+        # keeps its meaning.
+        previously_issued = _valid_csrf_tokens(txn_model)
         txn_model.csrf_token = csrf_token
+        txn_model.csrf_tokens = [
+            *previously_issued[-(_MAX_CSRF_TOKENS - 1) :],
+            csrf_token,
+        ]
         txn_model.csrf_expires_at = csrf_expires_at
         await self._transaction_store.put(
             key=txn_id, value=txn_model, ttl=15 * 60
@@ -455,10 +487,10 @@ class ConsentMixin:
             )
 
         txn = txn_model.model_dump()
-        expected_csrf = txn.get("csrf_token")
+        valid_csrf = _valid_csrf_tokens(txn_model)
         expires_at = float(txn.get("csrf_expires_at") or 0)
 
-        if not expected_csrf or csrf_token != expected_csrf or time.time() > expires_at:
+        if not csrf_token or csrf_token not in valid_csrf or time.time() > expires_at:
             return create_secure_html_response(
                 "<h1>Error</h1><p>Invalid or expired consent token</p>", status_code=400
             )

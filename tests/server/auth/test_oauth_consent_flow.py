@@ -537,6 +537,80 @@ class TestCSRFDoubleSubmit:
             assert response.status_code == 403
 
 
+class TestConcurrentConsentRenders:
+    """A transaction can be rendered more than once before it is submitted."""
+
+    async def test_earlier_render_still_submittable(self, oauth_proxy_with_storage):
+        """A second render must not invalidate the form from the first one.
+
+        A consent URL gets loaded twice more often than you would think: a
+        reload, a browser preload, an extension re-fetching it. Each render
+        issues a new CSRF token, and if that replaces the previous one, the
+        page the user is actually looking at is already dead when they click
+        Approve. They get "Invalid or expired consent token" on a transaction
+        that has not expired, and retrying does not help.
+        """
+        txn_id, _ = await _start_flow(
+            oauth_proxy_with_storage,
+            "concurrent-render-client",
+            "http://localhost:9090/callback",
+        )
+
+        app = Starlette(routes=oauth_proxy_with_storage.get_routes())
+        # https base_url so the Secure/__Host- consent cookie is retained
+        # between requests, the way it is in a browser.
+        with TestClient(app, base_url="https://myserver.com") as test_client:
+            first = _extract_csrf(test_client.get(f"/consent?txn_id={txn_id}").text)
+            second = _extract_csrf(test_client.get(f"/consent?txn_id={txn_id}").text)
+            assert first and second
+            # Each render gets its own token, so a token stays bound to the
+            # browser it was issued to and the double-submit check keeps working.
+            assert first != second
+
+            # The user submits the page they had open, which is the first one.
+            response = test_client.post(
+                "/consent",
+                data={"action": "approve", "txn_id": txn_id, "csrf_token": first},
+                follow_redirects=False,
+            )
+            assert response.status_code == 302
+
+    async def test_forged_token_still_rejected_without_cookie(
+        self, oauth_proxy_with_storage
+    ):
+        """Keeping older tokens valid must not weaken the double-submit check.
+
+        An attacker who renders the consent page for a transaction they started
+        learns a token that stays valid. It is still useless against a victim's
+        browser, because it never lands in the victim's cookie.
+        """
+        txn_id, _ = await _start_flow(
+            oauth_proxy_with_storage,
+            "concurrent-render-attacker",
+            "http://localhost:9090/callback",
+        )
+
+        app = Starlette(routes=oauth_proxy_with_storage.get_routes())
+        with TestClient(app, base_url="https://myserver.com") as attacker_client:
+            attacker_token = _extract_csrf(
+                attacker_client.get(f"/consent?txn_id={txn_id}").text
+            )
+            assert attacker_token
+
+        with TestClient(app, base_url="https://myserver.com") as victim_client:
+            victim_client.get(f"/consent?txn_id={txn_id}")
+            response = victim_client.post(
+                "/consent",
+                data={
+                    "action": "approve",
+                    "txn_id": txn_id,
+                    "csrf_token": attacker_token,
+                },
+                follow_redirects=False,
+            )
+            assert response.status_code == 403
+
+
 class TestStoragePersistence:
     """Tests for state persistence across storage backends."""
 

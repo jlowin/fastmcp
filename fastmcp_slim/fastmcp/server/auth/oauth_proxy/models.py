@@ -59,6 +59,13 @@ class OAuthTransaction(BaseModel):
     resource: str | None = None
     proxy_code_verifier: str | None = None
     csrf_token: str | None = None
+    # Every render of the consent page issues its own CSRF token, so that two
+    # renders of one transaction never share a token (the double-submit cookie
+    # check relies on a token being unique to the browser that received it).
+    # All tokens issued for this transaction stay valid until it expires,
+    # mirroring MCP_CONSENT_STATE, which already accumulates them client-side.
+    # `csrf_token` remains the most recently issued one.
+    csrf_tokens: list[str] = Field(default_factory=list)
     csrf_expires_at: float | None = None
     consent_token: str | None = None
 
