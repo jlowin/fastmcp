@@ -284,6 +284,7 @@ class TestMalformedKeyWarning:
             "tool:my_tool",
             "resource:data://config",
             "prompt:analyze",
+            "resource:data://user@example.com/profile",
         ],
     )
     def test_warns_on_key_without_delimiter(self, key: str):
@@ -298,6 +299,8 @@ class TestMalformedKeyWarning:
             "tool:my_tool@v1",
             "resource:data://config@",
             "resource:data://user@example.com/profile@",
+            "resource:data://user@example.com/profile@v1",
+            "resource:file://x@v1",
         ],
     )
     def test_no_warning_on_well_formed_key(self, key: str, recwarn):
@@ -320,3 +323,32 @@ class TestMalformedKeyWarning:
         Visibility(False, tags={"internal"})
         Visibility(False, match_all=True)
         assert [w for w in recwarn if issubclass(w.category, UserWarning)] == []
+
+
+class TestMalformedKeyIntegration:
+    """End-to-end: malformed keys with '@' in the URI must warn and not hide."""
+
+    @pytest.mark.asyncio
+    async def test_disable_key_missing_trailing_at_on_uri_with_at(self):
+        import warnings
+
+        from fastmcp import Client, FastMCP
+
+        uri = "data://user@example.com/profile"
+        mcp = FastMCP("demo")
+
+        @mcp.resource(uri)
+        def profile() -> str:
+            return "SECRET"
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            mcp.disable(keys={f"resource:{uri}"})
+
+        assert any(
+            "missing the '@' version delimiter" in str(w.message) for w in caught
+        )
+
+        async with Client(mcp) as client:
+            resources = await client.list_resources()
+            assert [str(r.uri) for r in resources] == [uri]

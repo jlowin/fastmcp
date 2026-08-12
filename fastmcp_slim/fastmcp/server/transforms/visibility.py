@@ -37,6 +37,38 @@ _FASTMCP_KEY = "fastmcp"
 _INTERNAL_KEY = "_internal"
 
 
+def _visibility_key_is_malformed(key: str) -> bool:
+    """Return True when a visibility key can never match a real component key.
+
+    Component keys always include ``@`` as the version delimiter. Unversioned
+    keys end with a bare ``@``; versioned keys end with ``@<version>``. URIs
+    may contain ``@``, so a key that omits the trailing delimiter can satisfy
+    ``"@" in key`` while still matching nothing.
+    """
+    if "@" not in key:
+        return True
+
+    if key.endswith("@"):
+        return False
+
+    key_suffix = key
+    for prefix in ("tool", "resource", "template", "prompt"):
+        head = f"{prefix}:"
+        if key.startswith(head):
+            key_suffix = key[len(head) :]
+            break
+    else:
+        if ":" in key:
+            _, key_suffix = key.split(":", 1)
+
+    _name, version = key_suffix.rsplit("@", 1)
+
+    if not version:
+        return True
+
+    return "/" in version or ":" in version
+
+
 class Visibility(Transform):
     """Sets visibility state on matching components.
 
@@ -83,7 +115,7 @@ class Visibility(Transform):
             match_all: If True, matches all components regardless of other criteria.
         """
         if keys:
-            malformed = sorted(key for key in keys if "@" not in key)
+            malformed = sorted(key for key in keys if _visibility_key_is_malformed(key))
             if malformed:
                 warnings.warn(
                     f"Component keys are missing the '@' version delimiter and will "
