@@ -318,57 +318,11 @@ class OpenAPIParser(
                         ):
                             param_schema_dict["default"] = resolved_media_schema.default
 
-                param_examples = getattr(parameter, "examples", None)
                 param_example = getattr(parameter, "example", None)
-
-                # Extract examples and example, providing priority to examples over example
-                # and parameter-level over schema-level as per OpenAPI specification.
-                # Convert OpenAPI named examples map to JSON Schema-compatible array of values.
-                # Per-example try-except blocks ensure resolution failures (e.g. broken or external $ref)
-                # do not abort parameter extraction.
-                if param_examples is not None:
-                    example_values = []
-                    if isinstance(param_examples, dict):
-                        for ex_obj in param_examples.values():
-                            try:
-                                resolved_ex = self._resolve_ref(ex_obj)
-                                if isinstance(resolved_ex, BaseModel):
-                                    ex_dict = resolved_ex.model_dump(
-                                        mode="json", by_alias=True, exclude_none=True
-                                    )
-                                elif isinstance(resolved_ex, dict):
-                                    ex_dict = resolved_ex
-                                else:
-                                    ex_dict = resolved_ex
-
-                                if isinstance(ex_dict, dict) and "value" in ex_dict:
-                                    example_values.append(ex_dict["value"])
-                                else:
-                                    example_values.append(ex_dict)
-                            except Exception as e:
-                                logger.debug(
-                                    f"Failed to resolve parameter example reference: {e}"
-                                )
-                    if example_values:
-                        param_schema_dict.pop("example", None)
-                        param_schema_dict.pop("examples", None)
-                        param_schema_dict["examples"] = example_values
-                elif param_example is not None:
-                    try:
-                        resolved_ex = self._resolve_ref(param_example)
-                        if isinstance(resolved_ex, BaseModel):
-                            ex_val = resolved_ex.model_dump(
-                                mode="json", by_alias=True, exclude_none=True
-                            )
-                        else:
-                            ex_val = resolved_ex
-                        param_schema_dict.pop("example", None)
-                        param_schema_dict.pop("examples", None)
-                        param_schema_dict["example"] = ex_val
-                    except Exception as e:
-                        logger.debug(
-                            f"Failed to resolve parameter example reference: {e}"
-                        )
+                if param_example is not None:
+                    param_schema_dict.pop("example", None)
+                    param_schema_dict.pop("examples", None)
+                    param_schema_dict["example"] = param_example
 
                 # Extract explode and style properties if present
                 explode = getattr(parameter, "explode", None)

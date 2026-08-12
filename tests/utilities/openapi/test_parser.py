@@ -1,7 +1,5 @@
 """Unit tests for OpenAPI parser."""
 
-import json
-
 import pytest
 
 from fastmcp.utilities.openapi.parser import parse_openapi_to_http_routes
@@ -464,188 +462,44 @@ class TestErrorHandling:
 
 
 class TestParameterExamples:
-    """Test parameter-level example and examples propagation."""
+    """Test singular parameter-level example propagation."""
 
-    def test_parameter_example_and_examples_propagation(self):
-        """Test parameter example and examples precedence and schema propagation."""
+    def test_parameter_example_propagation(self):
+        """Test singular parameter example propagation, default preservation, and overriding schema-level examples."""
         spec = {
             "openapi": "3.1.0",
-            "info": {"title": "Example Drop Demo", "version": "1.0.0"},
-            "components": {
-                "examples": {
-                    "RefExample": {
-                        "summary": "Ref Example Summary",
-                        "value": "REF_VALUE",
-                    }
-                }
-            },
-            "paths": {
-                "/trade": {
-                    "get": {
-                        "operationId": "get_trade",
-                        "summary": "Monthly trade totals",
-                        "parameters": [
-                            {
-                                "name": "startYearMonth",
-                                "in": "query",
-                                "required": True,
-                                "description": "Start month, YYYYMM.",
-                                "example": "201601",
-                                "schema": {"type": "string"},
-                            },
-                            {
-                                "name": "pageNo",
-                                "in": "query",
-                                "required": False,
-                                "description": "Page number.",
-                                "example": 3,
-                                "schema": {"type": "integer", "default": 1},
-                            },
-                            {
-                                "name": "override",
-                                "in": "query",
-                                "required": False,
-                                "description": "Parameter example must override the schema example.",
-                                "examples": {
-                                    "paramLevel": {
-                                        "summary": "Parameter level example",
-                                        "value": "PARAM_LEVEL",
-                                    }
-                                },
-                                "schema": {
-                                    "type": "string",
-                                    "examples": ["SCHEMA_LEVEL"],
-                                },
-                            },
-                            {
-                                "name": "status",
-                                "in": "query",
-                                "required": False,
-                                "description": "Filter trades by status.",
-                                "schema": {"type": "string"},
-                                "examples": {
-                                    "settled": {
-                                        "summary": "Settled trades",
-                                        "value": "SETTLED",
-                                    },
-                                    "pending": {
-                                        "summary": "Pending trades",
-                                        "value": "PENDING",
-                                    },
-                                },
-                            },
-                            {
-                                "name": "format",
-                                "in": "query",
-                                "required": False,
-                                "description": "Output response format.",
-                                "example": "csv",
-                                "schema": {"type": "string", "default": "hellos"},
-                                "examples": {
-                                    "jsonFormat": {
-                                        "summary": "JSON Output",
-                                        "value": "json",
-                                    },
-                                    "xmlFormat": {
-                                        "summary": "XML Output",
-                                        "value": "xml",
-                                    },
-                                },
-                            },
-                            {
-                                "name": "refParam",
-                                "in": "query",
-                                "examples": {
-                                    "refEx": {
-                                        "$ref": "#/components/examples/RefExample"
-                                    }
-                                },
-                                "schema": {"type": "string"},
-                            },
-                        ],
-                        "responses": {
-                            "200": {
-                                "description": "OK",
-                                "content": {
-                                    "application/json": {"schema": {"type": "object"}}
-                                },
-                            }
-                        },
-                    }
-                }
-            },
-        }
-
-        routes = parse_openapi_to_http_routes(spec)
-        assert len(routes) == 1
-        route = routes[0]
-
-        schema, _ = _combine_schemas_and_map_params(route)
-        props = schema["properties"]
-
-        # Ensure json serializable without crashing
-        json_repr = json.dumps(props)
-        assert json_repr is not None
-
-        # 1. Parameter example propagated
-        assert props["startYearMonth"]["example"] == "201601"
-
-        # 2. Parameter example + schema default preserved
-        assert props["pageNo"]["example"] == 3
-        assert props["pageNo"]["default"] == 1
-
-        # 3. Parameter-level examples overrides schema-level examples (as array of values)
-        assert props["override"]["examples"] == ["PARAM_LEVEL"]
-        assert "SCHEMA_LEVEL" not in json_repr
-
-        # 4. Parameter-level examples map converted to array of values
-        assert props["status"]["examples"] == ["SETTLED", "PENDING"]
-
-        # 5. Parameter-level examples takes precedence over parameter-level example
-        assert "examples" in props["format"]
-        assert "example" not in props["format"]
-        assert props["format"]["examples"] == ["json", "xml"]
-
-        # 6. Parameter-level example with $ref resolved into array of values
-        assert props["refParam"]["examples"] == ["REF_VALUE"]
-
-    def test_broken_or_external_example_ref_does_not_drop_parameter(self):
-        """Test that unresolvable example $ref does not drop parameter, while good $ref resolves."""
-        spec = {
-            "openapi": "3.1.0",
-            "info": {"title": "Broken Example Ref Test", "version": "1.0.0"},
-            "components": {
-                "examples": {
-                    "GoodExample": {
-                        "summary": "Good Example",
-                        "value": "GOOD_REF_VALUE",
-                    }
-                }
-            },
+            "info": {"title": "Parameter Example Test", "version": "1.0.0"},
             "paths": {
                 "/test": {
                     "get": {
                         "operationId": "test_op",
                         "parameters": [
                             {
-                                "name": "paramWithBrokenExampleRef",
+                                "name": "startYearMonth",
                                 "in": "query",
                                 "required": True,
-                                "description": "Required parameter with broken example ref.",
-                                "examples": {
-                                    "validEx": {"summary": "Valid", "value": "VALID"},
-                                    "goodRefEx": {
-                                        "$ref": "#/components/examples/GoodExample"
-                                    },
-                                    "brokenEx": {
-                                        "$ref": "#/components/examples/NonExistent"
-                                    },
-                                    "externalEx": {
-                                        "$ref": "external-file.json#/examples/External"
-                                    },
-                                },
+                                "example": "201601",
                                 "schema": {"type": "string"},
-                            }
+                            },
+                            {
+                                "name": "pageNo",
+                                "in": "query",
+                                "example": 3,
+                                "schema": {"type": "integer", "default": 1},
+                            },
+                            {
+                                "name": "overrideSchemaExamples",
+                                "in": "query",
+                                "example": "PARAM_EXAMPLE",
+                                "schema": {
+                                    "type": "string",
+                                    "example": "SCHEMA_EXAMPLE",
+                                    "examples": [
+                                        "SCHEMA_EXAMPLES_1",
+                                        "SCHEMA_EXAMPLES_2",
+                                    ],
+                                },
+                            },
                         ],
                         "responses": {"200": {"description": "OK"}},
                     }
@@ -657,17 +511,16 @@ class TestParameterExamples:
         assert len(routes) == 1
         route = routes[0]
 
-        # Parameter must NOT be dropped
-        assert len(route.parameters) == 1
-        param = route.parameters[0]
-        assert param.name == "paramWithBrokenExampleRef"
-        assert param.required is True
-
         schema, _ = _combine_schemas_and_map_params(route)
         props = schema["properties"]
-        assert "paramWithBrokenExampleRef" in props
-        # Valid literal example and good $ref example are extracted while broken/external $refs are skipped
-        assert props["paramWithBrokenExampleRef"]["examples"] == [
-            "VALID",
-            "GOOD_REF_VALUE",
-        ]
+
+        # 1. Singular parameter example propagated
+        assert props["startYearMonth"]["example"] == "201601"
+
+        # 2. Parameter example propagated and schema default preserved
+        assert props["pageNo"]["example"] == 3
+        assert props["pageNo"]["default"] == 1
+
+        # 3. Parameter-level example overrides schema-level example and examples
+        assert props["overrideSchemaExamples"]["example"] == "PARAM_EXAMPLE"
+        assert "examples" not in props["overrideSchemaExamples"]
