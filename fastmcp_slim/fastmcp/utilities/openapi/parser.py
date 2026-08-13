@@ -318,6 +318,12 @@ class OpenAPIParser(
                         ):
                             param_schema_dict["default"] = resolved_media_schema.default
 
+                param_example = getattr(parameter, "example", None)
+                if param_example is not None:
+                    param_schema_dict.pop("example", None)
+                    param_schema_dict.pop("examples", None)
+                    param_schema_dict["example"] = param_example
+
                 # Extract explode and style properties if present
                 explode = getattr(parameter, "explode", None)
                 style = getattr(parameter, "style", None)
