@@ -389,6 +389,10 @@ The OAuth proxy requires a compatible `TokenVerifier` to validate tokens from yo
 
 See the [Token Verification guide](/servers/auth/token-verification) for detailed setup instructions for your provider.
 
+<Warning>
+Provider-specific verifiers like `GitHubTokenVerifier` and `GoogleTokenVerifier` confirm that a token is a valid credential for that provider — not that it was issued to *your* application. GitHub tokens carry no audience claim at all, so any valid GitHub credential (including a personal access token) will verify. Inside the OAuth proxy this is safe: the proxy issues its own tokens to clients and only runs the verifier against upstream tokens it obtained through its own OAuth flow. If you use one of these verifiers standalone, you are authenticating "any user of that provider" unless you constrain it — `GoogleTokenVerifier` accepts an `audience` parameter to pin tokens to your OAuth client ID.
+</Warning>
+
 ### Scope Configuration
 
 OAuth scopes control what permissions your application requests from users. They're configured through your `TokenVerifier` (required for the OAuth proxy to validate tokens from your provider). Set `required_scopes` to automatically request the permissions your application needs:

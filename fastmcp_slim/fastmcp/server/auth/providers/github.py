@@ -44,6 +44,15 @@ class GitHubTokenVerifier(TokenVerifier):
     GitHub OAuth tokens are opaque (not JWTs), so we verify them
     by calling GitHub's API to check if they're valid and get user info.
 
+    Warning:
+        GitHub tokens carry no audience claim, so this verifier cannot tell
+        which OAuth app (if any) a token was issued for — any valid GitHub
+        credential, including a personal access token, will verify. Used
+        inside `GitHubProvider` this is safe, because the proxy only ever
+        checks tokens it obtained through its own OAuth flow. As a standalone
+        verifier it authenticates "some GitHub user", not "a user of your
+        app" — only use it that way if that is genuinely your access model.
+
     Caching is disabled by default.  Set ``cache_ttl_seconds`` to a positive
     integer to cache successful verification results and avoid repeated
     GitHub API calls for the same token.
