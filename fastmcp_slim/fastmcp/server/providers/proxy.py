@@ -14,7 +14,7 @@ import warnings
 from collections.abc import Awaitable, Callable, Sequence
 from copy import deepcopy
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Generic, Literal, TypeVar, cast
 
 import anyio
 import httpx2
@@ -77,6 +77,7 @@ logger = get_logger(__name__)
 # Type alias for client factory functions
 ClientFactoryT = Callable[[], Client] | Callable[[], Awaitable[Client]]
 ProxyIdentity = Literal["proxy", "upstream"]
+_CacheT = TypeVar("_CacheT")
 
 
 class _ForwardingClientSession(ClientSession):
@@ -819,12 +820,12 @@ class ProxyPrompt(Prompt):
 # -----------------------------------------------------------------------------
 
 
-class _CacheEntry:
+class _CacheEntry(Generic[_CacheT]):
     """A cached sequence of components with a monotonic timestamp."""
 
     __slots__ = ("items", "timestamp")
 
-    def __init__(self, items: Sequence[Any], timestamp: float):
+    def __init__(self, items: Sequence[_CacheT], timestamp: float):
         self.items = items
         self.timestamp = timestamp
 
