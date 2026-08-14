@@ -610,19 +610,19 @@ def _single_pass_optimize(
                 if (
                     prune_titles
                     and "title" in node
-                    and isinstance(node["title"], str)  # type: ignore
+                    and isinstance(node["title"], str)
                     and (
                         any(k in node for k in _SCHEMA_KEYWORDS)
                         or all(k in _METADATA_KEYS for k in node)
                     )
                 ):
-                    node.pop("title")  # type: ignore
+                    node.pop("title")
 
                 if (
                     prune_additional_properties
                     and node.get("additionalProperties") is False
                 ):
-                    node.pop("additionalProperties")  # type: ignore
+                    node.pop("additionalProperties")
 
             # Recursive traversal
             for key, value in node.items():

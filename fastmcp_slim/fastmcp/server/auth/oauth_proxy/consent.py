@@ -20,7 +20,11 @@ from pydantic import AnyUrl
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, RedirectResponse
 
-from fastmcp.server.auth.oauth_proxy.models import ProxyDCRClient
+from fastmcp.server.auth.oauth_proxy.models import (
+    ConsentCSRFToken,
+    ProxyDCRClient,
+    _hash_token,
+)
 from fastmcp.server.auth.oauth_proxy.ui import create_consent_html
 from fastmcp.server.auth.redirect_validation import (
     build_client_redirect,
@@ -36,7 +40,37 @@ if TYPE_CHECKING:
 # Keeps the Cookie header bounded to avoid hitting reverse proxy header limits.
 _MAX_REMEMBERED_CLIENTS = 25
 
+# Maximum number of consent-state cookies the browser carries at once. Each
+# render of a consent page adds one, and a handful of renders is normal (a
+# reload, a preload, an extension re-fetching the URL); the bound keeps the
+# Cookie header from growing without limit across many pending flows.
+#
+# The matching server-side state is bounded by its own 15-minute TTL rather
+# than by a count, because counting entries would mean reading them back and
+# rewriting them — the read-modify-write that concurrent renders race on.
+_MAX_CSRF_TOKENS = 10
+
+# Base name of the consent-state cookie. One cookie is set per issued CSRF
+# token (`MCP_CONSENT_STATE_<digest>`) rather than one list shared by all of
+# them: two renders in flight at once both build their Set-Cookie from the same
+# inbound Cookie header, so a shared list silently drops whichever entry was
+# written first. Separate names never collide.
+#
+# The unsuffixed name is the pre-upgrade flat list. It is read, never written,
+# so a consent page rendered before an upgrade can still be submitted after it.
+_CONSENT_STATE_COOKIE_BASE = "MCP_CONSENT_STATE"
+
 logger = get_logger(__name__)
+
+
+def _consent_state_base_name(csrf_token: str) -> str:
+    """Base cookie name carrying a single issued CSRF token.
+
+    The token is hashed rather than used directly so the raw token does not end
+    up in a cookie name, which is far more likely to be logged than its value.
+    """
+    digest = hashlib.sha256(csrf_token.encode()).hexdigest()[:32]
+    return f"{_CONSENT_STATE_COOKIE_BASE}_{digest}"
 
 
 class ConsentMixin:
@@ -173,6 +207,115 @@ class ConsentMixin:
             name,
             value_b64,
             max_age=max_age,
+            secure=self._is_https,
+            httponly=True,
+            samesite="lax",
+            path="/",
+        )
+
+    def _read_consent_state_cookies(
+        self: OAuthProxy, request: Request
+    ) -> dict[str, tuple[str, float]]:
+        """Per-token consent-state cookies the browser sent, by cookie name.
+
+        Returns {cookie_name: (txn_id, issued_at)} for every cookie whose
+        signature verifies. Unsigned, tampered, or unparsable cookies are
+        skipped rather than raising, the same way the other cookie readers here
+        treat them.
+        """
+        prefix = self._cookie_name(f"{_CONSENT_STATE_COOKIE_BASE}_")
+        found: dict[str, tuple[str, float]] = {}
+        for name, raw in request.cookies.items():
+            if not name.startswith(prefix):
+                continue
+            payload = self._verify_cookie(raw)
+            if not payload:
+                logger.debug("Cookie signature verification failed for %s", name)
+                continue
+            try:
+                data = json.loads(base64.b64decode(payload.encode()).decode())
+            except Exception:
+                logger.debug("Failed to decode cookie %s; ignoring", name)
+                continue
+            if not isinstance(data, dict):
+                continue
+            txn_id = data.get("txn")
+            issued_at = data.get("iat")
+            if isinstance(txn_id, str) and isinstance(issued_at, int | float):
+                found[name] = (txn_id, float(issued_at))
+        return found
+
+    def _set_consent_state_cookie(
+        self: OAuthProxy,
+        response: HTMLResponse | RedirectResponse,
+        csrf_token: str,
+        txn_id: str,
+        issued_at: float,
+    ) -> None:
+        """Record that this browser received `csrf_token`, under its own name.
+
+        The cookie is what makes the double-submit check meaningful: the token
+        in the form has to match one this browser was actually handed. Writing
+        it under a name derived from the token keeps that property while making
+        the write independent of every other render's.
+        """
+        payload = base64.b64encode(
+            json.dumps(
+                {"txn": txn_id, "iat": issued_at}, separators=(",", ":")
+            ).encode()
+        ).decode()
+        response.set_cookie(
+            self._cookie_name(_consent_state_base_name(csrf_token)),
+            self._sign_cookie(payload),
+            max_age=15 * 60,
+            secure=self._is_https,
+            httponly=True,
+            samesite="lax",
+            path="/",
+        )
+
+    def _clear_consent_state_for_transaction(
+        self: OAuthProxy,
+        request: Request,
+        response: HTMLResponse | RedirectResponse,
+        txn_id: str,
+        *,
+        include_legacy: bool,
+    ) -> None:
+        """Expire the consent state belonging to one completed transaction.
+
+        Only this transaction's cookies are removed. Another consent flow the
+        same browser has open keeps its own state, which a single shared list
+        had no way to express — completing either flow wiped both.
+        """
+        for name, (cookie_txn, _issued_at) in self._read_consent_state_cookies(
+            request
+        ).items():
+            if hmac.compare_digest(cookie_txn, txn_id):
+                self._expire_cookie(response, name)
+
+        if include_legacy:
+            # The pre-upgrade cookie is a flat list with no transaction
+            # attached, so it can only be cleared wholesale. Reached only when
+            # the submitted token came from it, which means every flow sharing
+            # it was rendered before the upgrade too.
+            self._set_list_cookie(
+                response,
+                _CONSENT_STATE_COOKIE_BASE,
+                self._encode_list_cookie([]),
+                max_age=60,
+            )
+
+    def _expire_cookie(
+        self: OAuthProxy,
+        response: HTMLResponse | RedirectResponse,
+        name: str,
+    ) -> None:
+        """Expire one cookie by name, matching the attributes it was set with."""
+        response.set_cookie(
+            name,
+            "",
+            max_age=0,
             secure=self._is_https,
             httponly=True,
             samesite="lax",
@@ -369,20 +512,31 @@ class ConsentMixin:
                     sec_fetch_site,
                 )
 
-        # Need consent: issue CSRF token and show HTML
+        # Need consent: issue CSRF token and show HTML.
+        #
+        # A transaction can be rendered more than once before it is submitted —
+        # a reload, a browser preload, an extension re-fetching the URL. Every
+        # render issues its own token, so that a token stays unique to the
+        # browser that received it and the double-submit cookie check keeps its
+        # meaning, and every token issued for the transaction stays valid until
+        # it expires. Dropping the earlier one kills the form the user is
+        # already looking at: they click Approve and get "Invalid or expired
+        # consent token" on a flow that never expired, with no way to recover.
+        #
+        # The token is stored under its own key rather than appended to a list
+        # on the transaction. Two renders in flight at once would both read the
+        # same transaction, each append their token, and the second write would
+        # drop the first — `AsyncKeyValue` has no compare-and-swap to prevent
+        # it. Independent keys make the writes commute, including across
+        # processes sharing one storage backend.
         csrf_token = secrets.token_urlsafe(32)
-        csrf_expires_at = time.time() + 15 * 60
-
-        # Update transaction with CSRF token
-        txn_model.csrf_token = csrf_token
-        txn_model.csrf_expires_at = csrf_expires_at
-        await self._transaction_store.put(
-            key=txn_id, value=txn_model, ttl=15 * 60
-        )  # Auto-expire after 15 minutes
-
-        # Update dict for use in HTML generation
-        txn["csrf_token"] = csrf_token
-        txn["csrf_expires_at"] = csrf_expires_at
+        issued_at = time.time()
+        csrf_expires_at = issued_at + 15 * 60
+        await self._consent_csrf_store.put(
+            key=_hash_token(csrf_token),
+            value=ConsentCSRFToken(txn_id=txn_id, expires_at=csrf_expires_at),
+            ttl=15 * 60,  # Auto-expire after 15 minutes
+        )
 
         # Load client to get client_name and CIMD info if available
         client = await self.get_client(txn["client_id"])
@@ -423,15 +577,19 @@ class ConsentMixin:
             cimd_domain=cimd_domain,
         )
         response = create_secure_html_response(html)
-        # Merge new CSRF token with any existing ones (supports concurrent flows)
-        existing_tokens = self._decode_list_cookie(request, "MCP_CONSENT_STATE")
-        existing_tokens.append(csrf_token)
-        self._set_list_cookie(
-            response,
-            "MCP_CONSENT_STATE",
-            self._encode_list_cookie(existing_tokens),
-            max_age=15 * 60,
-        )
+        self._set_consent_state_cookie(response, csrf_token, txn_id, issued_at)
+
+        # Keep the browser's consent state bounded. The cookie just set always
+        # survives; the oldest of the rest are expired to make room. Eviction
+        # is by issued-at from the cookie itself, so it does not depend on any
+        # server-side bookkeeping that renders would have to share.
+        others = self._read_consent_state_cookies(request)
+        others.pop(self._cookie_name(_consent_state_base_name(csrf_token)), None)
+        surplus = len(others) + 1 - _MAX_CSRF_TOKENS
+        if surplus > 0:
+            by_age = sorted(others.items(), key=lambda item: item[1][1])
+            for name, _entry in by_age[:surplus]:
+                self._expire_cookie(response, name)
         return response
 
     async def _submit_consent(
@@ -455,10 +613,34 @@ class ConsentMixin:
             )
 
         txn = txn_model.model_dump()
-        expected_csrf = txn.get("csrf_token")
-        expires_at = float(txn.get("csrf_expires_at") or 0)
 
-        if not expected_csrf or csrf_token != expected_csrf or time.time() > expires_at:
+        # Look the token up by its own key. A record proves the token was
+        # issued by a render of THIS transaction; nothing else can have written
+        # it, and a concurrent render cannot have removed it.
+        csrf_record = (
+            await self._consent_csrf_store.get(key=_hash_token(csrf_token))
+            if csrf_token
+            else None
+        )
+        if csrf_record is not None:
+            legacy_csrf = False
+            csrf_valid = (
+                hmac.compare_digest(csrf_record.txn_id, txn_id)
+                and time.time() <= csrf_record.expires_at
+            )
+        else:
+            # No record: either the token is bogus, or the consent page was
+            # rendered by a version that kept the token on the transaction.
+            # Honouring the old location keeps a flow that was already open
+            # during an upgrade submittable instead of failing at Approve.
+            stored = txn_model.csrf_token
+            csrf_valid = bool(csrf_token and stored) and (
+                hmac.compare_digest(stored or "", csrf_token)
+                and time.time() <= (txn_model.csrf_expires_at or 0)
+            )
+            legacy_csrf = csrf_valid
+
+        if not csrf_valid:
             return create_secure_html_response(
                 "<h1>Error</h1><p>Invalid or expired consent token</p>", status_code=400
             )
@@ -467,8 +649,16 @@ class ConsentMixin:
         # Without this, an attacker who knows their own tx_id/csrf_token can
         # CSRF the victim's browser into approving consent, bypassing the
         # consent binding cookie protection.
-        cookie_csrf_tokens = self._decode_list_cookie(request, "MCP_CONSENT_STATE")
-        if csrf_token not in cookie_csrf_tokens:
+        if legacy_csrf:
+            cookie_ok = csrf_token in self._decode_list_cookie(
+                request, _CONSENT_STATE_COOKIE_BASE
+            )
+        else:
+            entry = self._read_consent_state_cookies(request).get(
+                self._cookie_name(_consent_state_base_name(csrf_token))
+            )
+            cookie_ok = entry is not None and hmac.compare_digest(entry[0], txn_id)
+        if not cookie_ok:
             logger.warning(
                 "CSRF double-submit check failed for transaction %s "
                 "(possible cross-site consent forgery)",
@@ -509,9 +699,12 @@ class ConsentMixin:
                     max_age=365 * 24 * 3600,
                 )
 
-            # Clear CSRF cookie by setting empty short-lived value
-            self._set_list_cookie(
-                response, "MCP_CONSENT_STATE", self._encode_list_cookie([]), max_age=60
+            # Retire this transaction's consent state, both halves of it: the
+            # stored token so it cannot be replayed, and the cookies that
+            # carried it. Other pending flows are left alone.
+            await self._consent_csrf_store.delete(key=_hash_token(csrf_token))
+            self._clear_consent_state_for_transaction(
+                request, response, txn_id, include_legacy=legacy_csrf
             )
             self._set_consent_binding_cookie(request, response, txn_id, consent_token)
             return response
@@ -549,8 +742,9 @@ class ConsentMixin:
                     max_age=365 * 24 * 3600,
                 )
 
-            self._set_list_cookie(
-                response, "MCP_CONSENT_STATE", self._encode_list_cookie([]), max_age=60
+            await self._consent_csrf_store.delete(key=_hash_token(csrf_token))
+            self._clear_consent_state_for_transaction(
+                request, response, txn_id, include_legacy=legacy_csrf
             )
             return response
 

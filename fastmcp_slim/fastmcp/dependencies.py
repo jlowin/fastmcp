@@ -11,7 +11,7 @@ using the uncalled-for DI engine. The docket-specific dependencies
 
 from typing import Any
 
-from uncalled_for import Dependency, Depends, Shared
+from uncalled_for import CallArgument, CycleError, Dependency, Depends, Shared
 
 from fastmcp.server.dependencies import (
     CurrentAccessToken,
@@ -25,11 +25,13 @@ from fastmcp.server.dependencies import (
 )
 
 __all__ = [
+    "CallArgument",
     "CurrentAccessToken",
     "CurrentContext",
     "CurrentFastMCP",
     "CurrentHeaders",
     "CurrentRequest",
+    "CycleError",
     "Dependency",
     "Depends",
     "Progress",
