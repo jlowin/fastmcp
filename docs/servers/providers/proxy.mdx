@@ -60,11 +60,9 @@ To mount a proxy inside another FastMCP server, see [Mounting External Servers](
 
 ## Connection Semantics
 
-FastMCP proxies are lazy bridges. Creating the proxy object and starting the local server do not contact the upstream server. The upstream connection begins when an MCP client sends an `initialize` request to the proxy.
+FastMCP proxies are lazy bridges. Creating the proxy object and starting the local server do not contact the upstream server. During client negotiation, the proxy makes a best-effort request for optional server metadata using the backend client's existing lifecycle and negotiation mode; an unavailable backend does not prevent the client from connecting to the proxy.
 
-During initialization, the proxy initializes the upstream server before responding locally. If the upstream server is unavailable, the URL does not point to an MCP endpoint, or upstream authentication cannot complete, the proxy initialization fails. This keeps the local proxy's connection status aligned with the upstream server it represents.
-
-After initialization, the proxy forwards MCP requests such as `ping`, `tools/list`, `resources/list`, `prompts/list`, tool calls, resource reads, sampling, elicitation, logging, and progress through the upstream client.
+Subsequent MCP requests such as `ping`, `tools/list`, `resources/list`, `prompts/list`, tool calls, resource reads, sampling, elicitation, logging, and progress connect to the backend as needed. Component provider failures follow `provider_error_strategy`: the default `"warn"` logs and skips a failed provider, while `"raise"` reports the failure to the client.
 
 ## Transport Bridging
 
@@ -240,6 +238,10 @@ proxy = create_proxy(
 
 A modern client here reaches both `weather` and `calendar` on modern sessions, so a guard tool on either one round-trips end to end. An explicit `mode` pins every backend in the configuration, the same way it pins a single one.
 
+### Request Metadata
+
+Request `_meta` follows the same connection boundary. Progress tokens, tracing, task state, and application or vendor metadata pass through the proxy to the backend. The connection-owned keys — protocol version, client identity, and client capabilities — never copy from the frontend connection: a modern backend session stamps its own negotiated values, and a handshake-era backend receives none. This holds even when the two connections negotiate different eras, such as a modern client reaching a handshake-only backend through an explicit `mode`.
+
 ## Configuration-Based Proxies
 
 <VersionBadge version="2.4.0" />
@@ -383,6 +385,28 @@ Only reuse sessions when you know the backend is stateless (e.g. stateless HTTP)
 </Warning>
 
 ## Advanced Usage
+
+### Forwarding Server Metadata
+
+Add `ProxyMetadataMiddleware` when a gateway built with `ProxyProvider` should also expose backend instructions and namespaced `_meta`:
+
+```python
+from fastmcp import FastMCP
+from fastmcp.server.providers.proxy import (
+    ProxyClient,
+    ProxyMetadataMiddleware,
+    ProxyProvider,
+)
+
+backend = ProxyProvider(lambda: ProxyClient("http://backend:8000/mcp", mode="auto"))
+gateway = FastMCP(
+    "Controlled Gateway",
+    providers=[backend],
+    middleware=[ProxyMetadataMiddleware(backend)],
+)
+```
+
+By default the gateway keeps its own `serverInfo`; pass `identity="upstream"` to use the backend identity when available. Frontend instructions and `_meta` values win on collisions. The middleware never copies upstream protocol versions, connection metadata, capabilities, cache policy, `resultType`, or unknown top-level fields. If the backend is unavailable, the client can still connect without its optional metadata.
 
 ### FastMCPProxy Class
 

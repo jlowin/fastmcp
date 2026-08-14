@@ -173,31 +173,30 @@ class ToolMeta:
 def _resolve_param_hints(fn: Callable[..., Any]) -> dict[str, Any]:
     """Resolve a callable's parameter type hints, tolerating partials.
 
-    ``get_type_hints`` rejects ``functools.partial`` objects (and other
-    non-function callables), which the synchronous TypeAdapter path handles
-    natively. For those, resolve hints against the underlying function and keep
-    only the parameters that remain in the partially-bound signature.
+    Depending on the Python version, ``get_type_hints`` either rejects
+    ``functools.partial`` objects or returns no hints for them. The synchronous
+    TypeAdapter path handles partials natively. Resolve their hints against the
+    underlying function and keep only parameters in the partially-bound
+    signature.
     """
+    target = fn
+    while isinstance(target, functools.partial):
+        target = target.func
     try:
-        return get_type_hints(fn, include_extras=True)
+        resolved = get_type_hints(target, include_extras=True)
     except TypeError:
-        target = fn
-        while isinstance(target, functools.partial):
-            target = target.func
-        try:
-            resolved = get_type_hints(target, include_extras=True)
-        except TypeError:
-            return {}
-        return {
-            name: resolved[name]
-            for name in inspect.signature(fn).parameters
-            if name in resolved
-        }
+        return {}
+    if target is fn:
+        return resolved
+    return {
+        name: resolved[name]
+        for name in inspect.signature(fn).parameters
+        if name in resolved
+    }
 
 
 class FunctionTool(Tool):
     fn: SkipJsonSchema[Callable[..., Any]]
-    return_type: Annotated[SkipJsonSchema[Any], Field(exclude=True)] = None
     run_in_thread: Annotated[
         bool,
         Field(

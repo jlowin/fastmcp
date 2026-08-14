@@ -217,7 +217,10 @@ class FunctionPrompt(Prompt):
                             schema_str = json.dumps(param_schema, separators=(",", ":"))
 
                             # Append schema info to description
-                            schema_note = f"Provide as a JSON string matching the following schema: {schema_str}"
+                            schema_note = (
+                                "Provide a value matching the following JSON schema: "
+                                f"{schema_str}. Encode non-string values as JSON."
+                            )
                             if arg_description:
                                 arg_description = f"{arg_description}\n\n{schema_note}"
                             else:
@@ -263,26 +266,38 @@ class FunctionPrompt(Prompt):
             if param_name in sig.parameters:
                 param = sig.parameters[param_name]
 
-                # If parameter has no annotation or annotation is str, pass as-is
-                if (
-                    param.annotation == inspect.Parameter.empty
-                    or param.annotation is str
-                ) or not isinstance(param_value, str):
+                if param.annotation == inspect.Parameter.empty or not isinstance(
+                    param_value, str
+                ):
                     converted_kwargs[param_name] = param_value
                 else:
                     # Try to convert string argument using type adapter
                     try:
                         adapter = get_cached_typeadapter(param.annotation)
-                        # Try JSON parsing first for complex types
+                        # Preserve the MCP wire string when validation keeps it
+                        # as a string. Non-string results still prefer JSON
+                        # decoding so coercible types such as bytes and Path do
+                        # not retain JSON quote characters.
                         try:
+                            python_value = adapter.validate_python(param_value)
+                        except (ValueError, TypeError, pydantic_core.ValidationError):
                             converted_kwargs[param_name] = adapter.validate_json(
                                 param_value
                             )
-                        except (ValueError, TypeError, pydantic_core.ValidationError):
-                            # Fallback to direct validation
-                            converted_kwargs[param_name] = adapter.validate_python(
-                                param_value
-                            )
+                        else:
+                            if isinstance(python_value, str):
+                                converted_kwargs[param_name] = python_value
+                            else:
+                                try:
+                                    converted_kwargs[param_name] = (
+                                        adapter.validate_json(param_value)
+                                    )
+                                except (
+                                    ValueError,
+                                    TypeError,
+                                    pydantic_core.ValidationError,
+                                ):
+                                    converted_kwargs[param_name] = python_value
                     except (ValueError, TypeError, pydantic_core.ValidationError) as e:
                         # If conversion fails, provide informative error
                         raise PromptError(

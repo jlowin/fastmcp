@@ -53,16 +53,16 @@ fallback-version = "0.0.0"
 [tool.hatch.metadata.hooks.uv-dynamic-versioning]
 dependencies = [
     "fastmcp-slim[server]=={{ version }}",
-    "pydocket>=0.20.0",
-    # burner-redis 0.1.7's Windows build crashes the interpreter (native fault,
-    # no Python traceback) running the memory:// backend under pytest-xdist —
-    # reproduced on GitHub Actions windows-latest, confirmed absent on
-    # macOS/Linux with the same versions (full suite green there under the
-    # identical upgraded dependencies). pydocket only floors it at >=0.1.6, so
-    # capping pydocket alone is not enough: a resolver is free to pick the
-    # newest burner-redis satisfying that floor regardless. Pin burner-redis
-    # directly on Windows only (which in turn caps pydocket to <0.20.2 there,
-    # the last release that doesn't itself require burner-redis>=0.1.7) until
-    # upstream ships a fix — other platforms are unaffected and stay unpinned.
-    "burner-redis<0.1.7; sys_platform == 'win32'",
+    # Fernet and the PBKDF2 key derivation behind FASTMCP_TASKS_ENCRYPTION_KEY,
+    # which encrypts task context snapshots at rest.
+    "cryptography>=43.0.0",
+    # pydocket 0.24.1 resolves CallArgument references through uncalled-for's
+    # call-scoped frames and shuts its worker down reliably when run_forever
+    # is cancelled on Python 3.10 and 3.11, which our lifespan does on every
+    # server shutdown. Without that fix a worker cancelled during teardown
+    # hangs; on Windows, pytest-timeout's hard kill of the hung xdist worker
+    # was misread as a burner-redis 0.1.7 interpreter crash, which is why a
+    # burner-redis pin and a platform-split floor used to live here
+    # (prefectlabs/burner-redis#7 has the exoneration).
+    "pydocket>=0.24.1",
 ]

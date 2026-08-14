@@ -3,7 +3,12 @@ from __future__ import annotations
 from collections import defaultdict
 from typing import Any
 
-from jsonref import JsonRefError, replace_refs
+
+def replace_refs(*args: Any, **kwargs: Any) -> Any:
+    """Call jsonref lazily while preserving the module's patchable boundary."""
+    from jsonref import replace_refs as _replace_refs
+
+    return _replace_refs(*args, **kwargs)
 
 
 def _copy_schema(schema: dict[str, Any]) -> dict[str, Any]:
@@ -220,6 +225,10 @@ def dereference_refs(schema: dict[str, Any]) -> dict[str, Any]:
     # Detect cycles up front and fall back to root-only resolution.
     if _defs_have_cycles(schema.get("$defs", {})):
         return resolve_root_ref(schema)
+
+    # Most schema operations do not dereference. Keep jsonref (and its requests
+    # dependency tree) out of server startup until a schema actually needs it.
+    from jsonref import JsonRefError
 
     try:
         # Use jsonref to resolve all $ref references
@@ -601,19 +610,19 @@ def _single_pass_optimize(
                 if (
                     prune_titles
                     and "title" in node
-                    and isinstance(node["title"], str)  # type: ignore
+                    and isinstance(node["title"], str)
                     and (
                         any(k in node for k in _SCHEMA_KEYWORDS)
                         or all(k in _METADATA_KEYS for k in node)
                     )
                 ):
-                    node.pop("title")  # type: ignore
+                    node.pop("title")
 
                 if (
                     prune_additional_properties
                     and node.get("additionalProperties") is False
                 ):
-                    node.pop("additionalProperties")  # type: ignore
+                    node.pop("additionalProperties")
 
             # Recursive traversal
             for key, value in node.items():

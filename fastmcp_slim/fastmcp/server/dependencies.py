@@ -30,7 +30,12 @@ from mcp.server.context import ServerRequestContext
 from mcp.server.session import ServerSession
 from packaging.version import Version
 from starlette.requests import Request
-from uncalled_for import Dependency, get_dependency_parameters
+from uncalled_for import (
+    CycleError,
+    Dependency,
+    frame_scope,
+    get_dependency_parameters,
+)
 from uncalled_for.resolution import _Depends
 
 from fastmcp.exceptions import FastMCPError
@@ -751,11 +756,12 @@ def without_injected_parameters(
 async def _resolve_fastmcp_dependencies(
     fn: Callable[..., Any], arguments: dict[str, Any]
 ) -> AsyncGenerator[dict[str, Any], None]:
-    """Resolve Docket dependencies for a FastMCP function.
+    """Resolve uncalled-for dependencies for a FastMCP function.
 
-    Sets up the minimal context needed for Docket's Depends() to work:
+    Sets up the context that uncalled-for's Depends() needs:
     - A cache for resolved dependencies
     - An AsyncExitStack for managing context manager lifetimes
+    - A resolution frame, so CallArgument() can read the call's arguments
 
     The Docket instance (for CurrentDocket dependency) is managed separately
     by the server's lifespan and made available via ContextVar.
@@ -783,33 +789,35 @@ async def _resolve_fastmcp_dependencies(
         async with AsyncExitStack() as stack:
             stack_token = _Depends.stack.set(stack)
             try:
-                resolved: dict[str, Any] = {}
+                # The frame memoizes each parameter per call, so a
+                # CallArgument() that references a sibling dependency gets
+                # the same value the function receives for it.
+                with frame_scope(fn, arguments) as frame:
+                    resolved: dict[str, Any] = {}
 
-                for parameter, dependency in dependency_params.items():
-                    # If argument was explicitly provided, use that instead
-                    if parameter in arguments:
-                        resolved[parameter] = arguments[parameter]
-                        continue
+                    for parameter in dependency_params:
+                        # Resolve the dependency. The frame returns an
+                        # explicitly provided argument as-is.
+                        try:
+                            resolved[parameter] = await frame.resolve(parameter)
+                        except (FastMCPError, CycleError):
+                            # Let FastMCPError subclasses (ToolError,
+                            # ResourceError, etc.) propagate unchanged so they
+                            # can be handled appropriately. CycleError already
+                            # names the cyclic reference path, so wrapping it
+                            # would only hide that.
+                            raise
+                        except Exception as error:
+                            fn_name = getattr(fn, "__name__", repr(fn))
+                            raise RuntimeError(
+                                f"Failed to resolve dependency '{parameter}' "
+                                f"for {fn_name}"
+                            ) from error
 
-                    # Resolve the dependency
-                    try:
-                        resolved[parameter] = await stack.enter_async_context(
-                            dependency
-                        )
-                    except FastMCPError:
-                        # Let FastMCPError subclasses (ToolError, ResourceError, etc.)
-                        # propagate unchanged so they can be handled appropriately
-                        raise
-                    except Exception as error:
-                        fn_name = getattr(fn, "__name__", repr(fn))
-                        raise RuntimeError(
-                            f"Failed to resolve dependency '{parameter}' for {fn_name}"
-                        ) from error
+                    # Merge resolved dependencies with provided arguments
+                    final_arguments = {**arguments, **resolved}
 
-                # Merge resolved dependencies with provided arguments
-                final_arguments = {**arguments, **resolved}
-
-                yield final_arguments
+                    yield final_arguments
             finally:
                 _Depends.stack.reset(stack_token)
     finally:
@@ -828,6 +836,9 @@ async def resolve_dependencies(
 
     The filtering prevents external callers from overriding injected parameters by
     providing values for dependency parameter names. This is a security feature.
+    The filtered arguments also feed the resolution frame, so a CallArgument()
+    reference to a dependency parameter resolves the dependency and never a
+    caller-supplied value.
 
     Note: Context injection is handled via transform_context_annotations() which
     converts `ctx: Context` to `ctx: Context = Depends(get_context)` at registration

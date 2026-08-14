@@ -213,8 +213,9 @@ class WorkOSProvider(OAuthProxy):
             require_authorization_consent: Whether to require user consent before authorizing clients (default True).
                 When True, users see a consent screen before being redirected to WorkOS.
                 When False, authorization proceeds directly without user confirmation.
-                When "external", the built-in consent screen is skipped but no warning is
-                logged, indicating that consent is handled externally (e.g. by the upstream IdP).
+                When "external", authorization follows the same direct path as False,
+                but the warning is suppressed as an operator acknowledgment that
+                equivalent protections are enforced externally.
                 SECURITY WARNING: Only set to False for local development or testing environments.
             extra_authorize_params: Additional parameters to forward to WorkOS's authorization endpoint.
                 Useful for forcing scopes like `offline_access` so WorkOS issues a refresh token,

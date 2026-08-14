@@ -1,11 +1,13 @@
 """Core tool transform functionality."""
 
+import json
 import re
+from dataclasses import dataclass
 from typing import Annotated, Any
 
 import pytest
 from mcp_types import TextContent
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, with_config
 
 from fastmcp import FastMCP
 from fastmcp.client.client import Client
@@ -720,6 +722,28 @@ async def test_transform_fn_wrapped_result_respects_serialize_by_alias():
     result = await transformed.run({})
 
     assert result.structured_content == {"result": {"id": "42"}}
+
+
+async def test_transform_fn_configured_dataclass_respects_serialize_by_alias():
+    """A transform uses its return annotation for nested dataclass serialization."""
+
+    @with_config(ConfigDict(serialize_by_alias=True))
+    @dataclass
+    class Item:
+        id: Annotated[str, Field(serialization_alias="itemId")]
+
+    def base() -> None:
+        pass
+
+    async def transform() -> list[Item]:
+        return [Item(id="42")]
+
+    transformed = Tool.from_tool(base, transform_fn=transform)
+    result = await transformed.run({})
+
+    assert result.structured_content == {"result": [{"itemId": "42"}]}
+    assert isinstance(result.content[0], TextContent)
+    assert json.loads(result.content[0].text) == [{"itemId": "42"}]
 
 
 class TestProxy:
