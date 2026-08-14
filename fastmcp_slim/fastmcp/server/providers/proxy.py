@@ -14,7 +14,7 @@ import warnings
 from collections.abc import Awaitable, Callable, Sequence
 from copy import deepcopy
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Generic, Literal, TypeVar, cast
 
 import anyio
 import httpx2
@@ -819,12 +819,15 @@ class ProxyPrompt(Prompt):
 # -----------------------------------------------------------------------------
 
 
-class _CacheEntry:
+_ComponentT = TypeVar("_ComponentT")
+
+
+class _CacheEntry(Generic[_ComponentT]):
     """A cached sequence of components with a monotonic timestamp."""
 
     __slots__ = ("items", "timestamp")
 
-    def __init__(self, items: Sequence[Any], timestamp: float):
+    def __init__(self, items: Sequence[_ComponentT], timestamp: float):
         self.items = items
         self.timestamp = timestamp
 
