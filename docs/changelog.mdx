@@ -5,6 +5,43 @@ rss: true
 tag: NEW
 ---
 
+<Update label="v4.0.0b3" description="2026-08-14">
+
+**[v4.0.0b3: Fast Fourward](https://github.com/PrefectHQ/fastmcp/releases/tag/v4.0.0b3)**
+
+FastMCP 4 beta 3 moves the v4 line toward general availability with Prefect Horizon authentication, `CallArgument` and `Depends` bindings for tools and background tasks, and a round of OAuth, proxy, OpenAPI, and Python 3.14 compatibility hardening.
+
+### Enhancements ✨
+* Add Prefect Horizon authentication client and local state by [@parkedwards](https://github.com/parkedwards) in [#4785](https://github.com/PrefectHQ/fastmcp/pull/4785)
+* Clarify auto-closed PR message by [@jlowin](https://github.com/jlowin) in [#4820](https://github.com/PrefectHQ/fastmcp/pull/4820)
+* Support CallArgument and Depends bindings from uncalled-for 0.4.0 by [@chrisguidry](https://github.com/chrisguidry) in [#4802](https://github.com/PrefectHQ/fastmcp/pull/4802)
+* Fix static analysis under newer ty releases by [@zzstoatzz](https://github.com/zzstoatzz) in [#4831](https://github.com/PrefectHQ/fastmcp/pull/4831)
+* Cover CallArgument resolution in background tasks by [@zzstoatzz](https://github.com/zzstoatzz) in [#4833](https://github.com/PrefectHQ/fastmcp/pull/4833)
+* Scalekit issuer updates backward compatibility by [@AkshayParihar33](https://github.com/AkshayParihar33) in [#4798](https://github.com/PrefectHQ/fastmcp/pull/4798)
+
+### Security 🔒
+* Add audience pinning to GoogleTokenVerifier by [@zzstoatzz](https://github.com/zzstoatzz) in [#4827](https://github.com/PrefectHQ/fastmcp/pull/4827)
+* Bump cryptography to 50.0.0 by [@zzstoatzz](https://github.com/zzstoatzz) in [#4836](https://github.com/PrefectHQ/fastmcp/pull/4836)
+
+### Fixes 🐞
+* Fix partial parameter hints on Python 3.14 by [@zzstoatzz](https://github.com/zzstoatzz) in [#4796](https://github.com/PrefectHQ/fastmcp/pull/4796)
+* fix(openapi): extract parameter-level example and examples by [@doneman536](https://github.com/doneman536) in [#4793](https://github.com/PrefectHQ/fastmcp/pull/4793)
+* Keep earlier consent CSRF tokens valid within a transaction by [@trevhud](https://github.com/trevhud) in [#4818](https://github.com/PrefectHQ/fastmcp/pull/4818)
+* Fix StatefulProxyClient reconnection after session failure by [@jlowin](https://github.com/jlowin) in [#4829](https://github.com/PrefectHQ/fastmcp/pull/4829)
+
+### Docs 📚
+* Docs language dropdown by [@znicholasbrown](https://github.com/znicholasbrown) in [#4801](https://github.com/PrefectHQ/fastmcp/pull/4801)
+* Docs: mirror v3.4.7 release notes by [@jlowin](https://github.com/jlowin) in [#4811](https://github.com/PrefectHQ/fastmcp/pull/4811)
+* docs: prepare FastMCP 4 beta 3 by [@jlowin](https://github.com/jlowin) in [#4840](https://github.com/PrefectHQ/fastmcp/pull/4840)
+
+## New Contributors
+* @parkedwards made their first contribution in [#4785](https://github.com/PrefectHQ/fastmcp/pull/4785)
+* @trevhud made their first contribution in [#4818](https://github.com/PrefectHQ/fastmcp/pull/4818)
+
+**Full Changelog**: [v4.0.0b2...v4.0.0b3](https://github.com/PrefectHQ/fastmcp/compare/v4.0.0b2...v4.0.0b3)
+
+</Update>
+
 <Update label="v3.4.7" description="2026-08-10">
 
 **[v3.4.7: Know Your Audience](https://github.com/PrefectHQ/fastmcp/releases/tag/v3.4.7)**
