@@ -10,6 +10,7 @@ This implementation is based on:
 """
 
 from collections.abc import Sequence
+from functools import lru_cache
 from typing import Any, Literal
 
 import httpx2
@@ -148,6 +149,7 @@ class OIDCConfiguration(BaseModel):
         return self
 
     @classmethod
+    @lru_cache(maxsize=128)
     def get_oidc_configuration(
         cls, config_url: AnyHttpUrl, *, strict: bool | None, timeout_seconds: int | None
     ) -> Self:

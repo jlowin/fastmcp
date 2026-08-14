@@ -384,6 +384,36 @@ def validate_get_oidc_configuration(oidc_configuration, strict, timeout_seconds)
 class TestGetOIDCConfiguration:
     """Tests for getting OIDC configuration."""
 
+    @pytest.fixture(autouse=True)
+    def clear_configuration_cache(self):
+        OIDCConfiguration.get_oidc_configuration.cache_clear()
+        yield
+        OIDCConfiguration.get_oidc_configuration.cache_clear()
+
+    def test_get_oidc_configuration_is_cached(self, valid_oidc_configuration_dict):
+        """Repeated discovery for the same configuration only fetches once."""
+        config_url = AnyHttpUrl(
+            "https://cache-test.example.com/.well-known/openid-configuration"
+        )
+        with patch("httpx2.get") as mock_get:
+            mock_response = MagicMock(spec=Response)
+            mock_response.json.return_value = valid_oidc_configuration_dict
+            mock_get.return_value = mock_response
+
+            first = OIDCConfiguration.get_oidc_configuration(
+                config_url=config_url,
+                strict=True,
+                timeout_seconds=10,
+            )
+            second = OIDCConfiguration.get_oidc_configuration(
+                config_url=config_url,
+                strict=True,
+                timeout_seconds=10,
+            )
+
+        assert first == second
+        mock_get.assert_called_once()
+
     def test_get_oidc_configuration(self, valid_oidc_configuration_dict):
         """Test with valid response and explicit timeout."""
         call_args = validate_get_oidc_configuration(
