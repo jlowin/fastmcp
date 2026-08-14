@@ -18,6 +18,7 @@ from fastmcp_tasks.dependencies import CurrentDocket
 from uncalled_for import Depends
 
 from fastmcp import Context, FastMCP
+from fastmcp.dependencies import CallArgument
 from fastmcp.server.auth import AccessToken
 from fastmcp.server.dependencies import CurrentFastMCP
 from fastmcp.server.sessions import UserSession
@@ -274,3 +275,53 @@ async def test_ctx_session_state_works_in_background_task():
     structured = final.result["structuredContent"]
     assert structured["read_back"] == "hello"
     assert isinstance(structured["session_id"], str) and structured["session_id"]
+
+
+async def test_background_tool_resolves_bare_call_argument():
+    """A bare CallArgument resolves from the tool's arguments in a worker.
+
+    Regression guard for the pydocket-floor split caught in #4802 review:
+    pydocket 0.20.1's task resolver did not establish an uncalled-for frame, so
+    CallArgument worked on foreground calls but raised in background tasks.
+    The unified pydocket>=0.24.1 floor resolves it in both paths; this pins the
+    background one.
+    """
+    mcp = FastMCP("call-argument-task")
+    mcp.add_extension(TasksExtension())
+
+    def get_greeting(name: str = CallArgument()) -> str:
+        return f"Hello, {name}!"
+
+    @mcp.tool(task=True)
+    async def greet(name: str, greeting: str = Depends(get_greeting)) -> str:
+        return greeting
+
+    async with running_task_server(mcp):
+        final = await run_task(mcp, "greet", {"name": "Alice"})
+
+    assert final.status == "completed"
+    assert final.result is not None
+    assert final.result["structuredContent"] == {"result": "Hello, Alice!"}
+
+
+async def test_background_tool_resolves_call_argument_binding():
+    """A Depends(..., param=CallArgument("name")) binding resolves in a worker."""
+    mcp = FastMCP("call-argument-binding-task")
+    mcp.add_extension(TasksExtension())
+
+    def get_account(user_id: str) -> dict[str, str]:
+        return {"id": user_id, "plan": "pro"}
+
+    @mcp.tool(task=True)
+    async def show_account(
+        owner: str,
+        account: dict[str, str] = Depends(get_account, user_id=CallArgument("owner")),
+    ) -> str:
+        return f"{account['id']}:{account['plan']}"
+
+    async with running_task_server(mcp):
+        final = await run_task(mcp, "show_account", {"owner": "alice"})
+
+    assert final.status == "completed"
+    assert final.result is not None
+    assert final.result["structuredContent"] == {"result": "alice:pro"}

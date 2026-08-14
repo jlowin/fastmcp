@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import weakref
 from dataclasses import dataclass
 from unittest.mock import MagicMock
@@ -89,6 +90,32 @@ async def stateless_server(stateful_proxy_server: FastMCP):
 
 
 class TestStatefulProxyClient:
+    async def test_reconnects_after_persistent_session_ends(self):
+        """A completed request must not prevent a dead session from reconnecting."""
+        backend = FastMCP("backend")
+
+        @backend.tool
+        def echo(value: str) -> str:
+            return value
+
+        client = StatefulProxyClient(backend)
+        try:
+            async with client:
+                result = await client.call_tool("echo", {"value": "first"})
+                assert result.data == "first"
+
+            session_task = client._session_state.session_task
+            assert session_task is not None
+            session_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await session_task
+
+            async with client:
+                result = await client.call_tool("echo", {"value": "second"})
+                assert result.data == "second"
+        finally:
+            await client.close()
+
     async def test_concurrent_log_requests_no_mixing(
         self, stateful_proxy_server: FastMCP
     ):

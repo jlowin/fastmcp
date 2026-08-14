@@ -430,4 +430,57 @@ async def call_api(endpoint: str, client: dict = Depends(get_api_client)) -> str
     return f"Calling {client['base_url']}/{client['version']}/{endpoint}"
 ```
 
+### Call Arguments
+
+<VersionBadge version="4.0.0" />
+
+A dependency factory can read the arguments of the function it serves. Declare the reference with `CallArgument()`:
+
+```python
+from fastmcp import FastMCP
+from fastmcp.dependencies import CallArgument, Depends
+
+mcp = FastMCP("Call Arguments Demo")
+
+
+def get_account(user_id: str = CallArgument()) -> dict:
+    return {"id": user_id, "plan": "pro"}
+
+
+@mcp.tool
+async def show_account(user_id: str, account: dict = Depends(get_account)) -> str:
+    return f"{account['id']} is on {account['plan']}"
+```
+
+When a client calls `show_account`, the factory receives the same `user_id` value the tool receives. The bare form takes the name of the parameter it is declared on. `CallArgument("user_id")` names the parameter explicitly. The reference also sees a value that another dependency on the tool's signature produced. `CallArgument("tenant", optional=True)` yields `None` when the function has no such parameter. References that form a cycle raise `CycleError`, importable from `fastmcp.dependencies`.
+
+Clients still cannot override dependencies this way: an argument whose name collides with a dependency parameter is stripped before resolution, so a `CallArgument` reference to that parameter resolves the dependency itself.
+
+### Bindings
+
+<VersionBadge version="4.0.0" />
+
+`Depends()` accepts keyword bindings, so you can wire up a factory without changing it:
+
+```python
+from fastmcp import FastMCP
+from fastmcp.dependencies import CallArgument, Depends
+
+mcp = FastMCP("Bindings Demo")
+
+
+def get_account(user_id: str) -> dict:
+    return {"id": user_id, "plan": "pro"}
+
+
+@mcp.tool
+async def show_account(
+    owner: str,
+    account: dict = Depends(get_account, user_id=CallArgument("owner")),
+) -> str:
+    return f"{account['id']} is on {account['plan']}"
+```
+
+A binding that is a `Dependency`, such as `CallArgument(...)` or another `Depends(...)`, resolves first and the factory receives its value. Any other value passes through as it is. A binding replaces the default of the factory's own parameter, which is then never resolved. Two dependencies on the same factory share one cached result only when their bindings match. See the [Docket dependency documentation](https://docket.lol/en/latest/dependency-injection/) for more detail on call arguments and bindings.
+
 For advanced dependency patterns—like `TaskArgument()` for accessing task parameters, or custom `Dependency` subclasses—see the [Docket dependency documentation](https://chrisguidry.github.io/docket/dependencies/).

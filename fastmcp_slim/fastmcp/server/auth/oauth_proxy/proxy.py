@@ -100,6 +100,7 @@ from fastmcp.server.auth.oauth_proxy.models import (
     DEFAULT_REFRESH_TOKEN_EXPIRY_SECONDS,
     HTTP_TIMEOUT_SECONDS,
     ClientCode,
+    ConsentCSRFToken,
     JTIMapping,
     OAuthTransaction,
     ProxyDCRClient,
@@ -646,6 +647,19 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
             key_value=self._client_storage,
             pydantic_model=OAuthTransaction,
             default_collection="mcp-oauth-transactions",
+            raise_on_validation_error=True,
+        )
+
+        # Consent CSRF tokens, keyed by a hash of the token rather than by
+        # transaction. Each render of a consent page writes its own key, so
+        # renders that overlap cannot overwrite one another the way appending
+        # to a list on the transaction would.
+        self._consent_csrf_store: PydanticAdapter[ConsentCSRFToken] = PydanticAdapter[
+            ConsentCSRFToken
+        ](
+            key_value=self._client_storage,
+            pydantic_model=ConsentCSRFToken,
+            default_collection="mcp-consent-csrf-tokens",
             raise_on_validation_error=True,
         )
 

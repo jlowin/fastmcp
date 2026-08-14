@@ -37,6 +37,6 @@ jobs:
           resolution: locked
 
       - name: Run prek
-        uses: j178/prek-action@v2
+        uses: j178/prek-action@v3.0.0
         env:
           SKIP: no-commit-to-branch
