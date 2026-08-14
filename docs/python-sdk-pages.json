@@ -32,6 +32,16 @@
     ]
   },
   {
+    "group": "fastmcp.resources",
+    "pages": [
+      "python-sdk/fastmcp-resources-base",
+      "python-sdk/fastmcp-resources-function_resource",
+      "python-sdk/fastmcp-resources-security",
+      "python-sdk/fastmcp-resources-template",
+      "python-sdk/fastmcp-resources-types"
+    ]
+  },
+  {
     "group": "fastmcp.server",
     "pages": [
       "python-sdk/fastmcp-server-caching",

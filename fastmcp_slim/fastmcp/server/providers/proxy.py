@@ -1804,10 +1804,12 @@ class StatefulProxyClient(ProxyClient[ClientTransportT]):
         return cast(StatefulProxyClient[ClientTransportT], super().new())
 
     async def __aexit__(self, exc_type, exc_value, traceback) -> None:  # type: ignore[override]  # ty:ignore[invalid-method-override]
-        """The stateful proxy client will be forced disconnected when the session is exited.
-
-        So we do nothing here.
-        """
+        """Release this context without disconnecting the persistent session."""
+        with anyio.CancelScope(shield=True):
+            async with self._session_state.lock:
+                self._session_state.nesting_counter = max(
+                    0, self._session_state.nesting_counter - 1
+                )
 
     async def clear(self):
         """Clear all cached clients and force disconnect them."""
