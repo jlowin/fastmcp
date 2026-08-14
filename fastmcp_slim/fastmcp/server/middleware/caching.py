@@ -1,6 +1,7 @@
 """A middleware for response caching."""
 
 import hashlib
+import json
 from collections.abc import Sequence
 from logging import Logger
 from typing import Any, TypedDict
@@ -354,7 +355,11 @@ class ResponseCachingMiddleware(Middleware):
 
         cache_key: str = _get_auth_partition_key()
 
-        if cached_value := await self._list_tools_cache.get(key=cache_key):
+        # an empty list is a cached result, not a miss: `get` returns None when the key is
+        # absent, so testing truthiness would re-list on every request for any caller whose
+        # filtered view is empty
+        cached_value = await self._list_tools_cache.get(key=cache_key)
+        if cached_value is not None:
             return cached_value
 
         tools: Sequence[Tool] = await call_next(context)
@@ -383,7 +388,9 @@ class ResponseCachingMiddleware(Middleware):
 
         cache_key: str = _get_auth_partition_key()
 
-        if cached_value := await self._list_resources_cache.get(key=cache_key):
+        # an empty list is a cached result, not a miss (see on_list_tools)
+        cached_value = await self._list_resources_cache.get(key=cache_key)
+        if cached_value is not None:
             return cached_value
 
         resources: Sequence[Resource] = await call_next(context)
@@ -414,7 +421,9 @@ class ResponseCachingMiddleware(Middleware):
 
         cache_key: str = _get_auth_partition_key()
 
-        if cached_value := await self._list_prompts_cache.get(key=cache_key):
+        # an empty list is a cached result, not a miss (see on_list_tools)
+        cached_value = await self._list_prompts_cache.get(key=cache_key)
+        if cached_value is not None:
             return cached_value
 
         prompts: Sequence[Prompt] = await call_next(context)
@@ -472,6 +481,14 @@ class ResponseCachingMiddleware(Middleware):
         # rather than crash wrapping it (the crash would fire after the task is
         # already enqueued, so a client retry could duplicate side effects).
         if not isinstance(tool_result, ToolResult):
+            return tool_result
+
+        # Never cache an error result. A tool that reports failure by returning
+        # is_error=True is describing this attempt, not a stable answer — the
+        # upstream 503 or bad gateway it is reporting is exactly the kind of
+        # thing that clears on retry. Caching it would pin the failure in place
+        # for the full TTL and stop the tool from ever being retried.
+        if tool_result.is_error:
             return tool_result
 
         cacheable_tool_result: CacheableToolResult = CacheableToolResult.wrap(
@@ -593,13 +610,19 @@ class ResponseCachingMiddleware(Middleware):
 
 
 def _get_arguments_str(arguments: dict[str, Any] | None) -> str:
-    """Get a string representation of the arguments."""
+    """Get a canonical string representation of the arguments."""
 
     if arguments is None:
         return "null"
 
     try:
-        return pydantic_core.to_json(value=arguments, fallback=str).decode()
+        return json.dumps(
+            pydantic_core.to_jsonable_python(arguments, fallback=str),
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+            default=str,
+        )
 
     except TypeError:
         return repr(arguments)

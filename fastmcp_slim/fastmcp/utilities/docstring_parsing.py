@@ -14,8 +14,6 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from griffe import Docstring, DocstringSectionKind
-
 _PARSERS = ("google", "numpy", "sphinx")
 
 logger = logging.getLogger("griffe")
@@ -42,6 +40,10 @@ def parse_docstring(fn: Callable[..., Any]) -> ParsedDocstring:
     doc = inspect.getdoc(fn)
     if not doc:
         return ParsedDocstring()
+
+    # Griffe is only needed for functions that actually have docstrings. This
+    # keeps its parser and model graph out of ordinary server startup.
+    from griffe import Docstring, DocstringSectionKind
 
     # Try each parser and use the first one that finds parameters.
     for parser in _PARSERS:

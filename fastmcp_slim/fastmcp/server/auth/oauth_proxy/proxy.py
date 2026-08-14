@@ -100,6 +100,7 @@ from fastmcp.server.auth.oauth_proxy.models import (
     DEFAULT_REFRESH_TOKEN_EXPIRY_SECONDS,
     HTTP_TIMEOUT_SECONDS,
     ClientCode,
+    ConsentCSRFToken,
     JTIMapping,
     OAuthTransaction,
     ProxyDCRClient,
@@ -397,8 +398,10 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
                   redirect_uri) in the same browser. Cross-site navigations are
                   still prompted to block AS-in-the-middle attacks. Lower UX
                   friction, but weaker protection than True.
-                - "external": skip the built-in consent screen; consent is handled
-                  externally (e.g. by the upstream IdP or a custom login page).
+                - "external": follow the same authorization path as False, but
+                  suppress the warning as an operator acknowledgment that equivalent
+                  consent and transaction-binding protections are enforced externally.
+                  FastMCP does not provide or verify those external protections.
                 - False: skip consent entirely. SECURITY WARNING: only set to
                   False for local development or testing environments.
             consent_csp_policy: Content Security Policy for the consent page.
@@ -644,6 +647,19 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
             key_value=self._client_storage,
             pydantic_model=OAuthTransaction,
             default_collection="mcp-oauth-transactions",
+            raise_on_validation_error=True,
+        )
+
+        # Consent CSRF tokens, keyed by a hash of the token rather than by
+        # transaction. Each render of a consent page writes its own key, so
+        # renders that overlap cannot overwrite one another the way appending
+        # to a list on the transaction would.
+        self._consent_csrf_store: PydanticAdapter[ConsentCSRFToken] = PydanticAdapter[
+            ConsentCSRFToken
+        ](
+            key_value=self._client_storage,
+            pydantic_model=ConsentCSRFToken,
+            default_collection="mcp-consent-csrf-tokens",
             raise_on_validation_error=True,
         )
 

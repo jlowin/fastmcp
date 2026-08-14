@@ -44,6 +44,15 @@ class GitHubTokenVerifier(TokenVerifier):
     GitHub OAuth tokens are opaque (not JWTs), so we verify them
     by calling GitHub's API to check if they're valid and get user info.
 
+    Warning:
+        GitHub tokens carry no audience claim, so this verifier cannot tell
+        which OAuth app (if any) a token was issued for — any valid GitHub
+        credential, including a personal access token, will verify. Used
+        inside `GitHubProvider` this is safe, because the proxy only ever
+        checks tokens it obtained through its own OAuth flow. As a standalone
+        verifier it authenticates "some GitHub user", not "a user of your
+        app" — only use it that way if that is genuinely your access model.
+
     Caching is disabled by default.  Set ``cache_ttl_seconds`` to a positive
     integer to cache successful verification results and avoid repeated
     GitHub API calls for the same token.
@@ -257,8 +266,9 @@ class GitHubProvider(OAuthProxy):
             require_authorization_consent: Whether to require user consent before authorizing clients (default True).
                 When True, users see a consent screen before being redirected to GitHub.
                 When False, authorization proceeds directly without user confirmation.
-                When "external", the built-in consent screen is skipped but no warning is
-                logged, indicating that consent is handled externally (e.g. by the upstream IdP).
+                When "external", authorization follows the same direct path as False,
+                but the warning is suppressed as an operator acknowledgment that
+                equivalent protections are enforced externally.
                 SECURITY WARNING: Only set to False for local development or testing environments.
             http_client: Optional httpx2.AsyncClient for connection pooling in token verification.
                 When provided, the client is reused across verify_token calls and the caller

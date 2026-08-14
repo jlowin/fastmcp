@@ -70,6 +70,7 @@ class GoogleTokenVerifier(TokenVerifier):
         required_scopes: list[str] | None = None,
         timeout_seconds: int = 10,
         http_client: httpx2.AsyncClient | None = None,
+        audience: str | list[str] | None = None,
     ):
         """Initialize the Google token verifier.
 
@@ -79,6 +80,12 @@ class GoogleTokenVerifier(TokenVerifier):
             http_client: Optional httpx2.AsyncClient for connection pooling. When provided,
                 the client is reused across calls and the caller is responsible for its
                 lifecycle. When None (default), a fresh client is created per call.
+            audience: Expected `aud` value (your Google OAuth client ID) or list of
+                allowed values. When set, tokens minted for any other OAuth client are
+                rejected. When None (default), any valid Google token is accepted
+                regardless of which OAuth client it was issued to — only appropriate
+                when the token's provenance is guaranteed elsewhere (as in
+                `GoogleProvider`, which obtains tokens through its own OAuth flow).
         """
         normalized = (
             [_normalize_google_scope(s) for s in required_scopes]
@@ -88,6 +95,7 @@ class GoogleTokenVerifier(TokenVerifier):
         super().__init__(required_scopes=normalized)
         self.timeout_seconds = timeout_seconds
         self._http_client = http_client
+        self.audience = audience
 
     async def verify_token(self, token: str) -> AccessToken | None:
         """Verify a Google OAuth token using the tokeninfo endpoint.
@@ -125,6 +133,18 @@ class GoogleTokenVerifier(TokenVerifier):
                 if not aud:
                     logger.debug("Google tokeninfo missing 'aud' claim")
                     return None
+
+                if self.audience is not None:
+                    allowed = (
+                        self.audience
+                        if isinstance(self.audience, list)
+                        else [self.audience]
+                    )
+                    if aud not in allowed:
+                        logger.debug(
+                            "Google token 'aud' does not match expected audience"
+                        )
+                        return None
 
                 # sub is required (unique Google user ID)
                 sub = token_data.get("sub")
@@ -290,8 +310,9 @@ class GoogleProvider(OAuthProxy):
             require_authorization_consent: Whether to require user consent before authorizing clients (default True).
                 When True, users see a consent screen before being redirected to Google.
                 When False, authorization proceeds directly without user confirmation.
-                When "external", the built-in consent screen is skipped but no warning is
-                logged, indicating that consent is handled externally (e.g. by Google's own consent).
+                When "external", authorization follows the same direct path as False,
+                but the warning is suppressed as an operator acknowledgment that
+                equivalent protections are enforced externally.
                 SECURITY WARNING: Only set to False for local development or testing environments.
             extra_authorize_params: Additional parameters to forward to Google's authorization endpoint.
                 By default, GoogleProvider sets {"access_type": "offline", "prompt": "consent"} to ensure
@@ -337,6 +358,7 @@ class GoogleProvider(OAuthProxy):
             required_scopes=required_scopes_final,
             timeout_seconds=timeout_seconds,
             http_client=http_client,
+            audience=client_id,
         )
 
         # Set Google-specific defaults for extra authorize params

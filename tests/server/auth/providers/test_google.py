@@ -40,6 +40,20 @@ class TestGoogleProvider:
         assert provider._upstream_client_secret.get_secret_value() == "GOCSPX-test123"
         assert str(provider.base_url) == "https://myserver.com/"
 
+    def test_verifier_audience_pinned_to_client_id(self, memory_storage: MemoryStore):
+        """The provider's token verifier only accepts tokens minted for its own client."""
+        provider = GoogleProvider(
+            client_id="123456789.apps.googleusercontent.com",
+            client_secret="GOCSPX-test123",
+            base_url="https://myserver.com",
+            jwt_signing_key="test-secret",
+            client_storage=memory_storage,
+        )
+
+        verifier = provider._token_validator
+        assert isinstance(verifier, GoogleTokenVerifier)
+        assert verifier.audience == "123456789.apps.googleusercontent.com"
+
     def test_init_defaults(self, memory_storage: MemoryStore):
         """Test that default values are applied correctly."""
         provider = GoogleProvider(
@@ -340,6 +354,65 @@ class TestGoogleTokenVerifier:
         result = await verifier.verify_token("token-without-aud")
 
         assert result is None
+
+    async def test_audience_match_accepted(self, httpx_mock: HTTPXMock):
+        """When audience is configured, a token with a matching 'aud' is accepted."""
+        httpx_mock.add_response(
+            url=_TOKENINFO_RE,
+            json={
+                "aud": "123.apps.googleusercontent.com",
+                "sub": "12345",
+                "scope": "openid",
+                "expires_in": "3600",
+            },
+        )
+        httpx_mock.add_response(url=_USERINFO_RE, json={"sub": "12345"})
+
+        verifier = GoogleTokenVerifier(audience="123.apps.googleusercontent.com")
+        result = await verifier.verify_token("valid-token")
+
+        assert result is not None
+        assert result.claims["aud"] == "123.apps.googleusercontent.com"
+
+    async def test_audience_mismatch_rejected(self, httpx_mock: HTTPXMock):
+        """A valid Google token minted for a different OAuth client is rejected."""
+        httpx_mock.add_response(
+            url=_TOKENINFO_RE,
+            json={
+                "aud": "attacker.apps.googleusercontent.com",
+                "sub": "12345",
+                "scope": "openid",
+                "expires_in": "3600",
+            },
+        )
+
+        verifier = GoogleTokenVerifier(audience="123.apps.googleusercontent.com")
+        result = await verifier.verify_token("foreign-client-token")
+
+        assert result is None
+
+    async def test_audience_list_match_accepted(self, httpx_mock: HTTPXMock):
+        """A list audience accepts any listed client ID and rejects others."""
+        httpx_mock.add_response(
+            url=_TOKENINFO_RE,
+            json={
+                "aud": "456.apps.googleusercontent.com",
+                "sub": "12345",
+                "scope": "openid",
+                "expires_in": "3600",
+            },
+        )
+        httpx_mock.add_response(url=_USERINFO_RE, json={"sub": "12345"})
+
+        verifier = GoogleTokenVerifier(
+            audience=[
+                "123.apps.googleusercontent.com",
+                "456.apps.googleusercontent.com",
+            ]
+        )
+        result = await verifier.verify_token("valid-token")
+
+        assert result is not None
 
     async def test_missing_sub_returns_none(self, httpx_mock: HTTPXMock):
         """A 200 response without 'sub' is rejected."""

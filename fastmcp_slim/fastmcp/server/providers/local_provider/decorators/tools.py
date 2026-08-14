@@ -28,16 +28,9 @@ from mcp_types import ToolAnnotations
 from fastmcp.tools.base import Tool
 from fastmcp.tools.function_tool import FunctionTool
 from fastmcp.utilities.authorization import AuthCheck
+from fastmcp.utilities.prefab import is_prefab_type, prefab_available
 from fastmcp.utilities.tasks import TaskConfig
 from fastmcp.utilities.types import AnyFunction, NotSet, NotSetT
-
-try:
-    from prefab_ui.app import PrefabApp as _PrefabApp
-    from prefab_ui.components.base import Component as _PrefabComponent
-
-    _HAS_PREFAB = True
-except ImportError:
-    _HAS_PREFAB = False
 
 if TYPE_CHECKING:
     from fastmcp.server.providers.local_provider import LocalProvider
@@ -51,7 +44,7 @@ PREFAB_RENDERER_URI = "ui://prefab/renderer.html"
 
 def _is_prefab_type(tp: Any) -> bool:
     """Check if *tp* is or contains a prefab type, recursing through unions and Annotated."""
-    if isinstance(tp, type) and issubclass(tp, (_PrefabApp, _PrefabComponent)):
+    if is_prefab_type(tp):
         return True
     origin = get_origin(tp)
     if origin is Union or origin is types.UnionType or origin is Annotated:
@@ -61,7 +54,7 @@ def _is_prefab_type(tp: Any) -> bool:
 
 def _has_prefab_return_type(tool: Tool) -> bool:
     """Check if a FunctionTool's return type annotation is a prefab type."""
-    if not _HAS_PREFAB or not isinstance(tool, FunctionTool):
+    if not isinstance(tool, FunctionTool):
         return False
     rt = tool.return_type
     if rt is None or rt is inspect.Parameter.empty:
@@ -94,13 +87,10 @@ def _maybe_apply_prefab_ui(provider: LocalProvider, tool: Tool) -> None:
     it. ``app=True``, return-type inference, and ``PrefabAppConfig`` all
     funnel through the same placeholder marker.
     """
-    if not _HAS_PREFAB:
-        return
-
     meta = tool.meta or {}
     ui = meta.get("ui")
 
-    if ui is True:
+    if ui is True and prefab_available():
         # Explicit app=True: stamp the placeholder so the synthesizer finds it.
         _stamp_prefab_marker(tool)
     elif ui is None and _has_prefab_return_type(tool):

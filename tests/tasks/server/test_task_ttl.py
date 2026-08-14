@@ -96,3 +96,30 @@ async def test_poll_refreshes_routing_key_ttl():
         async with docket.redis() as redis:
             # Refreshed well past the shrunk 5s, back toward the full window.
             assert await redis.ttl(key) > 60
+
+
+async def test_poll_refreshes_snapshot_ttl():
+    """A poll extends the context snapshot's TTL alongside the routing keys.
+
+    A re-entered leg restores the submitting caller from the snapshot, so an
+    actively polled task must never outlive it: without encryption an expired
+    snapshot degrades the leg to an anonymous run, and with encryption it fails
+    the task. After shrinking the snapshot's TTL, a `tasks/get` restores it.
+    """
+    from fastmcp_tasks.context import _snapshot_redis_key
+
+    mcp = _ttl_server()
+    async with running_task_server(mcp):
+        created = await submit_task(mcp, "slow_task", {})
+        docket = mcp._docket
+        assert docket is not None
+        key = _snapshot_redis_key(docket, None, created.task_id)
+
+        async with docket.redis() as redis:
+            await redis.expire(key, 5)
+            assert await redis.ttl(key) <= 5
+
+        await get_task(mcp, created.task_id)
+
+        async with docket.redis() as redis:
+            assert await redis.ttl(key) > 60

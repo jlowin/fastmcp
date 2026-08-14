@@ -1,10 +1,13 @@
 """Tests for the EventStore implementation."""
 
+import asyncio
+
 import pytest
 from mcp.server.streamable_http import EventMessage
 from mcp_types import JSONRPCRequest
 
 from fastmcp.server.event_store import (
+    _LOCK_STRIPES,
     EventEntry,
     EventStore,
     SessionScopedEventStore,
@@ -258,6 +261,87 @@ class TestEventStore:
         await event_store.store_event("stream-1", msg)
         await event_store.replay_events_after(event_id, callback)
         assert len(replayed) == 1
+
+
+class TestConcurrentStoreEvent:
+    async def test_concurrent_stores_on_one_stream(self, monkeypatch):
+        """Concurrent stores must not lose events or evict the same ID twice.
+
+        A live session stores events from more than one task (the SSE writer and
+        the message router), so the stream's event list is read and written
+        concurrently. Interleaved, each task appends only its own ID to the list
+        it read, and both evict the same expired IDs -- the second delete is the
+        one that raised `FileNotFoundError` on a file-backed store.
+        """
+        event_store = EventStore(max_events_per_stream=2)
+
+        stream_get = event_store._stream_store.get
+        event_delete = event_store._event_store.delete
+        deleted: list[str] = []
+
+        async def yielding_get(**kwargs):
+            # Suspend between the read and the write so the tasks interleave.
+            stream_data = await stream_get(**kwargs)
+            await asyncio.sleep(0)
+            return stream_data
+
+        async def recording_delete(**kwargs):
+            deleted.append(kwargs["key"])
+            return await event_delete(**kwargs)
+
+        monkeypatch.setattr(event_store._stream_store, "get", yielding_get)
+        monkeypatch.setattr(event_store._event_store, "delete", recording_delete)
+
+        message = JSONRPCRequest(jsonrpc="2.0", method="test", id=1)
+        event_ids = await asyncio.gather(
+            *(event_store.store_event("stream-1", message) for _ in range(5))
+        )
+
+        stream_data = await stream_get(key="stream-1")
+        assert stream_data is not None
+        # The two most recent events are retained; every other ID was evicted
+        # exactly once, and no ID vanished without being evicted.
+        assert len(stream_data.event_ids) == 2
+        assert sorted(stream_data.event_ids + deleted) == sorted(event_ids)
+        assert len(deleted) == len(set(deleted))
+
+    async def test_distinct_streams_are_not_serialized(self, monkeypatch):
+        """Unrelated streams must not wait on each other's backend calls.
+
+        One EventStore is shared by every session, so a store-wide lock would
+        put a Redis round-trip for one session in front of every other one.
+        """
+        event_store = EventStore()
+
+        # hash() is salted per process, so pick the second stream at runtime.
+        first = "stream-a"
+        second = next(
+            candidate
+            for candidate in (f"stream-{i}" for i in range(1000))
+            if hash(candidate) % _LOCK_STRIPES != hash(first) % _LOCK_STRIPES
+        )
+
+        stream_get = event_store._stream_store.get
+        both_inside = asyncio.Event()
+        inside = 0
+
+        async def gate(**kwargs):
+            nonlocal inside
+            inside += 1
+            if inside == 2:
+                both_inside.set()
+            # Both critical sections have to be open at once; a store-wide lock
+            # would keep the second task out until the first finished.
+            await asyncio.wait_for(both_inside.wait(), timeout=2)
+            return await stream_get(**kwargs)
+
+        monkeypatch.setattr(event_store._stream_store, "get", gate)
+
+        message = JSONRPCRequest(jsonrpc="2.0", method="test", id=1)
+        await asyncio.gather(
+            event_store.store_event(first, message),
+            event_store.store_event(second, message),
+        )
 
 
 class TestEventStoreIntegration:

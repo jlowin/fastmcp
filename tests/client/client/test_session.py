@@ -1,16 +1,31 @@
 """Client session and task error propagation tests."""
 
 import asyncio
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import Any
 
+import httpx2
 import pytest
-from mcp import ClientSession
-from mcp_types import TextContent
+from mcp import ClientSession, MCPError
+from mcp_types import INTERNAL_ERROR, TextContent
 
 from fastmcp import FastMCP
 from fastmcp.client import Client
-from fastmcp.client.transports import PythonStdioTransport
+from fastmcp.client.transports import ClientTransport, PythonStdioTransport
 from fastmcp.client.transports.base import TransportOptions
+
+
+class _FailingTransport(ClientTransport):
+    def __init__(self, exception: Exception) -> None:
+        self._exception = exception
+
+    @asynccontextmanager
+    async def connect_session(
+        self, **session_kwargs: Any
+    ) -> AsyncIterator[ClientSession]:
+        raise self._exception
+        yield
 
 
 class TestSessionTaskErrorPropagation:
@@ -141,6 +156,40 @@ class TestSessionTaskErrorPropagation:
 
             # Restore for cleanup
             client._session_state.session_task = original_task
+
+
+class TestConnectionFailurePropagation:
+    @pytest.mark.parametrize(
+        "failure",
+        [
+            MCPError(code=INTERNAL_ERROR, message="upstream failed"),
+            httpx2.HTTPStatusError(
+                "upstream unavailable",
+                request=httpx2.Request("GET", "https://example.com"),
+                response=httpx2.Response(503),
+            ),
+        ],
+        ids=["mcp-error", "http-status-error"],
+    )
+    async def test_preserves_passthrough_exception(self, failure: Exception):
+        client = Client(transport=_FailingTransport(failure))
+
+        with pytest.raises(type(failure)) as exc_info:
+            async with client:
+                pass
+
+        assert exc_info.value is failure
+        assert exc_info.value.__cause__ is not failure
+
+    async def test_wraps_other_failures_with_cause(self):
+        failure = OSError("connection refused")
+        client = Client(transport=_FailingTransport(failure))
+
+        with pytest.raises(RuntimeError, match="Client failed to connect") as exc_info:
+            async with client:
+                pass
+
+        assert exc_info.value.__cause__ is failure
 
 
 class TestCustomSessionClass:

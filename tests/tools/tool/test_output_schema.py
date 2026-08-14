@@ -231,6 +231,10 @@ class TestToolFromFunctionOutputSchema:
         tool = Tool.from_function(func)
         assert tool.output_schema is None
 
+        result = await tool.run({})
+        assert result.structured_content is None
+        assert len(result.content) == 1
+
     async def test_mixed_unserializable_return_annotation(self):
         class Unserializable:
             def __init__(self, data: Any):

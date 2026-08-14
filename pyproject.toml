@@ -73,10 +73,11 @@ members = ["fastmcp_slim", "fastmcp_remote", "fastmcp_tasks"]
 default-groups = ["dev"]
 exclude-newer = "1 week"
 # The cooldown above refuses anything published in the last week. Exempt the
-# first-party packages, whose fresh releases we install deliberately, and the
+# first-party packages, whose fresh releases we install deliberately, the
 # MCP SDK, where a new major is the only version satisfying our floor and so
-# has nothing older to fall back to.
-exclude-newer-package = { fastmcp = false, fastmcp-slim = false, fastmcp-remote = false, prefab-ui = false, mcp = false, mcp-types = false }
+# has nothing older to fall back to, and uncalled-for, the DI engine whose
+# releases we adopt deliberately.
+exclude-newer-package = { fastmcp = false, fastmcp-slim = false, fastmcp-remote = false, prefab-ui = false, mcp = false, mcp-types = false, uncalled-for = false, pydocket = false }
 
 [dependency-groups]
 dev = [
@@ -101,7 +102,7 @@ dev = [
     "pytest-timeout>=2.4.0",
     "pytest-xdist>=3.6.1",
     "ruff>=0.12.8",
-    "ty>=0.0.59",
+    "ty>=0.0.69",
     "prek>=0.2.12",
     "loq>=0.1.0a3",
     "opentelemetry-exporter-otlp-proto-grpc>=1.39.0",
@@ -157,6 +158,8 @@ exclude = [
     "examples/smart_home",              # needs phue
     "examples/apps/qr_server",          # needs qrcode
     "examples/providers/sqlite",        # needs aiosqlite
+    "examples/fastmcp_config_demo",     # needs pyautogui, Pillow
+    "examples/screenshot.py",           # needs pyautogui, Pillow
     "examples/memory.py",               # needs asyncpg, numpy, pydantic_ai, pgvector
     "examples/get_file.py",             # needs aiohttp
 ]
@@ -165,9 +168,8 @@ exclude = [
 python-version = "3.10"
 
 [tool.ty.analysis]
-# prefab_ui is the apps SDK; pyautogui/PIL are optional runtime deps used only
-# inside example tool bodies (screenshot demos) and are not installed here.
-replace-imports-with-any = ["prefab_ui.**", "pyautogui", "PIL", "PIL.**"]
+# prefab_ui is the apps SDK and is not installed here.
+replace-imports-with-any = ["prefab_ui.**"]
 
 [tool.ty.rules]
 division-by-zero = "warn"

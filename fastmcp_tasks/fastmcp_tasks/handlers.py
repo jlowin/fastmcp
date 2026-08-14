@@ -32,7 +32,7 @@ from fastmcp.exceptions import NotFoundError
 from fastmcp.tools.base import InputRequiredToolResult, Tool, ToolResult
 from fastmcp.utilities.tasks import DEFAULT_POLL_INTERVAL_MS
 from fastmcp.utilities.versions import VersionSpec
-from fastmcp_tasks.context import get_task_scope
+from fastmcp_tasks.context import get_task_scope, refresh_snapshot_ttl
 from fastmcp_tasks.creation import (
     TASK_MAPPING_TTL_BUFFER_SECONDS,
     enqueue_task_leg,
@@ -165,6 +165,10 @@ async def _lookup_task(
         await redis.expire(created_at_key, refresh_ttl)
         await redis.expire(poll_key, refresh_ttl)
     await refresh_current_leg_ttl(docket, task_scope, task_id, refresh_ttl)
+    # The snapshot must outlive the routing keys it serves: a re-entered leg
+    # restores the submitting caller from it, and with encryption configured a
+    # missing snapshot fails the task instead of degrading to an anonymous run.
+    await refresh_snapshot_ttl(docket, task_scope, task_id, refresh_ttl)
 
     created_at = created_at_bytes.decode("utf-8") if created_at_bytes else None
 

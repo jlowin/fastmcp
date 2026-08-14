@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import weakref
 from dataclasses import dataclass
 from unittest.mock import MagicMock
@@ -62,12 +63,9 @@ async def stateful_proxy_server(fastmcp_server: FastMCP):
     # `mode="legacy"` default for a directly-constructed instance (see
     # `TestProxyClientEraDefault` in test_proxy_client.py) — this backend isn't
     # built through `create_proxy`'s era-mirroring factory, so it stays pinned
-    # regardless of the front era. Every test below that forwards a real tool
-    # call through this fixture pins its front `Client` to `mode="legacy"` too:
-    # otherwise a modern front's request `_meta` carries reserved
-    # modern-envelope keys that `ProxyTool.run`'s legacy-backend path forwards
-    # verbatim, and this legacy-locked backend session rejects them as a
-    # protocol violation.
+    # regardless of the front era. Tests of handshake-only forwarding pin their
+    # front `Client` to `mode="legacy"` too: those server-initiated
+    # interactions do not exist on modern connections.
     client = StatefulProxyClient(transport=FastMCPTransport(fastmcp_server))
     return FastMCPProxy(client_factory=client.new_stateful)
 
@@ -92,6 +90,32 @@ async def stateless_server(stateful_proxy_server: FastMCP):
 
 
 class TestStatefulProxyClient:
+    async def test_reconnects_after_persistent_session_ends(self):
+        """A completed request must not prevent a dead session from reconnecting."""
+        backend = FastMCP("backend")
+
+        @backend.tool
+        def echo(value: str) -> str:
+            return value
+
+        client = StatefulProxyClient(backend)
+        try:
+            async with client:
+                result = await client.call_tool("echo", {"value": "first"})
+                assert result.data == "first"
+
+            session_task = client._session_state.session_task
+            assert session_task is not None
+            session_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await session_task
+
+            async with client:
+                result = await client.call_tool("echo", {"value": "second"})
+                assert result.data == "second"
+        finally:
+            await client.close()
+
     async def test_concurrent_log_requests_no_mixing(
         self, stateful_proxy_server: FastMCP
     ):
