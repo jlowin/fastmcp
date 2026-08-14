@@ -20,8 +20,7 @@ from fastmcp.resources.security import (
     ResourceSecurity,
 )
 from fastmcp.resources.template import ResourceTemplate
-from fastmcp.server.auth.authorization import AuthCheck
-from fastmcp.server.tasks.config import TaskConfig
+from fastmcp.utilities.authorization import AuthCheck
 from fastmcp.utilities.types import AnyFunction
 
 if TYPE_CHECKING:
@@ -54,7 +53,6 @@ class ResourceDecoratorMixin:
 
             meta = get_fastmcp_meta(resource)
             if meta is not None and isinstance(meta, ResourceMeta):
-                resolved_task = meta.task if meta.task is not None else False
                 enabled = meta.enabled
                 has_uri_params = "{" in meta.uri and "}" in meta.uri
                 wrapper_fn = without_injected_parameters(resource)
@@ -73,7 +71,6 @@ class ResourceDecoratorMixin:
                         tags=meta.tags,
                         annotations=meta.annotations,
                         meta=meta.meta,
-                        task=resolved_task,
                         auth=meta.auth,
                         security=meta.security,
                     )
@@ -90,7 +87,6 @@ class ResourceDecoratorMixin:
                         tags=meta.tags,
                         annotations=meta.annotations,
                         meta=meta.meta,
-                        task=resolved_task,
                         auth=meta.auth,
                     )
             else:
@@ -123,7 +119,6 @@ class ResourceDecoratorMixin:
         enabled: bool = True,
         annotations: Annotations | dict[str, Any] | None = None,
         meta: dict[str, Any] | None = None,
-        task: bool | TaskConfig | None = None,
         auth: AuthCheck | list[AuthCheck] | None = None,
         security: ResourceSecurity | None | InheritSecurity = INHERIT_SECURITY,
     ) -> Callable[[F], F]:
@@ -143,7 +138,6 @@ class ResourceDecoratorMixin:
             enabled: Whether the resource is enabled (default True). If False, adds to blocklist.
             annotations: Optional annotations about the resource's behavior
             meta: Optional meta information about the resource
-            task: Optional task configuration for background execution
             auth: Optional authorization checks for the resource
 
         Returns:
@@ -206,7 +200,6 @@ class ResourceDecoratorMixin:
                 mime_type=mime_type,
                 annotations=annotations,
                 meta=meta,
-                task=task,
                 auth=auth,
                 enabled=enabled,
                 security=security,

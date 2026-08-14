@@ -221,6 +221,155 @@ def _make_optional_parameter_nullable(schema: dict[str, Any]) -> dict[str, Any]:
     return schema
 
 
+def _allof_members(
+    schema: dict[str, Any],
+    schema_defs: dict[str, Any],
+    resolving: set[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Expand local schema references while collecting ``allOf`` members."""
+    resolving = resolving or set()
+
+    ref = schema.get("$ref")
+    if isinstance(ref, str):
+        for prefix in ("#/$defs/", "#/components/schemas/"):
+            if ref.startswith(prefix):
+                name = ref.removeprefix(prefix)
+                referenced_schema = schema_defs.get(name)
+                if isinstance(referenced_schema, dict) and name not in resolving:
+                    siblings = {
+                        key: value for key, value in schema.items() if key != "$ref"
+                    }
+                    members = _allof_members(
+                        referenced_schema, schema_defs, resolving | {name}
+                    )
+                    return members + ([siblings] if siblings else [])
+                break
+
+    all_of = schema.get("allOf")
+    if isinstance(all_of, list):
+        members = []
+        for member in all_of:
+            if isinstance(member, dict):
+                members.extend(_allof_members(member, schema_defs, resolving))
+
+        siblings = {key: value for key, value in schema.items() if key != "allOf"}
+        return members + ([siblings] if siblings else [])
+
+    return [schema]
+
+
+def _discriminator_target_name(target: str) -> str | None:
+    """Resolve a ``discriminator.mapping`` value to a local schema name.
+
+    Mapping values hold "schema names or references", so a bare ``"Cat"`` means
+    the ``Cat`` component just as ``"#/components/schemas/Cat"`` does. Anything
+    else — a remote URL, a pointer outside the component schemas — has no local
+    definition to flatten.
+    """
+    for prefix in ("#/$defs/", "#/components/schemas/"):
+        if target.startswith(prefix):
+            return target.removeprefix(prefix) or None
+    if target.startswith("#") or "/" in target:
+        return None
+    return target or None
+
+
+def _flatten_discriminator_subtypes(
+    schema: dict[str, Any],
+    schema_defs: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Flatten the subtypes named by an OpenAPI ``discriminator.mapping``.
+
+    A parent schema carrying a discriminator describes its children only
+    through ``mapping``, so the child fields are unreachable from the parent's
+    own ``properties``. Rather than emitting a branch per subtype, the fields
+    are merged in as optional and the variants are spelled out on the
+    discriminator property's description. Top-level ``oneOf`` is filled in
+    poorly by LLM tool-calling APIs, and the upstream API remains the real
+    validator either way: a field from the wrong variant is rejected there
+    rather than locally.
+
+    Only the mapping on *schema* itself is expanded. A subtype carrying its own
+    discriminator is left alone, which also keeps the parent/child reference
+    cycle from recursing.
+
+    Returns replacement ``properties`` for *schema*, or None when there is no
+    usable discriminator mapping to flatten.
+    """
+    discriminator = schema.get("discriminator")
+    if not isinstance(discriminator, dict):
+        return None
+
+    property_name = discriminator.get("propertyName")
+    mapping = discriminator.get("mapping")
+    if not isinstance(property_name, str) or not isinstance(mapping, dict):
+        return None
+
+    own_props = schema.get("properties", {})
+    # Variants that disagree about a property are unioned rather than resolved:
+    # keeping whichever came first would advertise one variant's constraint
+    # (a `const` tag, say) while claiming to accept all of them.
+    alternatives: dict[str, list[Any]] = {}
+    values: list[str] = []
+    variants: list[str] = []
+
+    for value, target in mapping.items():
+        if not isinstance(target, str):
+            continue
+
+        name = _discriminator_target_name(target)
+        subtype = schema_defs.get(name) if name else None
+        if not isinstance(subtype, dict):
+            continue
+
+        # Fields the parent already declares are shared, not variant-specific.
+        variant_fields: list[str] = []
+        for member in _allof_members(subtype, schema_defs):
+            for prop_name, prop_schema in member.get("properties", {}).items():
+                if prop_name in own_props:
+                    continue
+                if prop_name not in variant_fields:
+                    variant_fields.append(prop_name)
+                seen = alternatives.setdefault(prop_name, [])
+                if prop_schema not in seen:
+                    seen.append(prop_schema)
+
+        values.append(repr(value))
+        if variant_fields:
+            variants.append(f"{value!r} uses {', '.join(variant_fields)}")
+
+    # Every resolved variant is a legal tag even when it adds no fields of its
+    # own, so the accepted values are worth advertising on their own.
+    if not values:
+        return None
+
+    subtype_props = {
+        prop_name: schemas[0] if len(schemas) == 1 else {"anyOf": schemas}
+        for prop_name, schemas in alternatives.items()
+    }
+    properties = {**own_props, **subtype_props}
+
+    note = f"Selects the variant. Accepted values: {', '.join(values)}."
+    if variants:
+        note += (
+            f" {'; '.join(variants)}."
+            " Send only the fields belonging to the selected variant."
+        )
+
+    # A discriminator names a property of the payload, so give it a schema even
+    # when the parent left it undeclared — it is otherwise required and unusable.
+    tag_schema = properties.get(property_name)
+    if not isinstance(tag_schema, dict):
+        tag_schema = {"type": "string"}
+    existing = tag_schema.get("description")
+    properties[property_name] = {
+        **tag_schema,
+        "description": f"{existing} {note}" if existing else note,
+    }
+
+    return properties
+
+
 def _combine_schemas_and_map_params(
     route: HTTPRoute,
     convert_refs: bool = True,
@@ -273,14 +422,13 @@ def _combine_schemas_and_map_params(
             merged_props = {}
             merged_required = []
 
-            for sub_schema in body_schema["allOf"]:
-                if isinstance(sub_schema, dict):
-                    # Merge properties
-                    if "properties" in sub_schema:
-                        merged_props.update(sub_schema["properties"])
-                    # Merge required fields
-                    if "required" in sub_schema:
-                        merged_required.extend(sub_schema["required"])
+            for sub_schema in _allof_members(body_schema, route.request_schemas):
+                # Merge properties
+                if "properties" in sub_schema:
+                    merged_props.update(sub_schema["properties"])
+                # Merge required fields
+                if "required" in sub_schema:
+                    merged_required.extend(sub_schema["required"])
 
             # Update body_schema with merged properties
             body_schema["properties"] = merged_props
@@ -292,6 +440,17 @@ def _combine_schemas_and_map_params(
                 ]
             # Remove the allOf since we've merged it
             body_schema.pop("allOf", None)
+
+        # Merge discriminated subtype fields in as optional. The discriminator
+        # itself is dropped: its mapping points at definitions that are pruned
+        # from $defs once nothing references them, which would leave the
+        # emitted schema with dangling refs.
+        flattened_props = _flatten_discriminator_subtypes(
+            body_schema, route.request_schemas
+        )
+        if flattened_props is not None:
+            body_schema["properties"] = flattened_props
+            body_schema.pop("discriminator", None)
 
         body_props = body_schema.get("properties", {})
 

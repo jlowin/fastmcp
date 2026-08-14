@@ -88,6 +88,8 @@ def parse_frontmatter(content: str) -> tuple[dict[str, Any], str]:
         fallback also yields nothing), returns `({}, remaining)` with the
         delimited block stripped.
     """
+    content = content.removeprefix("\ufeff")
+
     if not content.startswith("---"):
         return {}, content
 

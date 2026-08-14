@@ -114,7 +114,7 @@ mcp = FastMCP(name="My Server", auth=auth)
 <ParamField body="base_url" type="AnyHttpUrl | str" required>
   Public URL where OAuth endpoints will be accessible, **including any mount path** (e.g., `https://your-server.com/api`).
 
-  This URL is used to construct OAuth callback URLs and operational endpoints. When mounting under a path prefix, include that prefix in `base_url`. Use `issuer_url` separately to specify where auth server metadata is located (typically at root level).
+  This URL is used to construct OAuth callback URLs and operational endpoints. When mounting under a path prefix, include that prefix in `base_url`. Use `issuer_url` separately to give the server an OAuth identity that differs from where its endpoints are mounted (typically the root level).
 </ParamField>
 
 <ParamField body="resource_base_url" type="AnyHttpUrl | str | None">
@@ -134,6 +134,8 @@ mcp = FastMCP(name="My Server", auth=auth)
 
 <ParamField body="issuer_url" type="AnyHttpUrl | str | None">
   Issuer URL for OAuth authorization server metadata (defaults to `base_url`).
+
+  `issuer_url` is the server's OAuth identity: it is the `issuer` field of the authorization server metadata, the `iss` claim of the tokens the proxy mints, and the RFC 9207 `iss` parameter on authorization responses. `base_url` remains the location of the endpoints, so `authorization_endpoint`, `token_endpoint`, and the rest of the metadata still point at `base_url` where the routes are actually mounted.
 
   When `issuer_url` has a path component (either explicitly or by defaulting from `base_url`), FastMCP creates path-aware discovery routes per RFC 8414. For example, if `base_url` is `http://localhost:8000/api`, the authorization server metadata will be at `/.well-known/oauth-authorization-server/api`.
 
@@ -204,9 +206,11 @@ mcp = FastMCP(name="My Server", auth=auth)
 </ParamField>
 
 <ParamField body="valid_scopes" type="list[str] | None">
-  List of all possible valid scopes for the OAuth provider. These are advertised
-  to clients through the `/.well-known` endpoints. Defaults to `required_scopes`
-  from your TokenVerifier if not specified.
+  The complete set of scopes clients are allowed to request — the full set of
+  available scopes (a superset of `required_scopes`). These are advertised to
+  clients through the `/.well-known` endpoints and enforced at Dynamic Client
+  Registration. Defaults to `required_scopes` from your TokenVerifier if not
+  specified.
 </ParamField>
 
 <ParamField body="extra_authorize_params" type="dict[str, str] | None">
@@ -279,10 +283,11 @@ auth = OAuthProxy(..., client_storage=MemoryStore())
 <ParamField body="jwt_signing_key" type="str | bytes | None">
 
 <VersionBadge version="2.13.0" />
-  Secret used to sign FastMCP JWT tokens issued to clients. Accepts any string or bytes - will be derived into a proper 32-byte cryptographic key using HKDF.
+  Secret used to sign FastMCP JWT tokens issued to clients. How the key is derived depends on what you pass:
 
-  **Default behavior (`None`):**
-  Derives a 32-byte key using PBKDF2 from the upstream client secret.
+  - **`bytes`** are used as-is, with no stretching, so supply at least 32 bytes of high-entropy key material. With the default file-backed client storage, the bytes must also decode as UTF-8; use `secrets.token_urlsafe(32).encode()` instead of raw `secrets.token_bytes()`, or configure `client_storage` explicitly.
+  - **A string** is stretched into a 32-byte key with PBKDF2 (1,000,000 iterations), since a supplied string may be low-entropy. Strings shorter than 12 characters also log a warning.
+  - **`None`** (the default) derives a 32-byte key from the upstream client secret using HKDF.
 
   **For production:**
   Provide an explicit secret (e.g., from environment variable) to use a fixed key instead of the key derived from the upstream client secret. This allows you to manage keys securely in cloud environments, allows keys to work across multiple instances, and allows you to rotate keys without losing client registrations.
@@ -310,8 +315,10 @@ auth = OAuthProxy(..., client_storage=MemoryStore())
   **`"remember"` — silent consent on return:**
   Users see the consent screen on first authorization; subsequent flows from the same browser for the same `(client_id, redirect_uri)` are silently approved via a signed cookie. Cross-site navigations (detected via `Sec-Fetch-Site`) fall back to the prompt. `Sec-Fetch-Site` is a browser-level heuristic rather than a protocol guarantee: an attacker who finds a way to initiate a non-cross-site navigation (XSS on a sibling origin, a same-site redirect chain, etc.) can reach the silent-consent path. `True` does not depend on this signal. See [Confused Deputy Attacks](#confused-deputy-attacks) for the underlying attack class.
 
-  **`"external"` — delegate to upstream:**
-  Skip the built-in consent page; consent is collected by the upstream IdP or a custom login page referenced via `upstream_authorization_endpoint`. No security warning is logged.
+  **`"external"` — externally managed:**
+  Follows the same authorization path as `False`: FastMCP skips its consent page and associated browser-binding protections, then redirects directly to the upstream provider. The difference is logging. `False` emits a security warning, while `"external"` suppresses that warning as an explicit acknowledgment that the operator is enforcing equivalent consent and transaction-binding protections elsewhere. FastMCP does not provide or verify those external protections.
+
+  Ordinary upstream OAuth consent is generally not equivalent. It typically authorizes FastMCP's shared upstream application without identifying the downstream MCP client or binding approval to that client's transaction. Use `"external"` only when your surrounding authorization system supplies those protections.
 
   **`False` — disable entirely:**
   Authorization proceeds directly to the upstream provider without any consent UI. Logs a security warning. Only for local development or testing.
@@ -331,7 +338,7 @@ auth = OAuthProxy(..., client_storage=MemoryStore())
   ```
 
   <Warning>
-    Disabling consent removes an important security layer. Only disable for local development or testing environments where you fully control all connecting clients.
+    Both `False` and `"external"` disable FastMCP's consent and browser-binding protections. `False` warns about this configuration; `"external"` suppresses the warning because it is an operator acknowledgment that equivalent protections exist elsewhere. Prefer the default `True` unless you own that external authorization flow.
   </Warning>
 </ParamField>
 
@@ -381,6 +388,10 @@ The OAuth proxy requires a compatible `TokenVerifier` to validate tokens from yo
 - **Opaque tokens (provider-specific)** (GitHub, Discord): Use provider-specific verifiers like `GitHubTokenVerifier`
 
 See the [Token Verification guide](/servers/auth/token-verification) for detailed setup instructions for your provider.
+
+<Warning>
+Provider-specific verifiers like `GitHubTokenVerifier` and `GoogleTokenVerifier` confirm that a token is a valid credential for that provider — not that it was issued to *your* application. GitHub tokens carry no audience claim at all, so any valid GitHub credential (including a personal access token) will verify. Inside the OAuth proxy this is safe: the proxy issues its own tokens to clients and only runs the verifier against upstream tokens it obtained through its own OAuth flow. If you use one of these verifiers standalone, you are authenticating "any user of that provider" unless you constrain it — `GoogleTokenVerifier` accepts an `audience` parameter to pin tokens to your OAuth client ID.
+</Warning>
 
 ### Scope Configuration
 
@@ -585,6 +596,27 @@ auth = OAuthProxy(
 
 Check your server logs for "Client registered with redirect_uri" messages to identify what URLs your clients use.
 
+### Application Type (Web vs. Native)
+
+<VersionBadge version="4.0.0" />
+
+During Dynamic Client Registration, a client may declare an `application_type` (per RFC 7591 and SEP-837) that governs which redirect URIs it is allowed to use. The OAuth proxy honors this field both at registration and when authorizing a redirect.
+
+`application_type` defaults to `"native"` because MCP clients typically run locally and register loopback callbacks. Clients that omit the field keep the permissive behavior described above. A client that explicitly registers as `"web"` is held to the stricter browser-app rules.
+
+Loopback covers the whole reserved range in both the address and name forms: every address in `127.0.0.0/8`, `::1`, and — per RFC 6761 — the name `localhost` along with any subdomain of it, such as `app.localhost`. The absolute (trailing-dot) spellings `localhost.` and `127.0.0.1.` are treated identically. A name that merely contains `localhost` as a label of a registrable domain, like `localhost.example.com`, is an ordinary public host and is not treated as loopback.
+
+| `application_type` | Allowed redirect URIs |
+| ------------------ | --------------------- |
+| `"native"` (default) | `https` URLs; app and private-use schemes (`vscode://callback`, `com.example.app:/callback`, `myapp://callback`, `urn:ietf:wg:oauth:2.0:oob`); and loopback `http` (`http://127.0.0.1`, any address in `127.0.0.0/8`, `http://localhost`, subdomains such as `http://app.localhost`, `http://[::1]`, any port) |
+| `"web"` | `https` on a non-loopback host only |
+
+Web clients must register a non-loopback `https` callback — that is the restriction SEP-837 asks for, and a web client that registers no redirect URI at all is refused, since it could never complete an authorization. Native clients keep the full range of schemes their platforms use; the only new limit is that cleartext `http` must target a loopback host, per RFC 8252 §7.3.
+
+Both application types always reject unsafe browser schemes (`javascript:`, `data:`, `file:`, `vbscript:`). FastMCP does not otherwise filter a native client's scheme: there is no reliable way to tell an app-dispatch scheme from a network transport, since the IANA registry lists `vscode:` alongside `coap:` and `smb:`, so any such filter would reject callbacks that real MCP clients depend on.
+
+A redirect URI that violates the declared type is refused during registration with a `RegistrationError` (`invalid_redirect_uri`). For example, a `"web"` client that registers `http://localhost:12345/callback` is rejected, since web clients must use a non-loopback `https` callback. Configure remote, browser-based clients as `application_type="web"` and give them an `https` callback URL.
+
 ## CIMD Support
 
 <VersionBadge version="3.0.0" />
@@ -699,7 +731,7 @@ For each ID-JAG presented at the token endpoint, the proxy checks that:
 - the JOSE header `typ` is `oauth-id-jag+jwt`;
 - the `iss` claim is one of the configured `trusted_issuers`;
 - the signature verifies against the issuer's published keys;
-- the `aud` claim identifies this authorization server;
+- the `aud` claim identifies this authorization server — configure your identity provider to mint assertions whose `aud` is the `issuer` value published at `/.well-known/oauth-authorization-server`, which is your `issuer_url` when you set one and your `base_url` otherwise;
 - the signed `client_id` claim matches the client presenting the assertion — an assertion the IdP minted for one client cannot be redeemed by another;
 - the signed `resource` claim names this server — an assertion minted for a different MCP server behind the same IdP is rejected;
 - `exp` (and `iat`/`nbf`, when present) place the assertion within a short lifetime and its validity window; and
@@ -738,8 +770,7 @@ Replay protection is per-process. Each server process tracks seen `jti` values i
 The OAuth proxy requires cryptographic keys for JWT signing and storage encryption, plus persistent storage to maintain valid tokens across server restarts.
 
 **Default behavior (appropriate for development only):**
-- **Mac/Windows**: FastMCP automatically generates keys and stores them in your system keyring. Storage defaults to disk. Tokens survive server restarts. This is **only** suitable for development and local testing.
-- **Linux**: Keys are ephemeral (random salt at startup). Storage defaults to memory. Tokens become invalid on server restart.
+On every platform, FastMCP deterministically derives `jwt_signing_key` from `upstream_client_secret` using HKDF, and storage defaults to an encrypted disk store in your platform's data directory (derived from `platformdirs`). Tokens survive server restarts as long as `upstream_client_secret` doesn't change. This is **only** suitable for development and local testing.
 
 **For production:**
 Configure the following parameters together: provide a unique `jwt_signing_key` (for signing FastMCP JWTs), and a shared `client_storage` backend (for storing tokens). Both are required for production deployments. Use a network-accessible storage backend like Redis or DynamoDB rather than local disk storage. **Wrap your storage in `FernetEncryptionWrapper` to encrypt sensitive OAuth tokens at rest** (see the `client_storage` parameter documentation above for examples). The keys accept any secret string and derive proper cryptographic keys using HKDF. See [OAuth Token Security](/deployment/http#oauth-token-security) and [Storage Backends](/servers/storage-backends) for complete production setup.

@@ -3,7 +3,9 @@
 import sys
 import tempfile
 import warnings
+from collections.abc import Sequence
 from pathlib import Path
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import mcp_types
@@ -40,7 +42,11 @@ from fastmcp.server.middleware.caching import (
     _make_get_prompt_cache_key,
     _make_read_resource_cache_key,
 )
-from fastmcp.server.middleware.middleware import CallNext, MiddlewareContext
+from fastmcp.server.middleware.middleware import (
+    CallNext,
+    Middleware,
+    MiddlewareContext,
+)
 from fastmcp.tools.base import Tool, ToolResult
 from fastmcp.utilities.tasks import TaskConfig
 
@@ -284,6 +290,42 @@ class TestResponseCachingMiddleware:
         )
         assert middleware1._matches_tool_cache_settings(tool_name=tool_name) is result
 
+    @pytest.mark.parametrize(
+        ("first", "second"),
+        [
+            ({"a": 5, "b": 3}, {"b": 3, "a": 5}),
+            ({"q": {"x": 1, "y": 2}}, {"q": {"y": 2, "x": 1}}),
+            ({"items": [{"x": 1, "y": 2}]}, {"items": [{"y": 2, "x": 1}]}),
+        ],
+        ids=["top level", "nested dict", "dict inside a list"],
+    )
+    def test_call_tool_cache_key_ignores_argument_order(
+        self, first: dict[str, Any], second: dict[str, Any]
+    ):
+        assert _make_call_tool_cache_key(
+            mcp_types.CallToolRequestParams(name="tool", arguments=first)
+        ) == _make_call_tool_cache_key(
+            mcp_types.CallToolRequestParams(name="tool", arguments=second)
+        )
+
+    def test_get_prompt_cache_key_ignores_argument_order(self):
+        assert _make_get_prompt_cache_key(
+            mcp_types.GetPromptRequestParams(
+                name="prompt", arguments={"a": "5", "b": "3"}
+            )
+        ) == _make_get_prompt_cache_key(
+            mcp_types.GetPromptRequestParams(
+                name="prompt", arguments={"b": "3", "a": "5"}
+            )
+        )
+
+    def test_call_tool_cache_key_distinguishes_arguments(self):
+        assert _make_call_tool_cache_key(
+            mcp_types.CallToolRequestParams(name="tool", arguments={"a": 5, "b": 3})
+        ) != _make_call_tool_cache_key(
+            mcp_types.CallToolRequestParams(name="tool", arguments={"a": 3, "b": 5})
+        )
+
 
 @pytest.mark.skipif(
     sys.platform == "win32",
@@ -355,9 +397,18 @@ class TestResponseCachingMiddlewareIntegration:
 
     async def test_list_operations_preserve_component_metadata(self):
         """Base component fields should survive conversion through the cache."""
+        from fastmcp.server.extensions import ServerExtension
+        from fastmcp.utilities.tasks import TASKS_EXTENSION_ID
+
+        class _StubTasksExtension(ServerExtension):
+            identifier = TASKS_EXTENSION_ID
+
         icon = mcp_types.Icon(src="https://example.com/component.png")
         mcp = FastMCP("MetadataServer")
         mcp.add_middleware(ResponseCachingMiddleware())
+        # A task-enabled tool requires the tasks extension to serve; register a
+        # stub so the metadata (execution.task_support) can be verified end-to-end.
+        mcp.add_extension(_StubTasksExtension())
 
         @mcp.tool(icons=[icon], task=TaskConfig(mode="optional"))
         async def greet() -> str:
@@ -381,7 +432,9 @@ class TestResponseCachingMiddlewareIntegration:
         assert not hasattr(cached_resources[0], "fn")
         assert not hasattr(cached_prompts[0], "fn")
 
-        async with Client(mcp) as client:
+        # Pinned to legacy: the tool's `execution.task_support` (SEP-1686) is
+        # advertised in the handshake-era tool listing; the modern listing omits it.
+        async with Client(mcp, mode="legacy") as client:
             for _ in range(2):
                 tools = await client.list_tools()
                 resources = await client.list_resources()
@@ -412,6 +465,18 @@ class TestResponseCachingMiddlewareIntegration:
                 "add", {"a": 5, "b": 3}
             )
             assert call_tool_result_one == call_tool_result_two
+
+    async def test_call_tool_with_reordered_arguments_hits_cache(
+        self,
+        caching_server: FastMCP,
+        tracking_calculator: TrackingCalculator,
+    ):
+        async with Client[FastMCPTransport](transport=caching_server) as client:
+            first = await client.call_tool("add", {"a": 5, "b": 3})
+            second = await client.call_tool("add", {"b": 3, "a": 5})
+
+        assert first == second
+        assert tracking_calculator.add_calls == 1
 
     async def test_call_tool_very_large_value(
         self,
@@ -591,6 +656,51 @@ class TestCacheableToolResult:
         cached_tool_result = CacheableToolResult.wrap(tool_result).unwrap()
 
         assert cached_tool_result.is_error is True
+
+
+class TestErrorResultsAreNotCached:
+    """Regression tests for issue #4395: an error result was cached for the full
+    TTL, so a transient failure permanently shadowed the tool until it expired."""
+
+    async def test_error_result_is_not_cached(self):
+        mcp = FastMCP("ErrorCachingTestServer")
+        mcp.add_middleware(ResponseCachingMiddleware(cache_storage=MemoryStore()))
+
+        call_count = 0
+
+        @mcp.tool
+        def flakey() -> ToolResult:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return ToolResult("upstream 503", is_error=True)
+            return ToolResult("recovered")
+
+        async with Client(mcp) as client:
+            first = await client.call_tool("flakey", {}, raise_on_error=False)
+            assert first.is_error is True
+
+            # The tool must actually run again rather than replay the error.
+            second = await client.call_tool("flakey", {}, raise_on_error=False)
+            assert second.is_error is False
+            assert call_count == 2
+
+    async def test_successful_result_is_still_cached(self):
+        mcp = FastMCP("SuccessCachingTestServer")
+        mcp.add_middleware(ResponseCachingMiddleware(cache_storage=MemoryStore()))
+
+        call_count = 0
+
+        @mcp.tool
+        def stable() -> str:
+            nonlocal call_count
+            call_count += 1
+            return "ok"
+
+        async with Client(mcp) as client:
+            await client.call_tool("stable", {})
+            await client.call_tool("stable", {})
+            assert call_count == 1
 
 
 class TestCachingWithImportedServerPrefixes:
@@ -891,3 +1001,83 @@ class TestAuthAwareCaching:
             assert {p.name for p in prompts} == {"public_prompt"}
         finally:
             auth_context_var.reset(tok)
+
+
+class CountingDownstream(Middleware):
+    """Counts the list calls that get past the caching middleware, i.e. cache misses."""
+
+    def __init__(self) -> None:
+        self.list_calls = 0
+
+    async def on_list_tools(
+        self,
+        context: MiddlewareContext[mcp_types.ListToolsRequest],
+        call_next: CallNext[mcp_types.ListToolsRequest, Sequence[Tool]],
+    ) -> Sequence[Tool]:
+        self.list_calls += 1
+        return await call_next(context)
+
+    async def on_list_resources(
+        self,
+        context: MiddlewareContext[mcp_types.ListResourcesRequest],
+        call_next: CallNext[mcp_types.ListResourcesRequest, Sequence[Resource]],
+    ) -> Sequence[Resource]:
+        self.list_calls += 1
+        return await call_next(context)
+
+    async def on_list_prompts(
+        self,
+        context: MiddlewareContext[mcp_types.ListPromptsRequest],
+        call_next: CallNext[mcp_types.ListPromptsRequest, Sequence[Prompt]],
+    ) -> Sequence[Prompt]:
+        self.list_calls += 1
+        return await call_next(context)
+
+
+class TestEmptyListCaching:
+    """An empty list is a cached result, not a cache miss.
+
+    Regression tests for issue #4733: the list hooks tested the cached value for
+    truthiness, so a server - or a per-user filtered view - with nothing to list
+    re-ran the listing on every single request and never served a cache hit.
+    """
+
+    @pytest.mark.parametrize("operation", ["tools", "resources", "prompts"])
+    async def test_empty_list_is_served_from_cache(self, operation: str):
+        counter = CountingDownstream()
+        mcp_server = FastMCP("test", middleware=[ResponseCachingMiddleware(), counter])
+
+        list_operation = getattr(mcp_server, f"list_{operation}")
+        for _ in range(3):
+            assert len(await list_operation()) == 0
+
+        assert counter.list_calls == 1
+
+    async def test_empty_filtered_view_is_served_from_cache(self):
+        from mcp.server.auth.middleware.auth_context import auth_context_var
+        from mcp.server.auth.middleware.bearer_auth import AuthenticatedUser
+
+        from fastmcp.server.auth import AccessToken, require_scopes
+
+        counter = CountingDownstream()
+        mcp_server = FastMCP("test", middleware=[ResponseCachingMiddleware(), counter])
+
+        @mcp_server.tool(auth=require_scopes("admin"))
+        def admin_only() -> str:
+            return "ok"
+
+        token = AccessToken(
+            token="token-read",
+            client_id="test-client",
+            scopes=["read"],
+            expires_at=None,
+            claims={},
+        )
+        tok = auth_context_var.set(AuthenticatedUser(token))
+        try:
+            for _ in range(3):
+                assert len(await mcp_server.list_tools()) == 0
+        finally:
+            auth_context_var.reset(tok)
+
+        assert counter.list_calls == 1

@@ -8,7 +8,6 @@ from dataclasses import dataclass
 from typing import Annotated, Any, Literal, cast
 
 import mcp_types
-import pydantic_core
 from mcp_types import ToolAnnotations
 from pydantic import ConfigDict
 from pydantic.fields import Field
@@ -19,8 +18,6 @@ from fastmcp.tools.base import (
     InputRequiredToolResult,
     Tool,
     ToolResult,
-    _convert_to_content,
-    resolve_serialize_by_alias,
 )
 from fastmcp.tools.function_parsing import ParsedFunction
 from fastmcp.utilities.async_utils import (
@@ -242,6 +239,50 @@ class ArgTransformConfig(FastMCPBaseModel):
         return ArgTransform(**self.model_dump(exclude_unset=True))  # pyright: ignore[reportAny]
 
 
+#: Meta namespaces the framework owns. An override replaces the caller-facing
+#: meta wholesale, but these carry a component's app membership, identity, and
+#: visibility — what intermediaries use to recognize a tool they are
+#: forwarding. Both are needed together: an identity that survives a rename
+#: while its ``ui.visibility`` marker does not leaves a tool that can be named
+#: but no longer answers to its identity.
+_FRAMEWORK_META_NAMESPACES = ("fastmcp", "ui")
+
+
+def _apply_meta_override(
+    source_meta: dict[str, Any] | None,
+    override: dict[str, Any] | None | NotSetT,
+) -> dict[str, Any] | None:
+    """Apply a transform's ``meta=`` override, preserving framework namespaces.
+
+    An override replaces the caller-facing meta wholesale, which is what users
+    expect. Framework-owned namespaces are carried across regardless, since a
+    transform that renames a tool must not silently unwire it — values the
+    override supplies for those namespaces still win key by key.
+    """
+    if isinstance(override, NotSetT):
+        return source_meta
+
+    source = source_meta or {}
+    preserved = {
+        namespace: dict(source[namespace])
+        for namespace in _FRAMEWORK_META_NAMESPACES
+        if isinstance(source.get(namespace), dict) and source[namespace]
+    }
+
+    if override is None:
+        return preserved or None
+
+    merged = dict(override)
+    for namespace, source_values in preserved.items():
+        override_values = override.get(namespace)
+        merged[namespace] = (
+            {**source_values, **override_values}
+            if isinstance(override_values, dict)
+            else source_values
+        )
+    return merged
+
+
 class TransformedTool(Tool):
     """A tool that is transformed from another tool.
 
@@ -350,40 +391,7 @@ class TransformedTool(Tool):
                 else:
                     return result
 
-            # Otherwise convert to content and create ToolResult with proper structured content
-
-            unstructured_result = _convert_to_content(result)
-
-            structured_output = None
-            # First handle structured content based on output schema, if any
-            if self.output_schema is not None:
-                if self.output_schema.get("x-fastmcp-wrap-result"):
-                    # Schema says wrap - serialize the inner result first (so its
-                    # serialize_by_alias config is honored) before nesting, since
-                    # wrapping in a dict would otherwise mask the model's config.
-                    structured_output = {
-                        "result": pydantic_core.to_jsonable_python(
-                            result, by_alias=resolve_serialize_by_alias(result)
-                        )
-                    }
-                else:
-                    structured_output = result
-            # If no output schema, try to serialize the result. If it is a dict, use
-            # it as structured content. If it is not a dict, ignore it.
-            if structured_output is None:
-                try:
-                    structured_output = pydantic_core.to_jsonable_python(
-                        result, by_alias=resolve_serialize_by_alias(result)
-                    )
-                    if not isinstance(structured_output, dict):
-                        structured_output = None
-                except Exception:
-                    pass
-
-            return ToolResult(
-                content=unstructured_result,
-                structured_content=structured_output,
-            )
+            return self.convert_result(result)
         finally:
             _current_tool.reset(token)
 
@@ -590,13 +598,14 @@ class TransformedTool(Tool):
             description if not isinstance(description, NotSetT) else tool.description
         )
         final_title = title if not isinstance(title, NotSetT) else tool.title
-        final_meta = meta if not isinstance(meta, NotSetT) else tool.meta
+        final_meta = _apply_meta_override(tool.meta, meta)
         final_annotations = (
             annotations if not isinstance(annotations, NotSetT) else tool.annotations
         )
 
         transformed_tool = cls(
             fn=final_fn,
+            return_type=parsed_fn.return_type if parsed_fn is not None else None,
             forwarding_fn=forwarding_fn,
             parent_tool=tool,
             name=final_name,
@@ -707,7 +716,8 @@ class TransformedTool(Tool):
         schema = {
             "type": "object",
             "properties": new_props,
-            "required": list(new_required),
+            # Iterate props (not the set) for deterministic ordering
+            "required": [p for p in new_props if p in new_required],
             "additionalProperties": False,
         }
 
@@ -899,7 +909,11 @@ class TransformedTool(Tool):
         result = {
             "type": "object",
             "properties": merged_props,
-            "required": list(final_required),
+            # Iterate props (not the set) for deterministic ordering; keep any
+            # required names not present in properties (sorted) rather than
+            # silently dropping them.
+            "required": [p for p in merged_props if p in final_required]
+            + sorted(final_required - set(merged_props)),
             "additionalProperties": False,
         }
 

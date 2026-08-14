@@ -132,6 +132,15 @@ These patterns apply to MCP client loopback redirects. Configure the upstream OA
 
 </ParamField>
 
+<ParamField body="valid_scopes" type="list[str] | None">
+  The complete set of scopes clients are allowed to request — the full set of
+  available scopes (a superset of `required_scopes`). These are advertised to
+  clients through the `/.well-known` endpoints (as `scopes_supported`) and
+  enforced at Dynamic Client Registration: a client registering with a scope
+  outside this set is rejected. Defaults to `required_scopes` from your token
+  verifier if not specified.
+</ParamField>
+
 <ParamField body="token_endpoint_auth_method" type="str | None">
   Token endpoint authentication method for the upstream OAuth server. Controls how the proxy authenticates when exchanging authorization codes and refresh tokens with the upstream provider.
   - `"client_secret_basic"`: Send credentials in Authorization header (most common)
@@ -146,14 +155,13 @@ Set this if your provider requires a specific authentication method and the defa
 <ParamField body="jwt_signing_key" type="str | bytes | None">
 
 <VersionBadge version="2.13.0" />
-  Secret used to sign FastMCP JWT tokens issued to clients. Accepts any string or bytes - will be derived into a proper 32-byte cryptographic key using HKDF.
+  Secret used to sign FastMCP JWT tokens issued to clients. **`bytes`** are used as-is, with no stretching, so supply at least 32 bytes of high-entropy key material. With the default file-backed client storage, the bytes must also decode as UTF-8; use `secrets.token_urlsafe(32).encode()` instead of raw `secrets.token_bytes()`, or configure `client_storage` explicitly. **A string** is stretched into a 32-byte key with PBKDF2 (1,000,000 iterations), since a supplied string may be low-entropy.
 
   **Default behavior (`None`):**
-  - **Mac/Windows**: Auto-managed via system keyring. Keys are generated once and persisted, surviving server restarts with zero configuration. Keys are automatically derived from server attributes, so this approach, while convenient, is **only** suitable for development and local testing. For production, you must provide an explicit secret.
-  - **Linux**: Ephemeral (random salt at startup). Tokens become invalid on server restart, triggering client re-authentication.
+  The key is deterministically derived from `client_secret` using HKDF, on every platform. Because the derivation is deterministic, the same key is produced across restarts as long as `client_secret` doesn't change, so tokens remain valid without any extra configuration. This convenience makes it **only** suitable for development and local testing.
 
   **For production:**
-  Provide an explicit secret (e.g., from environment variable) to use a fixed key instead of the auto-generated one.
+  Provide an explicit `jwt_signing_key` (e.g., from an environment variable) rather than relying on the auto-derived key.
 </ParamField>
 
 <ParamField body="client_storage" type="AsyncKeyValue | None">
@@ -162,10 +170,9 @@ Set this if your provider requires a specific authentication method and the defa
   Storage backend for persisting OAuth client registrations and upstream tokens.
 
   **Default behavior:**
-  - **Mac/Windows**: Encrypted DiskStore in your platform's data directory (derived from `platformdirs`)
-  - **Linux**: MemoryStore (ephemeral - clients lost on restart)
+  Encrypted disk store in your platform's data directory (derived from `platformdirs`), on every platform including Linux. The encryption key is itself derived from `jwt_signing_key`.
 
-  By default on Mac/Windows, clients are automatically persisted to encrypted disk storage, allowing them to survive server restarts as long as the filesystem remains accessible. This means MCP clients only need to register once and can reconnect seamlessly. On Linux where keyring isn't available, ephemeral storage is used to match the ephemeral key strategy.
+  By default, clients are automatically persisted to encrypted disk storage, allowing them to survive server restarts as long as the filesystem remains accessible. This means MCP clients only need to register once and can reconnect seamlessly.
 
 For production deployments with multiple servers or cloud deployments, use a network-accessible storage backend rather than local disk storage. **Wrap your storage in `FernetEncryptionWrapper` to encrypt sensitive OAuth tokens at rest.** See [Storage Backends](/servers/storage-backends) for available options.
 
@@ -199,7 +206,7 @@ auth = OIDCProxy(
 </ParamField>
 
 <ParamField body="require_authorization_consent" type='bool | Literal["remember", "external"]' default="True">
-  Consent screen behavior for authorization requests. Accepts `True` (default; always prompt — strongest protection), `"remember"` (silent consent on return visits via signed cookie, gated by `Sec-Fetch-Site` to block AS-in-the-middle attacks), `"external"` (consent handled by upstream IdP or custom page), or `False` (disable entirely; local/testing only). See the [OAuthProxy documentation](/servers/auth/oauth-proxy) for full details on each mode and the security trade-offs.
+  Consent screen behavior for authorization requests. Accepts `True` (default; always prompt — strongest protection), `"remember"` (silent consent on return visits via signed cookie, gated by `Sec-Fetch-Site` to block AS-in-the-middle attacks), `"external"` (same authorization path as `False`, but the warning is suppressed because the operator asserts that equivalent protections are enforced externally), or `False` (disable entirely; local/testing only). See the [OAuthProxy documentation](/servers/auth/oauth-proxy) for full details on each mode and the security trade-offs.
 </ParamField>
 
 <ParamField body="consent_csp_policy" type="str | None" default="None">

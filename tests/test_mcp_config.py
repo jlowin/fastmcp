@@ -41,16 +41,23 @@ from fastmcp.mcp_config import (
 from fastmcp.server.elicitation import AcceptedElicitation
 from fastmcp.tools.base import Tool as FastMCPTool
 
-# These tests spawn subprocess servers via stdio which can be slow under
-# parallel CI load. Give them more headroom than the 5s default, and skip
-# entirely on Windows due to process lifecycle issues.
+# Some tests in this module spawn subprocess servers via stdio, each paying a
+# full interpreter startup plus `import fastmcp` (~0.7s). They take 3-6s idle,
+# but on a loaded CI runner with four xdist workers competing they have blown a
+# 15s ceiling. The timeout is here to catch a genuine hang, not to police speed,
+# so give the module room rather than tuning each test individually.
 pytestmark = [
-    pytest.mark.timeout(15),
-    pytest.mark.skipif(
-        sys.platform.startswith("win32"),
-        reason="Windows has process lifecycle issues with stdio subprocesses",
-    ),
+    pytest.mark.timeout(60),
 ]
+
+# Most tests below run entirely in-memory (via InMemoryStdioMCPServer) or
+# only parse/serialize config objects, so they're safe on Windows. Apply this
+# marker only to tests that spawn a real subprocess (or attempt to, e.g. via
+# a nonexistent command) — those still hit Windows process lifecycle issues.
+requires_subprocess = pytest.mark.skipif(
+    sys.platform.startswith("win32"),
+    reason="Windows has process lifecycle issues with stdio subprocesses",
+)
 
 
 def running_under_debugger():
@@ -89,8 +96,66 @@ class InMemoryStdioMCPServer(StdioMCPServer):
     mcp: FastMCP
     command: str = "in-memory"
 
-    def to_transport(self) -> FastMCPTransport:  # ty: ignore[invalid-method-override]
+    def to_transport(self) -> FastMCPTransport:
         return FastMCPTransport(mcp=self.mcp)
+
+
+class TestConfigTransportLegacyOnly:
+    """`MCPConfigTransport.legacy_only` gating (regression for the over-broad flag).
+
+    A single-server config delegates directly to the underlying transport with no
+    proxy, so it must mirror that transport's era capability rather than being
+    forced legacy. Only the multi-server composite (backed by legacy-era
+    ProxyClients) is legacy-only.
+    """
+
+    def test_single_modern_capable_server_is_not_forced_legacy(self):
+        """A single Streamable HTTP backend stays modern-capable under mode='auto'."""
+        config = {
+            "mcpServers": {"only": {"url": "https://example.com/mcp"}},
+        }
+        transport = MCPConfigTransport(config)
+        assert isinstance(transport.transport, StreamableHttpTransport)
+        assert transport.legacy_only is False
+
+    def test_single_sse_server_mirrors_legacy_only(self):
+        """A single SSE backend is legacy-only because SSE cannot serve modern."""
+        config = {
+            "mcpServers": {
+                "only": {"url": "https://example.com/sse", "transport": "sse"}
+            },
+        }
+        transport = MCPConfigTransport(config)
+        assert isinstance(transport.transport, SSETransport)
+        assert transport.legacy_only is True
+
+    def test_multi_server_config_is_legacy_only(self):
+        """A multi-server composite is legacy-only regardless of backend eras."""
+        config = {
+            "mcpServers": {
+                "a": {"url": "https://a.example.com/mcp"},
+                "b": {"url": "https://b.example.com/mcp"},
+            },
+        }
+        transport = MCPConfigTransport(config)
+        assert transport.legacy_only is True
+
+    def test_transforming_single_server_wrapper_is_legacy_only(self):
+        """A single-server config that uses tool transforms or tag filters wraps
+        a legacy-pinned proxy; the wrapper transport must advertise legacy-only
+        so a default `mode="auto"` frontend negotiates the same era as the
+        backend rather than negotiating modern against a legacy upstream."""
+        config = {
+            "mcpServers": {
+                "a": {
+                    "url": "https://a.example.com/mcp",
+                    "include_tags": ["public"],
+                },
+            },
+        }
+        mcp_config = MCPConfig.from_dict(config)
+        transport = mcp_config.mcpServers["a"].to_transport()
+        assert transport.legacy_only is True
 
 
 def test_parse_single_stdio_config():
@@ -401,12 +466,13 @@ async def _wait_for_process_exit(pid: int, timeout: float = 3.0) -> None:
             psutil.Process(pid)
         except psutil.NoSuchProcess:
             return
-        await asyncio.sleep(0.05)
+        await asyncio.sleep(0.005)
     # Final check — if still alive, let the NoSuchProcess propagation fail the test clearly
     psutil.Process(pid)
     pytest.fail(f"Process {pid} still alive after {timeout}s")
 
 
+@requires_subprocess
 @pytest.mark.skipif(
     running_under_debugger(),
     reason="Debugger holds a reference to the transport",
@@ -467,6 +533,7 @@ async def test_multi_client_lifespan(tmp_path: Path):
     await _wait_for_process_exit(pid_2)
 
 
+@requires_subprocess
 @pytest.mark.timeout(15)
 async def test_multi_client_force_close(tmp_path: Path):
     server_script = inspect.cleandoc("""
@@ -625,6 +692,7 @@ async def test_multi_client_with_logging(caplog):
         assert test_records[0].msg == "test 42"
 
 
+@requires_subprocess
 async def test_multi_client_with_transforms(tmp_path: Path):
     """
     Tests that transforms are properly applied to the tools.
@@ -681,6 +749,7 @@ async def test_multi_client_with_transforms(tmp_path: Path):
         assert result.data == 3
 
 
+@requires_subprocess
 async def test_canonical_multi_client_with_transforms(tmp_path: Path):
     """Test that transforms are not applied to servers in a canonical MCPConfig."""
     server_script = inspect.cleandoc("""
@@ -732,6 +801,7 @@ async def test_canonical_multi_client_with_transforms(tmp_path: Path):
         assert "test_1_transformed_add" not in tools_by_name
 
 
+@requires_subprocess
 @pytest.mark.flaky(retries=3)
 async def test_multi_client_transform_with_filtering(tmp_path: Path):
     """
@@ -794,6 +864,7 @@ async def test_multi_client_transform_with_filtering(tmp_path: Path):
         assert "test_2_subtract" in tools_by_name
 
 
+@requires_subprocess
 @pytest.mark.flaky(retries=3)
 async def test_single_server_config_include_tags_filtering(tmp_path: Path):
     """include_tags should filter tools even with a single server in the config."""
@@ -1012,6 +1083,7 @@ async def test_single_server_config_transport():
     assert len(transport._transports) == 1
 
 
+@requires_subprocess
 @pytest.mark.parametrize(
     "server_order",
     [
@@ -1040,6 +1112,7 @@ async def test_multi_server_partial_failure(server_order: dict):
         assert len(tools) == 1
 
 
+@requires_subprocess
 async def test_multi_server_partial_failure_logs_warning(caplog):
     """A warning should be logged when a server fails to connect."""
     config = MCPConfig(
@@ -1064,6 +1137,7 @@ async def test_multi_server_partial_failure_logs_warning(caplog):
     assert len(warning_records) == 1
 
 
+@requires_subprocess
 async def test_multi_server_all_fail():
     """When all servers fail to connect, a ConnectionError should be raised."""
     config = MCPConfig(
@@ -1095,6 +1169,7 @@ def _make_ping_server() -> FastMCP:
     return app
 
 
+@requires_subprocess
 async def test_multi_server_partial_failure_cleanup():
     """Transports for failed servers should not leak into _transports."""
     config = MCPConfig(

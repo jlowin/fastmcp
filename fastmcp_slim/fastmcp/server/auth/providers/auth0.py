@@ -104,6 +104,7 @@ class Auth0Provider(OIDCProxy):
         fallback_refresh_token_expiry_seconds: int | None = None,
         fastmcp_access_token_expiry_seconds: int | None = None,
         token_expiry_threshold_seconds: int = 0,
+        enable_cimd: bool = True,
     ) -> None:
         """Initialize Auth0 OAuth provider.
 
@@ -134,8 +135,9 @@ class Auth0Provider(OIDCProxy):
             require_authorization_consent: Whether to require user consent before authorizing clients (default True).
                 When True, users see a consent screen before being redirected to Auth0.
                 When False, authorization proceeds directly without user confirmation.
-                When "external", the built-in consent screen is skipped but no warning is
-                logged, indicating that consent is handled externally (e.g. by the upstream IdP).
+                When "external", authorization follows the same direct path as False,
+                but the warning is suppressed as an operator acknowledgment that
+                equivalent protections are enforced externally.
                 SECURITY WARNING: Only set to False for local development or testing environments.
             fallback_refresh_token_expiry_seconds: Lifetime for the FastMCP-issued
                 refresh token when the upstream provider omits `refresh_expires_in`
@@ -148,6 +150,8 @@ class Auth0Provider(OIDCProxy):
                 refresh gracefully (e.g. `mcp-remote`). See `OAuthProxy` for details.
             token_expiry_threshold_seconds: Number of seconds before actual expiry to
                 treat a token as expired, refreshing early to avoid races. Defaults to 0.
+            enable_cimd: Enable CIMD (Client ID Metadata Document) support for URL-based
+                client IDs (default True). Set to False to disable.
         """
         # Parse scopes if provided as string
         auth0_required_scopes = (
@@ -174,6 +178,7 @@ class Auth0Provider(OIDCProxy):
             fallback_refresh_token_expiry_seconds=fallback_refresh_token_expiry_seconds,
             fastmcp_access_token_expiry_seconds=fastmcp_access_token_expiry_seconds,
             token_expiry_threshold_seconds=token_expiry_threshold_seconds,
+            enable_cimd=enable_cimd,
         )
 
         logger.debug(

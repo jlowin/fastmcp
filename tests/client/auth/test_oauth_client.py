@@ -96,15 +96,26 @@ async def test_unauthorized(client_unauthorized: Client):
     SDK v2 surfaces the server's 401 as an MCPError ("Server returned an error
     response") rather than re-raising the raw httpx2.HTTPStatusError.
     """
-    with pytest.raises(MCPError, match="error response"):
+    with pytest.raises(MCPError, match="error response") as exc_info:
         async with client_unauthorized:
             pass
 
+    assert exc_info.value.__cause__ is not exc_info.value
 
-async def test_ping(client_with_headless_oauth: Client):
-    """Test that we can ping the server."""
-    async with client_with_headless_oauth:
-        assert await client_with_headless_oauth.ping()
+
+async def test_ping(streamable_http_server: str):
+    """Test that we can ping the server.
+
+    Pinned to legacy: `ping` is a handshake-era request removed from the modern
+    (2026-07-28) protocol.
+    """
+    client = Client(
+        transport=StreamableHttpTransport(streamable_http_server),
+        auth=HeadlessOAuth(mcp_url=streamable_http_server, scopes=["read", "write"]),
+        mode="legacy",
+    )
+    async with client:
+        assert await client.ping()
 
 
 async def test_list_tools(client_with_headless_oauth: Client):
@@ -168,9 +179,12 @@ async def test_expired_dynamic_registration_is_retried():
     server = FastMCP("TestServer", auth=provider)
 
     async with run_server_async(server, port=port, transport="http") as url:
+        # Pinned to legacy: `ping` is a handshake-era request removed from the
+        # modern (2026-07-28) protocol; the retry is exercised via the handshake.
         client = Client(
             transport=StreamableHttpTransport(url),
             auth=HeadlessOAuth(mcp_url=url),
+            mode="legacy",
         )
         async with client:
             assert await client.ping()

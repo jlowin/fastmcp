@@ -140,6 +140,30 @@ class TestParseMcpConfig:
         servers = _parse_mcp_config(path, "test")
         assert servers == []
 
+    def test_invalid_server_does_not_hide_valid_servers(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ):
+        path = tmp_path / "config.json"
+        _write_config(
+            path,
+            {
+                "mcpServers": {
+                    "working": {
+                        "command": "python",
+                        "args": ["server.py"],
+                    },
+                    "broken": {
+                        "args": ["missing-command.py"],
+                    },
+                }
+            },
+        )
+
+        servers = _parse_mcp_config(path, "test")
+
+        assert [server.name for server in servers] == ["working"]
+        assert "broken" in caplog.text
+
     def test_remote_server(self, tmp_path: Path):
         path = tmp_path / "config.json"
         _write_config(path, _REMOTE_CONFIG)
@@ -147,6 +171,40 @@ class TestParseMcpConfig:
         assert len(servers) == 1
         assert isinstance(servers[0].config, RemoteMCPServer)
         assert servers[0].config.url == "http://localhost:8000/mcp"
+
+    def test_reads_as_utf8_explicitly(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        """Regression test for GH-4689: config files must be read with an
+        explicit UTF-8 encoding, not the platform's preferred encoding
+        (e.g. cp949 on Windows with a non-UTF-8 locale), since that's what
+        every tool that writes these files emits."""
+        original_read_text = Path.read_text
+
+        def _tracking_read_text(self: Path, *args: Any, **kwargs: Any) -> str:
+            assert kwargs.get("encoding") == "utf-8", (
+                "path.read_text() must pass encoding='utf-8' explicitly"
+            )
+            return original_read_text(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "read_text", _tracking_read_text)
+
+        path = tmp_path / "config.json"
+        path.write_bytes(
+            json.dumps(
+                {
+                    "mcpServers": {
+                        "demo": {
+                            "command": "echo",
+                            "args": ["hello — world"],
+                        }
+                    }
+                }
+            ).encode("utf-8")
+        )
+        servers = _parse_mcp_config(path, "test")
+        assert len(servers) == 1
+        assert servers[0].name == "demo"
 
 
 # ---------------------------------------------------------------------------

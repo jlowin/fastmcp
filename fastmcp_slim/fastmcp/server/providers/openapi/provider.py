@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import warnings
 from collections import Counter
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
@@ -10,6 +11,7 @@ from typing import Any, Literal, cast
 import httpx2
 from jsonschema_path import SchemaPath
 
+from fastmcp._warnings import FastMCPDeprecationWarning
 from fastmcp.prompts import Prompt
 from fastmcp.resources import Resource, ResourceTemplate
 from fastmcp.server.providers.base import Provider
@@ -48,6 +50,14 @@ logger = get_logger(__name__)
 DEFAULT_TIMEOUT: float = 30.0
 
 
+def _is_legacy_httpx_client(client: object) -> bool:
+    """Detect a legacy httpx client without importing the legacy package."""
+    return any(
+        cls.__module__.partition(".")[0] == "httpx" and cls.__name__ == "AsyncClient"
+        for cls in type(client).__mro__
+    )
+
+
 class OpenAPIProvider(Provider):
     """Provider that creates MCP components from an OpenAPI specification.
 
@@ -84,10 +94,12 @@ class OpenAPIProvider(Provider):
 
         Args:
             openapi_spec: OpenAPI schema as a dictionary
-            client: Optional httpx AsyncClient for making HTTP requests.
+            client: Optional httpx2 AsyncClient for making HTTP requests.
                 If not provided, a default client is created using the first
                 server URL from the OpenAPI spec with a 30-second timeout.
                 To customize timeout or other settings, pass your own client.
+                Legacy httpx clients are temporarily accepted with a deprecation
+                warning.
             route_maps: Optional list of RouteMap objects defining route mappings
             route_map_fn: Optional callable for advanced route type mapping
             mcp_component_fn: Optional callable for component customization
@@ -103,6 +115,14 @@ class OpenAPIProvider(Provider):
         self._owns_client = client is None
         if client is None:
             client = self._create_default_client(openapi_spec)
+        elif _is_legacy_httpx_client(client):
+            warnings.warn(
+                "Passing an httpx.AsyncClient to OpenAPIProvider is deprecated "
+                "and will be removed in a future release. Pass an "
+                "httpx2.AsyncClient instead.",
+                FastMCPDeprecationWarning,
+                stacklevel=2,
+            )
         self._client = client
         self._mcp_component_fn = mcp_component_fn
         self._validate_output = validate_output

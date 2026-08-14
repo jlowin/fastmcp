@@ -5,6 +5,7 @@ protecting against userinfo-based bypass attacks like http://localhost@evil.com.
 """
 
 import fnmatch
+import ipaddress
 from urllib.parse import unquote, urlencode, urlparse, urlunparse
 
 from pydantic import AnyUrl
@@ -170,15 +171,58 @@ def _match_host(uri_host: str | None, pattern_host: str | None) -> bool:
     return uri_host == pattern_host
 
 
-def _is_loopback_host(host: str | None) -> bool:
+def is_loopback_host(host: str | None) -> bool:
     """Check if a host is a loopback address.
 
-    Per RFC 8252 §7.3, loopback addresses include localhost, 127.0.0.1, and ::1.
+    Per RFC 8252 §7.3, loopback covers the whole reserved loopback range, not
+    just the two familiar literals: IPv4 `127.0.0.0/8` (so `127.0.0.2` and
+    `127.5.5.5` are loopback just as much as `127.0.0.1`) and IPv6 `::1`. IP
+    hosts are therefore classified with `ipaddress.ip_address().is_loopback`
+    rather than string equality — checking only `127.0.0.1` would let a web
+    client register `https://127.0.0.2/callback` and slip past the
+    non-loopback requirement.
+
+    Names are handled per RFC 6761 §6.3, which reserves the entire `localhost`
+    namespace for the local machine: the exact name `localhost` *and* any
+    subdomain of it (`app.localhost`, `api.app.localhost`). `.localhost` is a
+    reserved TLD that cannot be registered, so a subdomain of it always resolves
+    to the loopback interface and must count as loopback in both directions —
+    otherwise a web client could register `https://app.localhost/callback` and
+    slip past the non-loopback requirement, while a native client using
+    `http://app.localhost:3000/callback` would be wrongly rejected.
+
+    The suffix test is anchored on a leading dot so it cannot be spoofed by a
+    registrable domain: `localhost.evil.com` and `notlocalhost` are ordinary
+    public names and are *not* loopback.
+
+    Hosts are also normalized before classification: bracketed IPv6 literals
+    (`[::1]`) are unwrapped, and a single trailing dot (the absolute/FQDN form,
+    e.g. `localhost.` or `127.0.0.1.`) is stripped, since it denotes the same
+    host. Non-IP hosts fall through to the name check without raising.
     """
     if not host:
         return False
+
     host = host.lower()
-    return host in ("localhost", "127.0.0.1", "::1")
+
+    # urlparse().hostname strips brackets, but callers that parse the netloc
+    # themselves may still pass a bracketed IPv6 literal.
+    if host.startswith("[") and host.endswith("]"):
+        host = host[1:-1]
+
+    # Absolute (fully qualified) form: `localhost.` and `127.0.0.1.` name the
+    # same hosts as their relative spellings.
+    if host.endswith("."):
+        host = host[:-1]
+
+    if not host:
+        return False
+
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        # Not an IP literal — RFC 6761 §6.3 reserved localhost namespace.
+        return host == "localhost" or host.endswith(".localhost")
 
 
 def _match_port(
@@ -314,12 +358,70 @@ def matches_allowed_pattern(uri: str, pattern: str) -> bool:
         return False
 
     # RFC 8252 §7.3: loopback patterns without an explicit port match any port
-    if not (_is_loopback_host(pattern_host) and pattern_port is None):
+    if not (is_loopback_host(pattern_host) and pattern_port is None):
         if not _match_port(uri_port, pattern_port, uri_parsed.scheme.lower()):
             return False
 
     # Path must match (with fnmatch wildcards)
     return _match_path(uri_parsed.path, pattern_parsed.path)
+
+
+def is_redirect_uri_allowed_for_application_type(
+    redirect_uri: str | AnyUrl,
+    application_type: str | None,
+) -> bool:
+    """Check a redirect URI against RFC 7591 / SEP-837 `application_type` rules.
+
+    `application_type` governs which redirect URIs a Dynamically Registered
+    Client may use (RFC 7591 §2, OpenID Connect Dynamic Client Registration §2):
+
+    - `"web"` clients must use `https` redirect URIs on a non-loopback host.
+      Loopback `http`, `https://localhost`, and app/custom schemes are rejected.
+      This is the restriction SEP-837 actually asks for.
+    - `"native"` clients keep every scheme FastMCP already allowed, except that
+      `http` is restricted to loopback hosts (RFC 8252 §7.3, any port). App and
+      private-use schemes pass through untouched: `vscode://`,
+      `com.example.app:/callback`, `myapp://callback`, `urn:ietf:wg:oauth:2.0:oob`.
+
+    Deliberately absent: any attempt to classify a native client's scheme as
+    "private-use" versus "a network transport". There is no sound test. The IANA
+    registry cannot separate them — `vscode` is registered *because* it is an
+    app-dispatch scheme, alongside transports like `coap` and `smb` — and
+    reverse-domain notation fails too, since `iris.beep` and
+    `microsoft.windows.camera` are registered while `myapp` is not. Every
+    formulation either rejects schemes real MCP clients depend on or admits the
+    ones it meant to exclude, so native scheme filtering is left to the
+    unsafe-scheme check below.
+
+    Unsafe browser schemes (`javascript:`, `data:`, `file:`, `vbscript:`) are
+    always rejected regardless of `application_type`. That check predates this
+    function and is unchanged by it.
+
+    The MCP SDK defaults `application_type` to `"native"` because MCP clients
+    typically register loopback redirect URIs, so omitting the field preserves
+    the behavior clients relied on before this check existed. `None` — which a
+    registered-client record carries when the field was never set — is treated
+    the same way.
+    """
+    uri_str = str(redirect_uri)
+
+    if _is_unsafe_redirect_uri(uri_str):
+        return False
+
+    parsed = urlparse(uri_str)
+    scheme = parsed.scheme.lower()
+
+    if application_type == "web":
+        # "web": require an https redirect URI on a non-loopback host.
+        if scheme != "https":
+            return False
+        return not is_loopback_host(parsed.hostname)
+
+    # "native" (and the SDK default): cleartext http only to a loopback host;
+    # every other non-unsafe scheme is left alone.
+    if scheme == "http":
+        return is_loopback_host(parsed.hostname)
+    return True
 
 
 def validate_redirect_uri(

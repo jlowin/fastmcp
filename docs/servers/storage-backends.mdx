@@ -156,9 +156,7 @@ The [OAuth Proxy](/servers/auth/oauth-proxy) and OAuth auth providers use storag
 
 **Development (default behavior):**
 
-By default, FastMCP automatically manages keys and storage based on your platform:
-- **Mac/Windows**: Keys are auto-managed via system keyring, storage defaults to disk. Suitable **only** for development and local testing.
-- **Linux**: Keys are ephemeral, storage defaults to memory.
+By default, FastMCP automatically manages keys and storage the same way on every platform: the signing key is deterministically derived from your client secret, and storage defaults to an encrypted disk store in your platform's data directory (derived from `platformdirs`). Suitable **only** for development and local testing.
 
 No configuration needed:
 
@@ -201,7 +199,7 @@ Both parameters are required for production. **Wrap your storage in `FernetEncry
 
 ### Response Caching Middleware
 
-The [Response Caching Middleware](/servers/middleware#caching-middleware) caches tool calls, resource reads, and prompt requests. Storage configuration is passed via the `cache_storage` parameter:
+The [Response Caching Middleware](/servers/middleware#caching) caches tool calls, resource reads, and prompt requests. Storage configuration is passed via the `cache_storage` parameter:
 
 ```python
 from pathlib import Path
@@ -291,6 +289,6 @@ This allows clients to reconnect without re-authenticating after restarts.
 ## More Resources
 
 - [py-key-value-aio GitHub](https://github.com/strawgate/py-key-value) - Full library documentation
-- [Response Caching Middleware](/servers/middleware#caching-middleware) - Using storage for caching
+- [Response Caching Middleware](/servers/middleware#caching) - Using storage for caching
 - [OAuth Token Security](/deployment/http#oauth-token-security) - Production OAuth configuration
 - [HTTP Deployment](/deployment/http) - Complete deployment guide

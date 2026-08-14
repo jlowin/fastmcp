@@ -10,6 +10,7 @@ from mcp import MCPError as SDKMCPError
 import fastmcp
 import fastmcp._compat as _compat
 from fastmcp import Client, FastMCP
+from fastmcp import FastMCPDeprecationWarning as PublicWarning
 from fastmcp.client.transports import FastMCPTransport
 from fastmcp.exceptions import FastMCPDeprecationWarning, MCPError, McpError
 
@@ -28,6 +29,10 @@ def _reset_warn_once() -> None:
                 delattr(cls, camel)
     _compat._installed = False
     _compat.install()
+
+
+def test_deprecation_warning_is_same_from_public_imports() -> None:
+    assert PublicWarning is FastMCPDeprecationWarning
 
 
 @pytest.fixture(autouse=True)
@@ -50,6 +55,20 @@ class TestCamelCaseBridge:
         )
         with pytest.warns(FastMCPDeprecationWarning):
             assert tool.outputSchema == {"type": "string"}  # ty: ignore[unresolved-attribute]
+
+    @pytest.mark.parametrize(
+        ("camel", "snake", "value"),
+        [
+            ("readOnlyHint", "read_only_hint", True),
+            ("destructiveHint", "destructive_hint", False),
+            ("idempotentHint", "idempotent_hint", True),
+            ("openWorldHint", "open_world_hint", False),
+        ],
+    )
+    def test_tool_annotations_bridged(self, camel, snake, value):
+        annotations = mcp_types.ToolAnnotations(**{snake: value})
+        with pytest.warns(FastMCPDeprecationWarning):
+            assert getattr(annotations, camel) is value
 
     def test_call_tool_result_is_error_bridged(self):
         result = mcp_types.CallToolResult(content=[], is_error=True)
@@ -231,7 +250,8 @@ class TestClientBehaviorCompat:
         assert result.data == "hi"
 
     async def test_ping_returns_bool(self, server):
-        client = Client(transport=FastMCPTransport(server))
+        # `ping` only exists on the older protocol, so this pins that era.
+        client = Client(transport=FastMCPTransport(server), mode="legacy")
         async with client:
             result = await client.ping()
         assert result is True

@@ -1,11 +1,13 @@
 """Core tool transform functionality."""
 
+import json
 import re
+from dataclasses import dataclass
 from typing import Annotated, Any
 
 import pytest
 from mcp_types import TextContent
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, with_config
 
 from fastmcp import FastMCP
 from fastmcp.client.client import Client
@@ -39,6 +41,23 @@ def test_tool_from_tool_no_change(add_tool):
     assert new_tool.parameters == add_tool.parameters
     assert new_tool.name == add_tool.name
     assert new_tool.description == add_tool.description
+
+
+def test_transformed_tool_required_order_is_deterministic():
+    """`required` must follow property order, not set iteration order.
+
+    Set iteration order varies with PYTHONHASHSEED, which broke snapshot
+    tests of tools/list output across processes.
+    """
+
+    def fn(alpha: int, beta: str, gamma: float, delta: bool, epsilon: int) -> str:
+        return "x"
+
+    base = Tool.from_function(fn)
+    transformed = Tool.from_tool(base, transform_args={"alpha": ArgTransform(name="a")})
+    props = list(transformed.parameters["properties"])
+    assert transformed.parameters["required"] == props
+    assert props == ["a", "beta", "gamma", "delta", "epsilon"]
 
 
 def test_from_tool_accepts_decorated_function():
@@ -703,6 +722,28 @@ async def test_transform_fn_wrapped_result_respects_serialize_by_alias():
     result = await transformed.run({})
 
     assert result.structured_content == {"result": {"id": "42"}}
+
+
+async def test_transform_fn_configured_dataclass_respects_serialize_by_alias():
+    """A transform uses its return annotation for nested dataclass serialization."""
+
+    @with_config(ConfigDict(serialize_by_alias=True))
+    @dataclass
+    class Item:
+        id: Annotated[str, Field(serialization_alias="itemId")]
+
+    def base() -> None:
+        pass
+
+    async def transform() -> list[Item]:
+        return [Item(id="42")]
+
+    transformed = Tool.from_tool(base, transform_fn=transform)
+    result = await transformed.run({})
+
+    assert result.structured_content == {"result": [{"itemId": "42"}]}
+    assert isinstance(result.content[0], TextContent)
+    assert json.loads(result.content[0].text) == [{"itemId": "42"}]
 
 
 class TestProxy:

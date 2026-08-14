@@ -2,19 +2,15 @@
 
 from __future__ import annotations
 
-import uuid
-import weakref
-from typing import TYPE_CHECKING, Any, Literal, cast, overload
+from typing import TYPE_CHECKING, Any, cast
 
 import mcp_types
 import pydantic_core
 from mcp.client.caching import CacheMode
-from pydantic import RootModel
 
 if TYPE_CHECKING:
     from fastmcp.client.client import Client
 
-from fastmcp.client.tasks import PromptTask
 from fastmcp.client.telemetry import client_span
 from fastmcp.telemetry import inject_trace_context
 from fastmcp.utilities.logging import get_logger
@@ -22,11 +18,6 @@ from fastmcp.utilities.logging import get_logger
 logger = get_logger(__name__)
 
 AUTO_PAGINATION_MAX_PAGES = 250
-
-# Type alias for task response union (SEP-1686 graceful degradation)
-PromptTaskResponseUnion = RootModel[
-    mcp_types.CreateTaskResult | mcp_types.GetPromptResult
-]
 
 
 class ClientPromptsMixin:
@@ -192,7 +183,6 @@ class ClientPromptsMixin:
             )
             return result
 
-    @overload
     async def get_prompt(
         self: Client,
         name: str,
@@ -200,33 +190,7 @@ class ClientPromptsMixin:
         *,
         version: str | None = None,
         meta: dict[str, Any] | None = None,
-        task: Literal[False] = False,
-    ) -> mcp_types.GetPromptResult: ...
-
-    @overload
-    async def get_prompt(
-        self: Client,
-        name: str,
-        arguments: dict[str, Any] | None = None,
-        *,
-        version: str | None = None,
-        meta: dict[str, Any] | None = None,
-        task: Literal[True],
-        task_id: str | None = None,
-        ttl: int = 60000,
-    ) -> PromptTask: ...
-
-    async def get_prompt(
-        self: Client,
-        name: str,
-        arguments: dict[str, Any] | None = None,
-        *,
-        version: str | None = None,
-        meta: dict[str, Any] | None = None,
-        task: bool = False,
-        task_id: str | None = None,
-        ttl: int = 60000,
-    ) -> mcp_types.GetPromptResult | PromptTask:
+    ) -> mcp_types.GetPromptResult:
         """Retrieve a rendered prompt message list from the server.
 
         Args:
@@ -234,13 +198,9 @@ class ClientPromptsMixin:
             arguments (dict[str, Any] | None, optional): Arguments to pass to the prompt. Defaults to None.
             version (str | None, optional): Specific prompt version to get. If None, gets highest version.
             meta (dict[str, Any] | None): Optional request-level metadata.
-            task (bool): If True, execute as background task (SEP-1686). Defaults to False.
-            task_id (str | None): Optional client-provided task ID (auto-generated if not provided).
-            ttl (int): Time to keep results available in milliseconds (default 60s).
 
         Returns:
-            mcp_types.GetPromptResult | PromptTask: The complete response object if task=False,
-                or a PromptTask object if task=True.
+            mcp_types.GetPromptResult: The complete response object.
 
         Raises:
             RuntimeError: If called while the client is not connected.
@@ -254,94 +214,7 @@ class ClientPromptsMixin:
                 "version": version,
             }
 
-        if task:
-            return await self._get_prompt_as_task(
-                name, arguments, task_id, ttl, meta=request_meta or None
-            )
-
         result = await self.get_prompt_mcp(
             name=name, arguments=arguments, meta=request_meta or None
         )
         return result
-
-    async def _get_prompt_as_task(
-        self: Client,
-        name: str,
-        arguments: dict[str, Any] | None = None,
-        task_id: str | None = None,
-        ttl: int = 60000,
-        meta: dict[str, Any] | None = None,
-    ) -> PromptTask:
-        """Get a prompt for background execution (SEP-1686).
-
-        Returns a PromptTask object that handles both background and immediate execution.
-
-        Args:
-            name: Prompt name to get
-            arguments: Prompt arguments
-            task_id: Optional client-provided task ID (ignored, for backward compatibility)
-            ttl: Time to keep results available in milliseconds (default 60s)
-            meta: Optional request metadata (e.g., version info)
-
-        Returns:
-            PromptTask: Future-like object for accessing task status and results
-        """
-        # Per SEP-1686 final spec: client sends only ttl, server generates taskId
-        # Inject trace context into meta for propagation to server.
-        # SDK v2: request `_meta` is `RequestParamsMeta` (a TypedDict), not
-        # the old `RequestParams.Meta` nested model.
-        propagated_meta = inject_trace_context(meta)
-        request_meta = cast(
-            "mcp_types.RequestParamsMeta | None",
-            propagated_meta if propagated_meta else None,
-        )
-
-        # Serialize arguments for MCP protocol
-        serialized_arguments: dict[str, str] | None = None
-        if arguments:
-            serialized_arguments = {}
-            for key, value in arguments.items():
-                if isinstance(value, str):
-                    serialized_arguments[key] = value
-                else:
-                    serialized_arguments[key] = pydantic_core.to_json(value).decode(
-                        "utf-8"
-                    )
-
-        # SDK v2: GetPromptRequestParams has no `task` field, so this request
-        # cannot carry task metadata over the wire and the server graceful-
-        # degrades to immediate execution (sdk-feedback #3). `ttl` is retained on
-        # the public API but has no wire representation here.
-        request = mcp_types.GetPromptRequest(
-            params=mcp_types.GetPromptRequestParams(
-                name=name,
-                arguments=serialized_arguments,
-                _meta=request_meta,  # type: ignore[unknown-argument]  # pydantic alias
-            )
-        )
-
-        # Server returns CreateTaskResult (task accepted) or GetPromptResult (graceful degradation)
-        wrapped_result = await self._await_with_session_monitoring(
-            self.session.send_request(
-                request=request,  # type: ignore[arg-type]
-                result_type=PromptTaskResponseUnion,
-            )
-        )
-        raw_result = wrapped_result.root
-
-        if isinstance(raw_result, mcp_types.CreateTaskResult):
-            # Task was accepted - extract task info from CreateTaskResult
-            server_task_id = raw_result.task.task_id
-            self._submitted_task_ids.add(server_task_id)
-
-            task_obj = PromptTask(
-                self, server_task_id, prompt_name=name, immediate_result=None
-            )
-            self._task_registry[server_task_id] = weakref.ref(task_obj)
-            return task_obj
-        else:
-            # Graceful degradation - server returned GetPromptResult
-            synthetic_task_id = task_id or str(uuid.uuid4())
-            return PromptTask(
-                self, synthetic_task_id, prompt_name=name, immediate_result=raw_result
-            )

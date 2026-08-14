@@ -5,6 +5,7 @@ from pydantic import AnyUrl, BaseModel
 from fastmcp import Client, FastMCP
 from fastmcp.resources import Resource, ResourceContent, ResourceResult
 from fastmcp.resources.function_resource import FunctionResource
+from tests.conftest import user_meta
 
 
 class TestResourceValidation:
@@ -323,7 +324,7 @@ class TestResourceMetaPropagation:
 
         async with Client(mcp) as client:
             result = await client.read_resource_mcp("test://with-meta")
-            assert result.meta == {"version": "2.0", "source": "test"}
+            assert user_meta(result.meta) == {"version": "2.0", "source": "test"}
 
     async def test_resource_content_meta_received_by_client(self):
         """Meta set on ResourceContent is received by MCP client."""
@@ -355,7 +356,7 @@ class TestResourceMetaPropagation:
 
         async with Client(mcp) as client:
             result = await client.read_resource_mcp("test://both-meta")
-            assert result.meta == {"result_key": "result_val"}
+            assert user_meta(result.meta) == {"result_key": "result_val"}
             assert result.contents[0].meta == {"item_key": "item_val"}
 
     async def test_json_native_return_preserves_component_meta(self):

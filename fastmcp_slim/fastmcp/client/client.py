@@ -7,8 +7,7 @@ import hashlib
 import secrets
 import ssl
 import uuid
-import weakref
-from collections.abc import Callable, Coroutine
+from collections.abc import AsyncIterator, Callable, Coroutine, Mapping, Sequence
 from contextlib import AsyncExitStack, asynccontextmanager, suppress
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -31,15 +30,25 @@ from mcp.client.caching import (
     ClientResponseCache,
     InMemoryResponseCacheStore,
 )
-from mcp.client.extension import NotificationBinding
-from mcp.client.session import ClientRequestContext, MessageHandlerFnT
-from mcp_types import (
-    GetTaskResult,
-    TaskStatusNotification,
-    TaskStatusNotificationParams,
+from mcp.client.client import (
+    _evicting_message_handler,
+    _fold_extensions,
+    _synthesize_discover,
 )
+from mcp.client.extension import (
+    ClaimContext,
+    ClientExtension,
+    NotificationBinding,
+    ResultClaim,
+)
+from mcp.client.session import (
+    ClientRequestContext,
+    ElicitationFnT,
+    MessageHandlerFnT,
+)
+from mcp_types.methods import validate_server_result
 from mcp_types.version import HANDSHAKE_PROTOCOL_VERSIONS, MODERN_PROTOCOL_VERSIONS
-from pydantic import AnyUrl
+from pydantic import AnyUrl, ValidationError
 
 import fastmcp as fastmcp
 from fastmcp.client.auth.oauth import OAuth
@@ -47,6 +56,7 @@ from fastmcp.client.elicitation import (
     ElicitationHandler,
     create_elicitation_callback,
 )
+from fastmcp.client.extension_hooks import build_internal_client_extensions
 from fastmcp.client.logging import (
     LogHandler,
     create_log_callback,
@@ -56,7 +66,6 @@ from fastmcp.client.messages import MessageHandler, MessageHandlerT
 from fastmcp.client.mixins import (
     ClientPromptsMixin,
     ClientResourcesMixin,
-    ClientTaskManagementMixin,
     ClientToolsMixin,
 )
 from fastmcp.client.progress import ProgressHandler, default_progress_handler
@@ -68,12 +77,6 @@ from fastmcp.client.roots import (
 from fastmcp.client.sampling import (
     SamplingHandler,
     create_sampling_callback,
-)
-from fastmcp.client.tasks import (
-    PromptTask,
-    ResourceTask,
-    TaskNotificationHandler,
-    ToolTask,
 )
 from fastmcp.mcp_config import MCPConfig
 from fastmcp.utilities.exceptions import get_catch_handlers
@@ -121,11 +124,11 @@ CacheableT = TypeVar("CacheableT", bound=mcp_types.CacheableResult)
 ConnectMode = Literal["legacy", "auto"] | str
 """How the client negotiates the protocol era at connect time.
 
-- ``"legacy"`` (the current default): the classic initialize handshake, byte-identical
-  to pre-v4 behavior for handshake-era servers.
-- ``"auto"``: probe ``server/discover`` at the newest modern version and adopt it, falling
-  back to the initialize handshake for any server that is not positive evidence of a modern
-  peer (a denylist fallback — see the SDK's ``negotiate_auto``).
+- ``"auto"`` (the default): probe ``server/discover`` at the newest modern version and
+  adopt it, falling back to the initialize handshake for any server that is not positive
+  evidence of a modern peer (a denylist fallback — see the SDK's ``negotiate_auto``).
+- ``"legacy"``: the classic initialize handshake, byte-identical to pre-v4 behavior for
+  handshake-era servers. Opt into this to force the old handshake.
 - a modern protocol-version string (e.g. ``"2026-07-28"``): adopt that version directly
   without probing, synthesizing a minimal ``DiscoverResult`` when none is supplied.
 
@@ -133,51 +136,83 @@ The ``str`` arm is only for the version-pin case; ``Client.__init__`` rejects an
 """
 
 
-def _synthesize_discover(protocol_version: str) -> mcp_types.DiscoverResult:
-    """Build a minimal ``DiscoverResult`` for a pinned modern version (no wire probe).
+@asynccontextmanager
+async def _conformant_discover_only(
+    session: ClientSession,
+) -> AsyncIterator[None]:
+    """Hold ``session.send_discover`` to the same wire schema every later reply must meet.
 
-    Mirrors the SDK Client's ``_synthesize_discover``: the version is pinned but the
-    server identity is unknown, so ``server_info`` is empty.
+    ``negotiate_auto`` accepts a probe that parses as the version-free
+    ``DiscoverResult``, whose ``resultType``/``ttlMs``/``cacheScope`` all carry
+    SDK-side defaults. Every request *after* adoption is instead checked against
+    the strict per-version surface (``validate_server_result``), where those same
+    three fields are required. A server that answers ``server/discover`` without
+    them therefore passes the probe and then fails every subsequent call — the
+    connection is adopted into an era the peer cannot actually serve.
+
+    Closing that gap means judging the probe by the rule that will govern the rest
+    of the connection. A result that would be rejected later is not positive
+    evidence of a modern peer, so it is reported as an ordinary probe failure and
+    ``negotiate_auto`` falls back to the initialize handshake, exactly as it does
+    for a server with no ``server/discover`` at all.
     """
-    return mcp_types.DiscoverResult(
-        supported_versions=[protocol_version],
-        capabilities=mcp_types.ServerCapabilities(),
-        server_info=mcp_types.Implementation(name="", version=""),
-        result_type="complete",
-        ttl_ms=0,
-        cache_scope="public",
-    )
+    send_discover = session.send_discover
 
+    async def _checked_send_discover(version: str) -> dict[str, Any]:
+        raw = await send_discover(version)
+        try:
+            validate_server_result("server/discover", version, raw)
+        except ValidationError as e:
+            # Ordered before the ValueError arm below: pydantic's ValidationError
+            # subclasses ValueError, so a broader clause first would swallow it.
+            logger.debug(
+                "server/discover at %s is not %s-conformant (%s); "
+                "falling back to the initialize handshake",
+                version,
+                version,
+                e,
+            )
+            raise MCPError(
+                code=mcp_types.INVALID_PARAMS,
+                message=(
+                    f"server/discover result is not conformant with {version}; "
+                    "treating the server as handshake-era"
+                ),
+            ) from e
+        except (KeyError, ValueError):
+            # No schema on file for this method/version pair, so there is nothing to
+            # judge the probe against; leave the verdict to negotiate_auto's parse.
+            return raw
+        return raw
 
-def _evicting_message_handler(
-    cache: ClientResponseCache, user_handler: MessageHandlerFnT | None
-) -> MessageHandlerFnT:
-    """Compose cache eviction over an existing message handler (SEP-2549).
-
-    A server notification (tools/list_changed, resource updates, etc.) evicts the
-    entries it invalidates *before* the wrapped handler runs, so a downstream
-    consumer never observes a change while a stale cached listing is still served.
-    Mirrors the SDK Client's `_evicting_message_handler`, but delegates to FastMCP's
-    own handler chain rather than clobbering it. Eviction faults are contained: a
-    cache-store error must never block notification delivery.
-    """
-
-    async def handler(
-        message: Any,
-    ) -> None:
-        if isinstance(message, mcp_types.ServerNotification):
-            try:
-                await cache.evict_for_notification(message)
-            except Exception:
-                logger.exception(
-                    "Response cache eviction failed; the notification is still delivered"
-                )
-        if user_handler is not None:
-            await user_handler(message)
+    # A transport may itself have installed a `send_discover` override, so restore
+    # whatever was there rather than assuming the class attribute.
+    had_own = "send_discover" in vars(session)
+    session.send_discover = _checked_send_discover  # ty: ignore[invalid-assignment]
+    try:
+        yield
+    finally:
+        if had_own:
+            session.send_discover = send_discover  # ty: ignore[invalid-assignment]
         else:
-            await anyio.lowlevel.checkpoint()
+            del session.send_discover
 
-    return handler
+
+@dataclass
+class _FoldedExtensions:
+    """`Client(extensions=...)` folded into the shapes `ClientSession` consumes.
+
+    `ad` maps each extension identifier to its advertised settings (the SEP-2133
+    capability ad), `claims` maps each identifier to its `ResultClaim`s, `bindings`
+    is the flat list of `NotificationBinding`s the extensions observe, and `by_model`
+    indexes every claim by its result model so a claimed `tools/call` result can be
+    routed back to the owning resolver.
+    """
+
+    ad: dict[str, dict[str, Any]]
+    claims: dict[str, tuple[ResultClaim[Any], ...]]
+    bindings: list[NotificationBinding[Any]]
+    by_model: dict[type[mcp_types.Result], ResultClaim[Any]]
 
 
 @dataclass
@@ -197,6 +232,22 @@ class ClientSessionState:
     initialize_result: mcp_types.InitializeResult | None = None
 
 
+def _connection_failure(exception: BaseException) -> BaseException:
+    """Present a dead session the same way wherever it is noticed.
+
+    A failed session surfaces from two places: `_connect`, when the connection
+    never comes up, and `_await_with_session_monitoring`, when the session task
+    dies while a request is in flight. Which one wins is a matter of timing, so
+    both report the failure identically — otherwise the same dead backend
+    reaches callers as either a `RuntimeError` naming the connection or the raw
+    transport error, depending on the race. Types callers reasonably branch on
+    are passed through untouched.
+    """
+    if isinstance(exception, httpx2.HTTPStatusError | MCPError):
+        return exception
+    return RuntimeError(f"Client failed to connect: {exception}")
+
+
 @dataclass
 class CallToolResult:
     """Parsed result from a tool call."""
@@ -213,7 +264,6 @@ class Client(
     ClientResourcesMixin,
     ClientPromptsMixin,
     ClientToolsMixin,
-    ClientTaskManagementMixin,
 ):
     """
     MCP client that delegates connection management to a Transport instance.
@@ -259,12 +309,13 @@ class Client(
         timeout: Optional timeout for requests (seconds or timedelta)
         init_timeout: Optional timeout for initial connection (seconds or timedelta).
             Set to 0 to disable. If None, uses the value in the FastMCP global settings.
-        mode: Protocol-era negotiation at connect time. `"legacy"` (the default) runs
-            the initialize handshake, byte-identical to pre-v4 behavior. `"auto"` probes
+        mode: Protocol-era negotiation at connect time. `"auto"` (the default) probes
             `server/discover` and negotiates the modern era, denylist-falling-back to the
-            handshake for legacy servers. A modern version string (e.g. `"2026-07-28"`)
-            adopts that version directly. `mode="auto"` as a future default is a
-            release-time decision; the conservative `"legacy"` is the default for now.
+            initialize handshake for any server that is not positive evidence of a modern
+            peer — safe against a mixed fleet of legacy and modern servers. `"legacy"`
+            forces the initialize handshake, byte-identical to pre-v4 behavior; opt into it
+            to pin the old handshake. A modern version string (e.g. `"2026-07-28"`) adopts
+            that version directly without a probe.
         prior_discover: A previously obtained `DiscoverResult` to adopt when `mode` is a
             version pin, reused instead of synthesizing a minimal one. Ignored otherwise.
         input_required_max_rounds: Cap on `InputRequiredResult` (SEP-2322) retry rounds
@@ -276,6 +327,19 @@ class Client(
             modern-only, so a cache is inert on legacy connections. A custom `CacheConfig`
             store requires `target_id`, since FastMCP transports expose no server URL to
             derive a shared-store identity from.
+        extensions: Opt-in client extensions (SEP-2133), a sequence of
+            `mcp.client.extension.ClientExtension` instances. Each contributes its
+            capability advertisement, its result claims, and its notification bindings,
+            all of which are threaded into the underlying session. User-supplied
+            notification bindings compose with FastMCP's internal task-status binding
+            rather than replacing it. A claimed `call_tool` result is resolved
+            transparently through the owning extension's resolver. For an advertise-only
+            entry, use `mcp.client.advertise(identifier, settings)`.
+        result_claims: Additional `ResultClaim`s (SEP-2133) keyed by the identifier of
+            an extension already advertised through `extensions`, merged with that
+            extension's own claims. Rarely needed directly; prefer declaring claims on
+            the extension itself. Claimed shapes are modern-only and inert on a legacy
+            connection.
 
     Examples:
         ```python
@@ -290,6 +354,13 @@ class Client(
             result = await client.call_tool("my_tool", {"param": "value"})
         ```
     """
+
+    #: Whether FastMCP-internal client extensions (e.g. the tasks extension) are
+    #: folded in automatically at construction. `ProxyClient` overrides this to
+    #: `False`: a proxy forwards calls and must not advertise task support to its
+    #: backend, since proxied tools run synchronously (forbidden mode) and the
+    #: proxy has no path to drive a backend task on the front connection's behalf.
+    _auto_internal_extensions: bool = True
 
     @overload
     def __init__(self: Client[T], transport: T, *args: Any, **kwargs: Any) -> None: ...
@@ -365,10 +436,12 @@ class Client(
         client_info: mcp_types.Implementation | None = None,
         auth: httpx2.Auth | Literal["oauth"] | str | None = None,
         verify: ssl.SSLContext | bool | str | None = None,
-        mode: ConnectMode = "legacy",
+        mode: ConnectMode = "auto",
         prior_discover: mcp_types.DiscoverResult | None = None,
         input_required_max_rounds: int = DEFAULT_INPUT_REQUIRED_MAX_ROUNDS,
         cache: CacheConfig | bool | None = None,
+        extensions: Sequence[ClientExtension] | None = None,
+        result_claims: Mapping[str, Sequence[ResultClaim[Any]]] | None = None,
     ) -> None:
         self.name = name or self.generate_name()
 
@@ -441,29 +514,50 @@ class Client(
             cache
         )
 
-        # The unwrapped base handler (default routes task notifications; a user
-        # handler is preserved as-is). Retained so `new()` can rebuild the clone's
-        # handler without unwrapping the cache-eviction wrapper below.
-        self._base_message_handler: MessageHandlerFnT | None = (
-            message_handler or TaskNotificationHandler(self)
-        )
+        # The unwrapped base handler (a user handler is preserved as-is).
+        # Retained so `new()` can rebuild the clone's handler without unwrapping
+        # the cache-eviction wrapper below.
+        self._base_message_handler: MessageHandlerFnT | None = message_handler
         effective_message_handler = self._base_message_handler
         if self._response_cache is not None:
             effective_message_handler = _evicting_message_handler(
                 self._response_cache, effective_message_handler
             )
 
+        # Opt-in client extensions (SEP-2133) and their result claims. Retained so
+        # `new()` can rebuild an independent set of session kwargs per clone.
+        self._extensions_arg = extensions
+        self._result_claims_arg = result_claims
+        # Model→claim index the resolution path uses; (re)built by
+        # `_build_extension_kwargs`.
+        self._claim_by_model: dict[type[mcp_types.Result], ResultClaim[Any]] = {}
+
+        # Build the elicitation callback up front: it is threaded both into the
+        # session (to answer server-initiated elicitation) and into the internal
+        # client extensions (so a task resolver can answer in-task input), and
+        # `_build_extension_kwargs` — called below — needs it.
+        self._elicitation_callback: ElicitationFnT | None = (
+            create_elicitation_callback(elicitation_handler)
+            if elicitation_handler is not None
+            else None
+        )
+
         self._session_kwargs: SessionKwargs = {
             "sampling_callback": None,
             "list_roots_callback": None,
             "logging_callback": create_log_callback(log_handler),
+            # Log delivery is opt-in per request on the modern protocol: the
+            # session stamps this level into each request's `_meta`, and a
+            # server sends nothing without it. FastMCP's contract is that a
+            # client receives everything unless it narrows the level itself, so
+            # request the most permissive level and let the server's own
+            # `client_log_level` (and legacy `set_logging_level`) do the
+            # filtering. Inert on the handshake eras, which have no such opt-in.
+            "log_level": "debug",
             "message_handler": effective_message_handler,
             "read_timeout_seconds": read_timeout_seconds,
             "client_info": client_info,
-            # SDK v2 does not carry `notifications/tasks/status` in any protocol
-            # version's core notification tables, so it is never tee'd to the
-            # message_handler; a binding routes it to Task objects instead.
-            "notification_bindings": [self._task_status_binding()],
+            **self._build_extension_kwargs(),
         }
 
         if roots is not None:
@@ -479,10 +573,8 @@ class Client(
                 else mcp_types.SamplingCapability()
             )
 
-        if elicitation_handler is not None:
-            self._session_kwargs["elicitation_callback"] = create_elicitation_callback(
-                elicitation_handler
-            )
+        if self._elicitation_callback is not None:
+            self._session_kwargs["elicitation_callback"] = self._elicitation_callback
 
         # Maximum time to wait for a clean disconnect before giving up.
         # Normally disconnects complete in <100ms; this is a safety net for
@@ -492,15 +584,6 @@ class Client(
         # Session context management - see class docstring for detailed explanation
         self._session_state = ClientSessionState()
         self._transport_options: TransportOptions | None = None
-
-        # Track task IDs submitted by this client (for list_tasks support)
-        self._submitted_task_ids: set[str] = set()
-
-        # Registry for routing notifications/tasks/status to Task objects
-
-        self._task_registry: dict[
-            str, weakref.ref[ToolTask | PromptTask | ResourceTask]
-        ] = {}
 
     def _build_response_cache(
         self, cache: CacheConfig | bool | None
@@ -575,12 +658,18 @@ class Client(
         return self._session_state.session
 
     @property
+    def prior_discover(self) -> mcp_types.DiscoverResult | None:
+        """The configured result to adopt when `mode` pins a modern version."""
+        return self._prior_discover
+
+    @property
     def initialize_result(self) -> mcp_types.InitializeResult | None:
         """Get the result of the initialization request.
 
         `None` on a modern (`server/discover`) connection, which negotiates via a
-        `DiscoverResult` rather than an `InitializeResult`. Use `protocol_version` /
-        `server_capabilities` for era-neutral access to the negotiated identity.
+        `DiscoverResult` rather than an `InitializeResult`. Use `protocol_version`,
+        `server_info`, `server_capabilities`, and `instructions` for era-neutral
+        access to the negotiated server metadata.
         """
         return self._session_state.initialize_result
 
@@ -603,6 +692,27 @@ class Client(
         """
         session = self._session_state.session
         return session.server_capabilities if session is not None else None
+
+    @property
+    def server_info(self) -> mcp_types.Implementation | None:
+        """The session's server identity, or `None` when disconnected.
+
+        Populated from whichever negotiation result the era produced (the
+        `InitializeResult` on legacy, the `DiscoverResult` on modern). A directly
+        pinned modern version uses a synthesized identity with an empty name.
+        """
+        session = self._session_state.session
+        return session.server_info if session is not None else None
+
+    @property
+    def instructions(self) -> str | None:
+        """The server's instructions, or `None` when absent or disconnected.
+
+        Populated from whichever negotiation result the era produced (the
+        `InitializeResult` on legacy, the `DiscoverResult` on modern).
+        """
+        session = self._session_state.session
+        return session.instructions if session is not None else None
 
     def set_roots(self, roots: RootsList | RootsHandler) -> None:
         """Set the roots for the client. This does not automatically call `send_roots_list_changed`."""
@@ -627,9 +737,12 @@ class Client(
         self, elicitation_callback: ElicitationHandler
     ) -> None:
         """Set the elicitation callback for the client."""
-        self._session_kwargs["elicitation_callback"] = create_elicitation_callback(
-            elicitation_callback
-        )
+        self._elicitation_callback = create_elicitation_callback(elicitation_callback)
+        self._session_kwargs["elicitation_callback"] = self._elicitation_callback
+        # Rebuild internal extensions (e.g. the tasks extension) so a background
+        # task's in-task input is answered through the newly-set handler, not the
+        # one captured when the client was constructed.
+        self._session_kwargs.update(self._build_extension_kwargs())
 
     def is_connected(self) -> bool:
         """Check if the client is currently connected."""
@@ -660,26 +773,16 @@ class Client(
         new_client._session_state = ClientSessionState()
         new_client._transport_options = self._transport_options
 
-        # Reset mutable task tracking state so new client is independent
-        new_client._task_registry = {}
-        new_client._submitted_task_ids = set()
-
         # Give the clone its own response cache so cached entries are not shared
         # across independent sessions, and rebuild the negotiated_version closure
         # to point at the clone's session state.
         new_client._response_cache = new_client._build_response_cache(self._cache_arg)
 
         # Create a fresh session kwargs dict so the clone doesn't share
-        # the original's mutable dict. Rebind the task notification handler
-        # to the new client if the default handler is in use; preserve any
-        # custom message handler the user may have set.
+        # the original's mutable dict; preserve any custom message handler the
+        # user may have set, re-wrapping with the clone's own cache if one exists.
         new_client._session_kwargs = {**self._session_kwargs}  # type: ignore[typeddict-item]
-        # Recover the unwrapped base handler (never the cache-evicting wrapper): a
-        # default (TaskNotificationHandler) rebinds to the clone; a user handler is
-        # preserved. Then re-wrap with the clone's own cache if one exists.
         base_handler: MessageHandlerFnT | None = self._base_message_handler
-        if isinstance(base_handler, TaskNotificationHandler) or base_handler is None:
-            base_handler = TaskNotificationHandler(new_client)
         new_client._base_message_handler = base_handler
         if new_client._response_cache is not None:
             new_client._session_kwargs["message_handler"] = _evicting_message_handler(
@@ -687,10 +790,9 @@ class Client(
             )
         else:
             new_client._session_kwargs["message_handler"] = base_handler
-        # Rebind the task-status notification binding so it routes to the clone.
-        new_client._session_kwargs["notification_bindings"] = [
-            new_client._task_status_binding()
-        ]
+        # Rebuild the extension-contributed kwargs (capability ad, result claims,
+        # notification bindings) so user extensions compose on the clone.
+        new_client._session_kwargs.update(new_client._build_extension_kwargs())
 
         new_client.name += f":{secrets.token_hex(2)}"
 
@@ -745,14 +847,22 @@ class Client(
         else:
             timeout = normalize_timeout_to_seconds(timeout)
 
+        # A legacy-only transport (SSE, a multi-server proxy config) cannot serve
+        # the modern era; treat "auto" as "legacy" there rather than probing
+        # server/discover, which some such servers answer but then cannot serve.
+        effective_mode = self.mode
+        if effective_mode == "auto" and self.transport.legacy_only:
+            effective_mode = "legacy"
+
         try:
             with anyio.fail_after(timeout):
-                if self.mode == "legacy":
+                if effective_mode == "legacy":
                     self._session_state.initialize_result = (
                         await self.session.initialize()
                     )
-                elif self.mode == "auto":
-                    await negotiate_auto(self.session)
+                elif effective_mode == "auto":
+                    async with _conformant_discover_only(self.session):
+                        await negotiate_auto(self.session)
                     # auto may have fallen back to the legacy handshake; surface its
                     # InitializeResult through the existing public property when so.
                     self._session_state.initialize_result = (
@@ -781,8 +891,9 @@ class Client(
 
         With `mode="auto"` or a pinned modern version, connect-time negotiation may adopt
         the modern `server/discover` era, which has no `InitializeResult`; in that case
-        this method raises. Read `protocol_version` / `server_capabilities` instead, or use
-        `mode="legacy"` (the default) when you need the handshake result.
+        this method raises. Read `protocol_version`, `server_info`,
+        `server_capabilities`, and `instructions` instead, or use `mode="legacy"`
+        when you need the handshake result.
 
         Args:
             timeout: Optional timeout for the initialization request (seconds or timedelta).
@@ -815,8 +926,9 @@ class Client(
         if self.initialize_result is None:
             raise RuntimeError(
                 "The client negotiated a modern protocol era (server/discover), which has "
-                "no InitializeResult. Read client.protocol_version / client.server_capabilities "
-                "instead, or construct the client with mode='legacy'."
+                "no InitializeResult. Inspect client.protocol_version, client.server_info, "
+                "client.server_capabilities, and client.instructions for the metadata "
+                "available in this mode, or construct the client with mode='legacy'."
             )
         return self.initialize_result
 
@@ -899,18 +1011,26 @@ class Client(
 
                     raise
 
-                if self._session_state.session_task.done():
-                    exception = self._session_state.session_task.exception()
+                session_task = self._session_state.session_task
+                if not session_task.done() and self._session_state.session is None:
+                    # `_session_runner` sets `ready_event` from its `finally`,
+                    # so a failed connect can wake the wait above before the
+                    # task is marked done. No session means the connect failed,
+                    # so let the task settle and report the failure here rather
+                    # than letting the raw transport error escape on the next
+                    # request.
+                    await asyncio.wait([session_task], timeout=3)
+
+                if session_task.done():
+                    exception = session_task.exception()
                     if exception is None:
                         raise RuntimeError(
                             "Session task completed without exception but connection failed"
                         )
-                    # Preserve specific exception types that clients may want to handle
-                    if isinstance(exception, httpx2.HTTPStatusError | MCPError):
+                    failure = _connection_failure(exception)
+                    if failure is exception:
                         raise exception
-                    raise RuntimeError(
-                        f"Client failed to connect: {exception}"
-                    ) from exception
+                    raise failure from exception
 
             self._session_state.nesting_counter += 1
 
@@ -1145,50 +1265,87 @@ class Client(
             max_rounds=self.input_required_max_rounds,
         )
 
-    def _handle_task_status_notification(
-        self, notification: TaskStatusNotification
-    ) -> None:
-        """Route task status notification to appropriate Task object.
+    def _build_extension_kwargs(self) -> SessionKwargs:
+        """Session kwargs contributed by `extensions=` / `result_claims=`.
 
-        Called when notifications/tasks/status is received from server.
-        Updates Task object's cache and triggers events/callbacks.
+        Folds the user's `ClientExtension` instances into the capability ad, result
+        claims, and notification bindings the SDK `ClientSession` consumes, then
+        merges in any explicitly-passed `result_claims`.
+
+        Also rebuilds `self._claim_by_model`, the model→claim index the resolution
+        path uses to finish a claimed `tools/call` result, covering both the folded
+        extension claims and the explicit `result_claims` extras.
+
+        FastMCP-internal extensions (e.g. the tasks extension from `fastmcp-tasks`,
+        registered via `register_internal_client_extension_factory`) are folded in
+        automatically so an ordinary `Client` transparently drives a server's
+        background tasks. They lead the fold order; a user extension declaring the
+        same identifier wins, so the internal one is dropped rather than colliding.
         """
-        self._handle_task_status_params(notification.params)
-
-    def _handle_task_status_params(self, params: TaskStatusNotificationParams) -> None:
-        """Route task status notification params to the matching Task object."""
-        task_id = params.task_id
-        if not task_id:
-            return
-
-        # Look up task in registry (weakref)
-        task_ref = self._task_registry.get(task_id)
-        if task_ref:
-            task = task_ref()  # Dereference weakref
-            if task:
-                # Convert notification params to GetTaskResult (they share the same fields via Task)
-                status = GetTaskResult.model_validate(params.model_dump())
-                task._handle_status_notification(status)
-
-    def _task_status_binding(self) -> NotificationBinding[TaskStatusNotificationParams]:
-        """Build a binding routing `notifications/tasks/status` to Task objects.
-
-        SDK v2 drops notifications whose method is absent from the negotiated
-        version's core tables before they reach the message_handler; a binding is
-        the supported channel for observing such vendor notifications.
-        """
-        client_ref = weakref.ref(self)
-
-        async def _handler(params: TaskStatusNotificationParams) -> None:
-            client = client_ref()
-            if client is not None:
-                client._handle_task_status_params(params)
-
-        return NotificationBinding(
-            method="notifications/tasks/status",
-            params_type=TaskStatusNotificationParams,
-            handler=_handler,
+        user_extensions = list(self._extensions_arg or ())
+        user_identifiers = {
+            identifier
+            for extension in user_extensions
+            if (identifier := getattr(extension, "identifier", None)) is not None
+        }
+        internal_extensions = (
+            [
+                extension
+                for extension in build_internal_client_extensions(
+                    self._elicitation_callback
+                )
+                if extension.identifier not in user_identifiers
+            ]
+            if self._auto_internal_extensions
+            else []
         )
+        folded = _fold_extensions([*internal_extensions, *user_extensions])
+
+        claims: dict[str, tuple[ResultClaim[Any], ...]] = dict(folded.claims or {})
+        by_model: dict[type[mcp_types.Result], ResultClaim[Any]] = dict(folded.by_model)
+        for identifier, extra in (self._result_claims_arg or {}).items():
+            existing = claims.get(identifier, ())
+            claims[identifier] = (*existing, *extra)
+            for claim in extra:
+                by_model[claim.model] = claim
+        self._claim_by_model = by_model
+
+        kwargs: SessionKwargs = {
+            "notification_bindings": [*(folded.bindings or ())],
+        }
+        if folded.ad:
+            kwargs["extensions"] = folded.ad
+        if claims:
+            kwargs["result_claims"] = claims
+        return kwargs
+
+    async def _resolve_claimed_result(
+        self,
+        name: str,
+        result: mcp_types.Result,
+        read_timeout_seconds: float | None,
+    ) -> mcp_types.CallToolResult:
+        """Finish a claimed `tools/call` result through its owning extension.
+
+        A modern server may answer `tools/call` with a claimed extension shape
+        (SEP-2133). The session parses it into the claim's model; this hands that
+        model to the owning claim's resolver — which may send follow-up requests
+        through the session — and returns the ordinary `CallToolResult` it
+        produces. Mirrors the SDK Client's resolution path, including the
+        output-schema revalidation the direct path performs.
+        """
+        claim = self._claim_by_model[type(result)]
+        final = await claim.resolve(
+            result,
+            ClaimContext(
+                session=self.session,
+                tool_name=name,
+                read_timeout_seconds=read_timeout_seconds,
+            ),
+        )
+        if not final.is_error:
+            await self.session.validate_tool_result(name, final)
+        return final
 
     async def close(self):
         await self._disconnect(force=True)
@@ -1231,7 +1388,22 @@ class Client(
         )
 
     async def set_logging_level(self, level: mcp_types.LoggingLevel) -> None:
-        """Send a logging/setLevel request."""
+        """Send a logging/setLevel request.
+
+        Handshake-era servers only. `logging/setLevel` asks the server to
+        remember a level for the rest of the session, and the 2026-07-28
+        protocol has no session to remember it in — the method is absent from
+        that era's registry. Log *notifications* are unaffected: they ride the
+        request's own stream, so a server's `ctx.info()` still reaches you.
+        Filter by level on the receiving side instead, in your `log_handler`.
+        """
+        if self.protocol_version in MODERN_PROTOCOL_VERSIONS:
+            raise RuntimeError(
+                "logging/setLevel is not available on MCP 2026-07-28 "
+                "connections; the method requires per-session server state that "
+                "the modern protocol does not have. Filter incoming log "
+                "messages by level in your log_handler instead."
+            )
         # Deprecated upstream in SDK v2 but deliberately kept per compat directive;
         # removed with the multi-round-trip follow-up.
         await self._await_with_session_monitoring(

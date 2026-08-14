@@ -22,11 +22,19 @@ from fastmcp import FastMCP
 from fastmcp.server.auth import MultiAuth, OAuthProxy
 from fastmcp.server.auth.providers.jwt import JWTVerifier
 
+upstream_verifier = JWTVerifier(
+    jwks_uri="https://login.example.com/.well-known/jwks.json",
+    issuer="https://login.example.com",
+    audience="my-app",
+)
+
 auth = MultiAuth(
     server=OAuthProxy(
-        issuer_url="https://login.example.com/...",
-        client_id="my-app",
-        client_secret="secret",
+        upstream_authorization_endpoint="https://login.example.com/oauth/authorize",
+        upstream_token_endpoint="https://login.example.com/oauth/token",
+        upstream_client_id="my-app",
+        upstream_client_secret="secret",
+        token_verifier=upstream_verifier,
         base_url="https://my-server.com",
     ),
     verifiers=[

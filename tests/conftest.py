@@ -4,11 +4,11 @@ import secrets
 import socket
 import sys
 from collections.abc import Callable, Generator
-from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
 import pytest
+from mcp_types import SERVER_INFO_META_KEY
 from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
@@ -22,6 +22,21 @@ from tests.utilities.httpx2_mock import httpx_mock as httpx_mock
 # See: https://github.com/python/cpython/issues/116773
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
+
+def user_meta(meta: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Strip the SDK's `serverInfo` stamp from a result's `_meta`.
+
+    Every 2026-era result carries `io.modelcontextprotocol/serverInfo` (spec
+    #3002), stamped by the SDK runner rather than by the component that
+    produced the result. Tests asserting on the meta a tool or resource set
+    itself use this to ignore the stamp, and get `None` back when the stamp was
+    the only entry.
+    """
+    if meta is None:
+        return None
+    remaining = {k: v for k, v in meta.items() if k != SERVER_INFO_META_KEY}
+    return remaining or None
 
 
 def make_server_request_context(
@@ -85,24 +100,44 @@ def enable_fastmcp_logger_propagation(caplog):
     root_logger.propagate = original_propagate
 
 
+@pytest.fixture(scope="session")
+def _settings_home_root(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """Session-scoped (i.e. per xdist-worker) base directory for isolated
+    settings.home directories.
+
+    Created once via ``tmp_path_factory`` so ``isolate_settings_home`` can
+    carve out a per-test subdirectory with a plain, cheap ``mkdir`` instead
+    of requesting a fresh ``tmp_path`` (which every test would otherwise pay
+    for, autouse) on every single test.
+    """
+    return tmp_path_factory.mktemp("fastmcp-test-home")
+
+
 @pytest.fixture(autouse=True)
-def isolate_settings_home(tmp_path: Path):
+def isolate_settings_home(_settings_home_root: Path):
     """Ensure each test uses an isolated settings.home directory.
 
     This prevents file locking issues when multiple tests share the same
-    storage directory in settings.home / "oauth-proxy".
+    storage directory in settings.home / "oauth-proxy". That collision is
+    not hypothetical: most oauth-proxy tests construct their proxy with the
+    same hardcoded jwt_signing_key ("test-secret"), and the storage
+    directory's name is a fingerprint derived from that key -- so any two
+    tests reusing it resolve to the *same* subdirectory. Reusing a single
+    settings.home across the whole session/worker would let one test's
+    persisted client/token state leak into the next, even though the tests
+    run sequentially within a worker. A fresh subdirectory per test avoids
+    that leakage while a session-scoped root avoids paying tmp_path's
+    per-test overhead (numbering, test-id sanitization, retention-policy
+    bookkeeping) for the ~99% of tests that never touch this directory.
 
-    Also sets a fast Docket polling interval for tests — the default 50ms
-    is fine for production but still adds ~25ms average pickup latency per
-    task. 10ms makes task tests near-instant.
+    Docket settings moved to the fastmcp-tasks package, so they are no longer
+    overridden here.
     """
-    test_home = tmp_path / "fastmcp-test-home"
-    test_home.mkdir(exist_ok=True)
+    test_home = _settings_home_root / secrets.token_hex(8)
+    test_home.mkdir()
 
     with temporary_settings(
         home=test_home,
-        docket__minimum_check_interval=timedelta(milliseconds=10),
-        docket__url=f"memory://{secrets.token_hex(4)}",
         client_disconnect_timeout=1,
     ):
         yield

@@ -1,10 +1,48 @@
 from __future__ import annotations
 
-import copy
 from collections import defaultdict
 from typing import Any
 
-from jsonref import JsonRefError, replace_refs
+
+def replace_refs(*args: Any, **kwargs: Any) -> Any:
+    """Call jsonref lazily while preserving the module's patchable boundary."""
+    from jsonref import replace_refs as _replace_refs
+
+    return _replace_refs(*args, **kwargs)
+
+
+def _copy_schema(schema: dict[str, Any]) -> dict[str, Any]:
+    """Return a deep copy of a JSON schema without recursing.
+
+    `copy.deepcopy` consumes stack frames in proportion to nesting depth, so a
+    deeply nested schema raises `RecursionError` before the traversals in this
+    module can apply their own depth guards — turning a schema that used to
+    compress into one that fails outright. Schemas are plain JSON, so an
+    explicit stack copies the containers at any depth and shares the immutable
+    scalars at the leaves.
+    """
+    root: dict[str, Any] = {}
+    stack: list[tuple[Any, Any]] = [(schema, root)]
+
+    while stack:
+        source, target = stack.pop()
+        if isinstance(source, dict):
+            pairs: list[tuple[Any, Any]] = list(source.items())
+        else:
+            pairs = list(enumerate(source))
+
+        for key, value in pairs:
+            if isinstance(value, dict):
+                child: Any = {}
+                stack.append((value, child))
+            elif isinstance(value, list):
+                child = [None] * len(value)
+                stack.append((value, child))
+            else:
+                child = value
+            target[key] = child
+
+    return root
 
 
 def _defs_have_cycles(defs: dict[str, Any]) -> bool:
@@ -188,6 +226,10 @@ def dereference_refs(schema: dict[str, Any]) -> dict[str, Any]:
     if _defs_have_cycles(schema.get("$defs", {})):
         return resolve_root_ref(schema)
 
+    # Most schema operations do not dereference. Keep jsonref (and its requests
+    # dependency tree) out of server startup until a schema actually needs it.
+    from jsonref import JsonRefError
+
     try:
         # Use jsonref to resolve all $ref references
         # proxies=False returns plain dicts (not proxy objects)
@@ -348,7 +390,7 @@ def _prune_param(schema: dict[str, Any], param: str) -> dict[str, Any]:
     """Return a new schema with *param* removed from `properties`, `required`,
     and (if no longer referenced) `$defs`.
     """
-    schema = copy.deepcopy(schema)
+    schema = _copy_schema(schema)
 
     # ── 1. drop from properties/required ──────────────────────────────
     props = schema.get("properties", {})
@@ -501,7 +543,7 @@ def _single_pass_optimize(
     # Work on a copy so the caller's schema is never mutated (see docstring). The
     # pruning phases below pop keys/$defs in place, which would otherwise corrupt a
     # shared dict such as a live Tool.input_schema passed straight to compress_schema.
-    schema = copy.deepcopy(schema)
+    schema = _copy_schema(schema)
 
     # Phase 1: Collect references and apply simple cleanups
     # Track which $defs are referenced from the main schema and from other $defs
@@ -510,6 +552,11 @@ def _single_pass_optimize(
         list
     )  # def A references def B
     defs = schema.get("$defs")
+
+    # Set when the traversal below gives up at its depth limit. Once that
+    # happens the reference scan is incomplete, so we can no longer tell which
+    # definitions are genuinely unused.
+    reference_scan_truncated = False
 
     def traverse_and_clean(
         node: object,
@@ -528,7 +575,10 @@ def _single_pass_optimize(
         about) but we skip all cleanups so we don't mutate user data that
         happens to look metadata-shaped.
         """
+        nonlocal reference_scan_truncated
+
         if depth > 50:  # Prevent infinite recursion
+            reference_scan_truncated = True
             return
 
         if isinstance(node, dict):
@@ -560,19 +610,19 @@ def _single_pass_optimize(
                 if (
                     prune_titles
                     and "title" in node
-                    and isinstance(node["title"], str)  # type: ignore
+                    and isinstance(node["title"], str)
                     and (
                         any(k in node for k in _SCHEMA_KEYWORDS)
                         or all(k in _METADATA_KEYS for k in node)
                     )
                 ):
-                    node.pop("title")  # type: ignore
+                    node.pop("title")
 
                 if (
                     prune_additional_properties
                     and node.get("additionalProperties") is False
                 ):
-                    node.pop("additionalProperties")  # type: ignore
+                    node.pop("additionalProperties")
 
             # Recursive traversal
             for key, value in node.items():
@@ -651,6 +701,13 @@ def _single_pass_optimize(
     if prune_defs and defs:
         for def_name, def_schema in defs.items():
             traverse_and_clean(def_schema, current_def_name=def_name, in_schema=True)
+
+        # An incomplete scan has not seen every $ref, so a definition that looks
+        # unused may simply be referenced below the cutoff. Keeping an unused
+        # definition is harmless; dropping a referenced one leaves a dangling
+        # $ref and an invalid schema.
+        if reference_scan_truncated:
+            return schema
 
         # Phase 4: Remove unused definitions
         def is_def_used(def_name: str, visiting: set[str] | None = None) -> bool:

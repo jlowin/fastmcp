@@ -1,13 +1,13 @@
 import abc
 import contextlib
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Literal, TypeVar
 
 import httpx2
 import mcp_types
 from mcp import ClientSession
-from mcp.client.extension import NotificationBinding
+from mcp.client.extension import NotificationBinding, ResultClaim
 from mcp.client.session import (
     ElicitationFnT,
     ListRootsFnT,
@@ -29,10 +29,13 @@ class ClientSessionKwargs(TypedDict, total=False):
     sampling_capabilities: mcp_types.SamplingCapability | None
     list_roots_callback: ListRootsFnT | None
     logging_callback: LoggingFnT | None
+    log_level: mcp_types.LoggingLevel | None
     elicitation_callback: ElicitationFnT | None
     message_handler: MessageHandlerFnT | None
     client_info: mcp_types.Implementation | None
     notification_bindings: Sequence[NotificationBinding[Any]] | None
+    extensions: dict[str, dict[str, Any]] | None
+    result_claims: Mapping[str, Sequence[ResultClaim[Any]]] | None
 
 
 @dataclass(frozen=True)
@@ -50,10 +53,18 @@ class TransportOptions:
             authorization header upstream. Only appropriate for proxies, where
             the caller's credentials are meant to be propagated. Honored by the
             HTTP and SSE transports; ignored by the others.
+        backend_mode: The connect `mode` to give backend clients that a wrapping
+            transport builds on this client's behalf, so a chain of connections
+            speaks one protocol era end to end. `None` leaves each backend
+            client at its own default. Honored by `MCPConfigTransport`, whose
+            multi-server form mounts a proxy per configured server; ignored by
+            transports that connect to a single backend directly, since those
+            carry the connecting client's own session and era.
     """
 
     session_class: type[ClientSession] = ClientSession
     forward_incoming_headers: bool = False
+    backend_mode: str | None = None
 
 
 # SessionKwargs stays exactly the ClientSession constructor's parameters, so a
@@ -69,6 +80,13 @@ class ClientTransport(abc.ABC):
     to an MCP server, and providing a ClientSession within an async context.
 
     """
+
+    #: Whether this transport can only carry the legacy (handshake) protocol era.
+    #: The modern `2026-07-28` era is sessionless and served over Streamable HTTP;
+    #: the SSE transport predates it and cannot serve it. When True, a client with
+    #: `mode="auto"` negotiates the legacy handshake directly rather than probing
+    #: `server/discover` (which some servers answer over SSE but then cannot serve).
+    legacy_only: bool = False
 
     @abc.abstractmethod
     @contextlib.asynccontextmanager

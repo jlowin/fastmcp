@@ -140,7 +140,7 @@ You can cap result count with `default_limit`. The LLM can also override the lim
 Search(default_limit=5)  # return at most 5 results per search
 ```
 
-If your tools use [tags](/servers/tools#tags), Search also accepts a `tags` parameter so the LLM can narrow results to specific categories before searching.
+If your tools use [tags](/servers/visibility#tags), Search also accepts a `tags` parameter so the LLM can narrow results to specific categories before searching.
 
 ### GetSchemas
 
@@ -148,7 +148,7 @@ If your tools use [tags](/servers/tools#tags), Search also accepts a `tags` para
 
 ### GetTags
 
-`GetTags` lets the LLM browse tools by category using [tag](/servers/tools#tags) metadata. At brief detail, the LLM sees tag names with counts. At full detail, it sees tools listed under each tag:
+`GetTags` lets the LLM browse tools by category using [tag](/servers/visibility#tags) metadata. At brief detail, the LLM sees tag names with counts. At full detail, it sees tools listed under each tag:
 
 ```
 - math (3 tools)
@@ -187,7 +187,7 @@ from fastmcp.experimental.transforms.code_mode import CodeMode
 mcp = FastMCP("Server", transforms=[CodeMode()])
 ```
 
-If your tools use [tags](/servers/tools#tags), add `GetTags` so the LLM can browse by category before searching — giving it four stages of progressive disclosure:
+If your tools use [tags](/servers/visibility#tags), add `GetTags` so the LLM can browse by category before searching — giving it four stages of progressive disclosure:
 
 ```python
 from fastmcp import FastMCP
@@ -250,7 +250,7 @@ Here's a minimal example:
 from fastmcp.experimental.transforms.code_mode import CodeMode
 from fastmcp.experimental.transforms.code_mode import GetToolCatalog, GetSchemas
 from fastmcp.server.context import Context
-from fastmcp.tools.tool import Tool
+from fastmcp.tools import Tool
 
 def list_all_tools(get_catalog: GetToolCatalog) -> Tool:
     async def list_tools(ctx: Context) -> str:

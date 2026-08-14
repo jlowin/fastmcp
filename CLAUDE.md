@@ -56,11 +56,13 @@ When modifying MCP functionality, changes typically need to be applied across al
 
 **Read `CONTRIBUTING.md` before opening issues or PRs.** It describes when PRs are appropriate, what we expect from enhancement proposals, and what we'll close without review.
 
+**Review closed contributor PRs.** When reviewing an issue, inspect every associated non-maintainer PR, including closed PRs. External PRs may be closed as part of the issue-link and assignment workflow, so closure alone is not a negative signal. Read `CONTRIBUTING.md` and the PR timeline and comments to understand its status before evaluating it.
+
 ### Git & CI
 
 - Prek hooks are required (run automatically on commits)
 - Never amend commits to fix prek failures
-- Never apply labels manually or invent new ones — the GitHub API auto-creates any unknown label name, polluting the repo's label list. Note the appropriate label in the PR body and let the maintainer/automation apply it. Canonical names: `bugs`, `breaking change`, `enhancements`, `features` (it's `breaking change`, not `breaking`). See the review-pr skill.
+- Never apply labels manually or invent new ones — issues and PRs are auto-labeled by a bot based on title/body/code changes. Don't note a "suggested" or "appropriate" label anywhere in the PR body either. See the review-pr skill.
 - Improvements = enhancements (not features) unless specified
 - **NEVER** force-push on collaborative repos
 - **ALWAYS** run prek before PRs
@@ -68,6 +70,12 @@ When modifying MCP functionality, changes typically need to be applied across al
 - **NEVER** merge a PR marked as do-not-merge or draft. Check title, body, AND labels for `[DNM]`, `DNM`, `DO NOT MERGE`, `DON'T MERGE`, `DONT MERGE`, `do-not-merge`, `dont-merge`, `[DRAFT]`, or `DRAFT` (case-insensitive, any variation — some authors use `[DRAFT]` in the title even when `isDraft` is false). Authors use these as hard stops — respect them even if CI is green and review looks clean. When triaging a batch of PRs, filter these out up front AND re-check each one's labels immediately before merging, since labels can change mid-session.
 - **ALWAYS** read review-bot comments before approving a PR. CodeRabbit and chatgpt-codex-connector (Codex) leave substantive review comments on most PRs in this repo — these bots have read the diff and often flag real issues that aren't in the PR description. Use `gh pr view <num> --comments` and read the bot feedback as part of review. Unlike proposed solutions from issue reporters, review-bot feedback should be evaluated on its merits, not discounted.
 - **Be constructively skeptical of bot review comments on your own PRs.** CodeRabbit, Codex, and claude[bot] run a fresh review pass on every push, which means a PR with active churn can accumulate bot comments in a stream that never really ends — each fix surfaces a new edge case the next pass can flag. Most of the early feedback is real and worth acting on; diminishing returns set in fast. Evaluate each comment on its merits, the same way you would a human reviewer: is this a real bug users will hit, or a hypothetical that requires an adversarial setup? Does the fix introduce more complexity than the problem? Has the bot missed context that's obvious to a human reader (a `*,` keyword-only marker, a design decision documented elsewhere, something already resolved on a later commit)? When a comment is pedantic, a false positive, or flagging something already fixed, reply on the thread explaining the reasoning and move on — don't keep iterating just because more comments arrive. If you find yourself three rounds deep and the feedback is shifting toward "what if someone does X" hypotheticals, you're past the point where each fix is improving the PR. Stop, document the contract as-is, and ship.
+- **Resolve a review thread when you fix it; reply when you're declining it.** A fix explains itself through the commit, so resolving is enough — and it leaves unresolved threads meaning unfinished business, which is the signal worth having. A decline needs a one-line reason in a reply, because resolving collapses the thread and a hidden objection is worse than a visible one. Doing both is noise. Get thread ids from the GraphQL `reviewThreads` field, then resolve:
+
+  ```bash
+  gh api graphql -f query='query($n:Int!){repository(owner:"PrefectHQ",name:"fastmcp"){pullRequest(number:$n){reviewThreads(first:50){nodes{id isResolved path}}}}}' -F n=<pr-number>
+  gh api graphql -f query='mutation($id:ID!){resolveReviewThread(input:{threadId:$id}){thread{isResolved}}}' -F id=PRRT_...
+  ```
 
 ### Outbound Comments and Shell Interpolation
 
@@ -111,7 +119,9 @@ Set `target_commitish` to the same branch that will receive the release tag. For
 
 **Patch releases** (3.1.1, 3.0.2) get 1-2 sentences explaining what broke and what the fix does. Keep it minimal — the auto-generated changelog has the details.
 
-**Merge the docs changelog PR *before* cutting the release, not after.** The post-publish `update-published-docs` job force-pushes the `published-docs` branch (which gofastmcp.com serves) to the released commit for stable releases on the default branch, so the changelog entry only reaches the live site if it's already in the commit being tagged. Land the docs PR on the release target branch first, then cut the release from that branch. If you tag first and merge docs after, this release's changelog won't appear on the live site until the next default-branch stable release force-pushes `published-docs` forward. Maintenance releases from `release/3.x` or `release/2.x` publish packages and GitHub notes without repointing `published-docs`; add their changelog entries on the maintenance branch, slotted into the matching major-version section. Two hand-maintained files mirror the GitHub release and must get a new entry for every version, newest at the top (these are `.mdx` and are not covered by the prek Prettier hook, which only runs on `yaml`/`json5` — match the existing entries' style by hand):
+**Publish docs through a PR.** The `published-docs` branch serves gofastmcp.com, and repository rules reject direct pushes and force-pushes to it. Stable releases from `main` automatically open a publication PR after PyPI succeeds. For prereleases and later docs follow-ups, create the same PR manually: start a temporary branch from the current `published-docs`, make a single commit whose tree exactly matches the desired commit on `main`, and use `published-docs` as the PR base. Merging publishes to production. Never push directly to `published-docs`.
+
+**Merge the docs changelog PR *before* cutting the release, not after.** The post-publish `update-published-docs` job opens a PR that syncs `published-docs` to the released commit for stable releases on the default branch, so the changelog entry only reaches the live site if it's already in the commit being tagged. Land the docs PR on the release target branch first, then cut the release from that branch. If you tag first and merge docs after, this release's publication PR will not include the changelog; publish `main` manually through the PR flow above or wait for the next default-branch stable release. Maintenance releases from `release/3.x` or `release/2.x` publish packages and GitHub notes without repointing `published-docs`; add their changelog entries on the maintenance branch, slotted into the matching major-version section. Two hand-maintained files mirror the GitHub release and must get a new entry for every version, newest at the top (these are `.mdx` and are not covered by the prek Prettier hook, which only runs on `yaml`/`json5` — match the existing entries' style by hand):
 
 - `docs/changelog.mdx` is the full mirror. Add an `<Update label="v<version>" description="YYYY-MM-DD">` block with: a bold linked title (`**[v<version>: <pun>](<release-url>)**`), a condensed 1-paragraph intro (one sentence for patches), the full categorized PR list reformatted from the `--generate-notes` output (`* <title> by [@user](https://github.com/user) in [#NNNN](<pull-url>)`), a `## New Contributors` list (plain `@user`, linked PR), and a `**Full Changelog**: [vA...vB](<compare-url>)` line.
 - `docs/updates.mdx` is the skimmable card feed. Add an `<Update label="FastMCP <version>" description="Month DD, YYYY" tags={["Releases"]}>` wrapping a `<Card>` that links to the GitHub release, with a 1-2 sentence summary and (for point releases) a handful of emoji-bulleted highlights.
@@ -177,6 +187,20 @@ Because the docs land *before* the tag exists, derive the entry from the maintai
 - **Content:** User-focused sections, motivate features (why) before mechanics (how)
 - **Style:** Prose over code comments for important information
 - **Docstrings:** FastMCP docstrings are automatically compiled into MDX documents. Use markdown (single backticks, fenced code blocks), not RST (no double backticks). Bare `{}` in examples will be interpreted as JSX — wrap in backticks instead.
+
+## Code Review Rules
+
+### Framework regressions and root causes
+
+- Review changes carefully for regressions in supported framework behavior, including interactions beyond the immediate diff. Trace relevant callers, shared abstractions, protocol and public API contracts, and all affected MCP component types. Determine whether a change fixes the causal code path or merely compensates for the symptom; side channels and special cases that leave the root cause intact should be treated as suspect.
+
+### Comprehensive first pass
+
+- Review the entire pull request diff against the merge base, not only the latest commits. Inspect every changed file and the relevant surrounding code, collect all independent, substantiated consequential findings before submitting the review, and report the complete set in one review whenever possible. Do not stop after finding the first few issues or defer other already-visible findings to later review cycles.
+
+### Prior discussion and proportionality
+
+- When prior review threads and author or maintainer replies are available, read them before commenting. Evaluate responses on their merits and do not repeat a resolved or convincingly rebutted finding without new evidence. Avoid fixating on speculative edge cases: report an edge case only when it is reachable under supported usage or a credible threat model and has meaningful impact; otherwise omit it or clearly treat it as non-blocking.
 
 ## Critical Patterns
 

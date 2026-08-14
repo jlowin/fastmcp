@@ -1,6 +1,7 @@
 """A middleware for response caching."""
 
 import hashlib
+import json
 from collections.abc import Sequence
 from logging import Logger
 from typing import Any, TypedDict
@@ -18,8 +19,18 @@ from key_value.aio.wrappers.statistics.wrapper import (
 from pydantic import Field
 from typing_extensions import NotRequired, Self, TypeVar, override
 
-from fastmcp.prompts.base import Message, Prompt, PromptResult
-from fastmcp.resources.base import Resource, ResourceContent, ResourceResult
+from fastmcp.prompts.base import (
+    InputRequiredPromptResult,
+    Message,
+    Prompt,
+    PromptResult,
+)
+from fastmcp.resources.base import (
+    InputRequiredResourceResult,
+    Resource,
+    ResourceContent,
+    ResourceResult,
+)
 from fastmcp.server.dependencies import get_access_token
 from fastmcp.server.middleware.middleware import CallNext, Middleware, MiddlewareContext
 from fastmcp.tools.base import InputRequiredToolResult, Tool, ToolResult
@@ -27,6 +38,28 @@ from fastmcp.utilities.logging import get_logger
 from fastmcp.utilities.types import FastMCPBaseModel
 
 logger: Logger = get_logger(name=__name__)
+
+
+def _is_continuation_leg(context: MiddlewareContext[Any]) -> bool:
+    """Whether this request is answering a previous round's ask (SEP-2322).
+
+    A continuation must bypass the cache entirely. Cache keys are built from the
+    component's identity and arguments alone, so a continuation shares its key
+    with a fresh call: reading could serve a prior flow's final answer to this
+    leg, and writing would serve THIS flow's final answer to a later fresh call,
+    which would then never be asked the questions at all.
+
+    Either signal marks a continuation. A state-only round (one that carried
+    `request_state` without asking anything) retries with `input_responses`
+    still `None`.
+    """
+    fastmcp_ctx = context.fastmcp_context
+    if fastmcp_ctx is None:
+        return False
+    return (
+        fastmcp_ctx.input_responses is not None or fastmcp_ctx.request_state is not None
+    )
+
 
 # Constants
 ONE_HOUR_IN_SECONDS = 3600
@@ -322,7 +355,11 @@ class ResponseCachingMiddleware(Middleware):
 
         cache_key: str = _get_auth_partition_key()
 
-        if cached_value := await self._list_tools_cache.get(key=cache_key):
+        # an empty list is a cached result, not a miss: `get` returns None when the key is
+        # absent, so testing truthiness would re-list on every request for any caller whose
+        # filtered view is empty
+        cached_value = await self._list_tools_cache.get(key=cache_key)
+        if cached_value is not None:
             return cached_value
 
         tools: Sequence[Tool] = await call_next(context)
@@ -351,7 +388,9 @@ class ResponseCachingMiddleware(Middleware):
 
         cache_key: str = _get_auth_partition_key()
 
-        if cached_value := await self._list_resources_cache.get(key=cache_key):
+        # an empty list is a cached result, not a miss (see on_list_tools)
+        cached_value = await self._list_resources_cache.get(key=cache_key)
+        if cached_value is not None:
             return cached_value
 
         resources: Sequence[Resource] = await call_next(context)
@@ -382,7 +421,9 @@ class ResponseCachingMiddleware(Middleware):
 
         cache_key: str = _get_auth_partition_key()
 
-        if cached_value := await self._list_prompts_cache.get(key=cache_key):
+        # an empty list is a cached result, not a miss (see on_list_tools)
+        cached_value = await self._list_prompts_cache.get(key=cache_key)
+        if cached_value is not None:
             return cached_value
 
         prompts: Sequence[Prompt] = await call_next(context)
@@ -413,19 +454,7 @@ class ResponseCachingMiddleware(Middleware):
         ) is False or not self._matches_tool_cache_settings(tool_name=tool_name):
             return await call_next(context)
 
-        # A multi-round continuation leg (SEP-2322) must bypass the cache
-        # entirely: the cache key is built from the tool name and arguments
-        # only, so a continuation shares its key with a fresh call. Reading
-        # could serve a prior flow's final answer to this leg; writing would
-        # serve THIS flow's final answer to a later fresh call — which would
-        # then never be asked the tool's questions. Either signal marks a
-        # continuation: a state-only round (request_state with no questions)
-        # retries with input_responses=None but still carries request_state.
-        fastmcp_ctx = context.fastmcp_context
-        if fastmcp_ctx is not None and (
-            fastmcp_ctx.input_responses is not None
-            or fastmcp_ctx.request_state is not None
-        ):
+        if _is_continuation_leg(context):
             return await call_next(context)
 
         cache_key: str = _make_call_tool_cache_key(
@@ -443,6 +472,23 @@ class ResponseCachingMiddleware(Middleware):
         # callers and bypass the tool's own per-round logic. Return it straight
         # through without storing.
         if isinstance(tool_result, InputRequiredToolResult):
+            return tool_result
+
+        # A task-augmented call returns a CreateTaskResult (the tasks extension)
+        # up through this middleware — an acknowledgement that the work was
+        # enqueued, not a cacheable answer, and without a ToolResult's
+        # content/structured_content. Pass any non-ToolResult straight through
+        # rather than crash wrapping it (the crash would fire after the task is
+        # already enqueued, so a client retry could duplicate side effects).
+        if not isinstance(tool_result, ToolResult):
+            return tool_result
+
+        # Never cache an error result. A tool that reports failure by returning
+        # is_error=True is describing this attempt, not a stable answer — the
+        # upstream 503 or bad gateway it is reporting is exactly the kind of
+        # thing that clears on retry. Caching it would pin the failure in place
+        # for the full TTL and stop the tool from ever being retried.
+        if tool_result.is_error:
             return tool_result
 
         cacheable_tool_result: CacheableToolResult = CacheableToolResult.wrap(
@@ -468,6 +514,9 @@ class ResponseCachingMiddleware(Middleware):
         if self._read_resource_settings.get("enabled") is False:
             return await call_next(context)
 
+        if _is_continuation_leg(context):
+            return await call_next(context)
+
         cache_key: str = _make_read_resource_cache_key(
             msg=context.message, auth_key=_get_auth_partition_key()
         )
@@ -477,6 +526,14 @@ class ResponseCachingMiddleware(Middleware):
             return cached_value.unwrap()
 
         value: ResourceResult = await call_next(context)
+
+        # Never cache a multi-round-trip ask (SEP-2322). An
+        # InputRequiredResourceResult is a request for client input on this leg,
+        # not a stable answer, and it carries no contents — wrapping it would
+        # cache an empty read and the client would never see the question.
+        if isinstance(value, InputRequiredResourceResult):
+            return value
+
         cached_value = CacheableResourceResult.wrap(value)
 
         await self._read_resource_cache.put(
@@ -498,6 +555,9 @@ class ResponseCachingMiddleware(Middleware):
         if self._get_prompt_settings.get("enabled") is False:
             return await call_next(context)
 
+        if _is_continuation_leg(context):
+            return await call_next(context)
+
         cache_key: str = _make_get_prompt_cache_key(
             msg=context.message, auth_key=_get_auth_partition_key()
         )
@@ -506,6 +566,14 @@ class ResponseCachingMiddleware(Middleware):
             return cached_value.unwrap()
 
         value: PromptResult = await call_next(context)
+
+        # Never cache a multi-round-trip ask (SEP-2322). An
+        # InputRequiredPromptResult is a request for client input on this leg,
+        # not a stable answer, and it carries no messages — wrapping it would
+        # cache an empty prompt and the client would never see the question.
+        if isinstance(value, InputRequiredPromptResult):
+            return value
+
         cached_value = CacheablePromptResult.wrap(value)
 
         await self._get_prompt_cache.put(
@@ -542,13 +610,19 @@ class ResponseCachingMiddleware(Middleware):
 
 
 def _get_arguments_str(arguments: dict[str, Any] | None) -> str:
-    """Get a string representation of the arguments."""
+    """Get a canonical string representation of the arguments."""
 
     if arguments is None:
         return "null"
 
     try:
-        return pydantic_core.to_json(value=arguments, fallback=str).decode()
+        return json.dumps(
+            pydantic_core.to_jsonable_python(arguments, fallback=str),
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+            default=str,
+        )
 
     except TypeError:
         return repr(arguments)

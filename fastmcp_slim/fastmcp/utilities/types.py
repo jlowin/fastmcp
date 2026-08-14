@@ -335,18 +335,21 @@ class Audio:
 
     def _get_mime_type(self) -> str:
         """Get MIME type from format or guess from file extension."""
+        mapping = {
+            "wav": "audio/wav",
+            "mp3": "audio/mpeg",
+            "ogg": "audio/ogg",
+            "m4a": "audio/mp4",
+            "flac": "audio/flac",
+        }
+
         if self._format:
-            return f"audio/{self._format.lower()}"
+            return mapping.get(self._format.lower(), f"audio/{self._format.lower()}")
 
         if self.path:
-            suffix = self.path.suffix.lower()
-            return {
-                ".wav": "audio/wav",
-                ".mp3": "audio/mpeg",
-                ".ogg": "audio/ogg",
-                ".m4a": "audio/mp4",
-                ".flac": "audio/flac",
-            }.get(suffix, "application/octet-stream")
+            return mapping.get(
+                self.path.suffix.lower().lstrip("."), "application/octet-stream"
+            )
         return "audio/wav"  # default for raw binary data
 
     def to_audio_content(
@@ -421,7 +424,12 @@ class File:
         elif self.data is not None:
             raw_data = self.data
             if self._name:
-                uri_str = f"file:///{self._name}.{self._mime_type.split('/')[1]}"
+                extension = (
+                    ""
+                    if Path(self._name).suffix
+                    else f".{self._mime_type.split('/')[1]}"
+                )
+                uri_str = f"file:///{self._name}{extension}"
             else:
                 uri_str = f"file:///resource.{self._mime_type.split('/')[1]}"
         else:

@@ -41,7 +41,7 @@ try:
 except ImportError as e:
     raise ImportError(
         "The `anthropic` package is not installed. "
-        "Install it with `pip install fastmcp-slim[anthropic]` or add `anthropic` to your dependencies."
+        "Install it with `pip install 'fastmcp-slim[anthropic]'` or add `anthropic` to your dependencies."
     ) from e
 
 __all__ = ["AnthropicSamplingHandler"]
@@ -75,7 +75,7 @@ class AnthropicSamplingHandler:
     Example:
         ```python
         from anthropic import AsyncAnthropic
-        from fastmcp import FastMCP
+        from fastmcp import Client
         from fastmcp.client.sampling.handlers.anthropic import AnthropicSamplingHandler
 
         handler = AnthropicSamplingHandler(
@@ -83,7 +83,9 @@ class AnthropicSamplingHandler:
             client=AsyncAnthropic(),
         )
 
-        server = FastMCP(sampling_handler=handler)
+        # Answers a handshake-era server's push request and a modern server's
+        # input-required round alike.
+        client = Client("https://example.com/mcp", sampling_handler=handler)
         ```
     """
 

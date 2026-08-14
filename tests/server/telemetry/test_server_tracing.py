@@ -449,7 +449,9 @@ class TestSeamServerSpan:
     ):
         mcp = FastMCP("test-server")
 
-        async with Client(mcp) as client:
+        # `logging/setLevel` was dropped from the modern protocol version
+        # (SEP-2577), so exercising it needs the older protocol.
+        async with Client(mcp, mode="legacy") as client:
             await client.set_logging_level("info")
 
         spans = trace_exporter.get_finished_spans()
@@ -470,7 +472,9 @@ class TestSeamServerSpan:
         """A seam-spanned method must produce exactly one SERVER span, not two."""
         mcp = FastMCP("test-server")
 
-        async with Client(mcp) as client:
+        # `logging/setLevel` only exists on the older protocol; see the pin
+        # note in `test_set_logging_level_emits_seam_span` above.
+        async with Client(mcp, mode="legacy") as client:
             await client.set_logging_level("info")
 
         spans = trace_exporter.get_finished_spans()
@@ -583,14 +587,14 @@ class TestTelemetryEnabledByDefault:
     """Instrumentation is on by default and controllable via the off-switch.
 
     FastMCP uses only the OpenTelemetry API, so spans are created unconditionally
-    and light up when an SDK is configured. `FASTMCP_ENABLE_TELEMETRY=false`
-    (`fastmcp.settings.enable_telemetry`) turns span creation off entirely, so no
+    and light up when an SDK is configured. `FASTMCP_TELEMETRY_MODE=off`
+    (`fastmcp.settings.telemetry_mode`) turns span creation off entirely, so no
     FastMCP spans are exported even with an SDK configured.
     """
 
     async def test_spans_fire_by_default(self, trace_exporter: InMemorySpanExporter):
         """No opt-in required: a tool call produces a span out of the box."""
-        assert fastmcp.settings.enable_telemetry is True
+        assert fastmcp.settings.telemetry_mode == "native"
 
         mcp = FastMCP("test-server")
 
@@ -611,7 +615,7 @@ class TestTelemetryEnabledByDefault:
     ):
         """With telemetry disabled, no spans are created even with an SDK
         configured (the exporter fixture installs one)."""
-        monkeypatch.setattr(fastmcp.settings, "enable_telemetry", False)
+        monkeypatch.setattr(fastmcp.settings, "telemetry_mode", "off")
 
         mcp = FastMCP("test-server")
 
@@ -637,7 +641,7 @@ class TestTelemetryEnabledByDefault:
         are governed by the user's OpenTelemetry SDK, not FastMCP's off-switch,
         so they may still appear — the assertion filters them out.
         """
-        monkeypatch.setattr(fastmcp.settings, "enable_telemetry", False)
+        monkeypatch.setattr(fastmcp.settings, "telemetry_mode", "off")
 
         mcp = FastMCP("test-server")
 
@@ -672,7 +676,7 @@ class TestTelemetryEnabledByDefault:
         `trace.get_current_span()` inside a handler must still return the
         caller's enclosing span, and attributes written there must land on it.
         """
-        monkeypatch.setattr(fastmcp.settings, "enable_telemetry", False)
+        monkeypatch.setattr(fastmcp.settings, "telemetry_mode", "off")
 
         tracer = trace.get_tracer("test-enclosing")
         captured: dict[str, Span] = {}
@@ -745,10 +749,14 @@ class TestProtocolVersionAttribute:
         self, trace_exporter: InMemorySpanExporter
     ):
         """Seam-only methods (never reaching the high-level path) also carry the
-        protocol version."""
+        protocol version.
+
+        Pinned to legacy: `logging/setLevel` is a handshake-era seam method the
+        modern (2026-07-28) protocol drops, so the span exists only on legacy.
+        """
         mcp = FastMCP("test-server")
 
-        async with Client(mcp) as client:
+        async with Client(mcp, mode="legacy") as client:
             await client.set_logging_level("info")
 
         spans = trace_exporter.get_finished_spans()

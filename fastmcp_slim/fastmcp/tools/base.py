@@ -1,12 +1,12 @@
 from __future__ import annotations
 
+import inspect
 from collections.abc import Callable
 from typing import (
     TYPE_CHECKING,
     Annotated,
     Any,
     ClassVar,
-    overload,
 )
 
 import mcp_types
@@ -21,33 +21,34 @@ from mcp_types import (
     ToolExecution,
 )
 from mcp_types import Tool as MCPTool
-from pydantic import BaseModel, Field, model_validator
+from pydantic import (
+    BaseModel,
+    Field,
+    PrivateAttr,
+    PydanticSchemaGenerationError,
+    model_validator,
+)
 from pydantic.json_schema import SkipJsonSchema
 
 from fastmcp.utilities.authorization import AuthCheck
 from fastmcp.utilities.components import FastMCPComponent
 from fastmcp.utilities.logging import get_logger
-from fastmcp.utilities.tasks import TaskConfig, TaskMeta
+from fastmcp.utilities.prefab import (
+    is_prefab_app,
+    is_prefab_component,
+    prefab_app_from_component,
+)
+from fastmcp.utilities.tasks import TaskConfig
 from fastmcp.utilities.types import (
     Audio,
     File,
     Image,
     NotSet,
     NotSetT,
+    get_cached_typeadapter,
 )
 
-try:
-    from prefab_ui.app import PrefabApp as _PrefabApp
-    from prefab_ui.components.base import Component as _PrefabComponent
-
-    _HAS_PREFAB = True
-except ImportError:
-    _HAS_PREFAB = False
-
 if TYPE_CHECKING:
-    from docket import Docket
-    from docket.execution import Execution
-
     from fastmcp.tools.function_tool import FunctionTool
     from fastmcp.tools.tool_transform import ArgTransform, TransformedTool
 
@@ -55,38 +56,45 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
+_JSONABLE_ADAPTER = get_cached_typeadapter(Any)
 
-def resolve_serialize_by_alias(value: Any) -> bool:
-    """Resolve the effective ``by_alias`` setting for serializing *value*.
 
-    Pydantic's low-level serialization helpers (``to_json``,
-    ``to_jsonable_python``) default ``by_alias`` to ``True``, which silently
-    ignores a model's ``serialize_by_alias`` config. When *value* is a Pydantic
-    model we consult that config instead, falling back to ``True`` to preserve
-    FastMCP's longstanding default of emitting aliases when no preference is
-    declared.
+def _default_title(name: str) -> str:
+    """Derive a display title from a tool name.
+
+    The MCP spec says clients should fall back to `name` for display when
+    `title` is absent, but some clients (e.g. ChatGPT) instead drop the tool
+    entirely. Always emitting a title avoids depending on that fallback.
     """
-    if isinstance(value, type):
-        model = value if issubclass(value, BaseModel) else None
-    elif isinstance(value, BaseModel):
-        model = type(value)
-    else:
-        model = None
-
-    if model is None:
-        return True
-
-    configured = model.model_config.get("serialize_by_alias")
-    return True if configured is None else configured
+    return name.replace("_", " ").replace("-", " ").title()
 
 
 def default_serializer(data: Any) -> str:
-    return pydantic_core.to_json(
-        data, fallback=str, by_alias=resolve_serialize_by_alias(data)
-    ).decode()
+    return _JSONABLE_ADAPTER.dump_json(data, fallback=str).decode()
+
+
+def _serialize_to_jsonable(data: Any, annotation: Any = Any) -> Any:
+    """Serialize through Pydantic, falling back for unsupported annotations."""
+    if (
+        annotation is inspect.Signature.empty
+        or annotation is None
+        or annotation is Any
+        or annotation is ...
+        or isinstance(annotation, str)
+    ):
+        adapter = _JSONABLE_ADAPTER
+    else:
+        try:
+            return get_cached_typeadapter(annotation).dump_python(data, mode="json")
+        except PydanticSchemaGenerationError:
+            adapter = _JSONABLE_ADAPTER
+
+    return adapter.dump_python(data, mode="json")
 
 
 class ToolResult(BaseModel):
+    _raw_mcp_result: CallToolResult | None = PrivateAttr(default=None)
+
     content: list[ContentBlock] = Field(
         description="List of content blocks for the tool result"
     )
@@ -120,19 +128,15 @@ class ToolResult(BaseModel):
         if structured_content is not None:
             # Convert Prefab types to their wire-format envelope before
             # generic serialization, so the renderer gets the right shape.
-            if _HAS_PREFAB:
-                if isinstance(structured_content, _PrefabApp):
-                    structured_content = _prefab_to_json(structured_content)
-                elif isinstance(structured_content, _PrefabComponent):
-                    structured_content = _prefab_to_json(
-                        _PrefabApp(view=structured_content)
-                    )
+            if is_prefab_app(structured_content):
+                structured_content = _prefab_to_json(structured_content)
+            elif is_prefab_component(structured_content):
+                structured_content = _prefab_to_json(
+                    prefab_app_from_component(structured_content)
+                )
 
             try:
-                structured_content = pydantic_core.to_jsonable_python(
-                    value=structured_content,
-                    by_alias=resolve_serialize_by_alias(structured_content),
-                )
+                structured_content = _serialize_to_jsonable(structured_content)
             except pydantic_core.PydanticSerializationError as e:
                 logger.error(
                     f"Could not serialize structured content. If this is unexpected, set your tool's output_schema to None to disable automatic serialization: {e}"
@@ -152,11 +156,26 @@ class ToolResult(BaseModel):
             is_error=is_error,
         )
 
+    @classmethod
+    def from_mcp_result(cls, result: CallToolResult) -> ToolResult:
+        """Wrap a protocol result while preserving its exact wire representation."""
+        tool_result = cls(
+            content=result.content,
+            structured_content=result.structured_content,
+            meta=result.meta,
+            is_error=result.is_error,
+        )
+        tool_result._raw_mcp_result = result
+        return tool_result
+
     def to_mcp_result(
         self,
     ) -> (
         list[ContentBlock] | tuple[list[ContentBlock], dict[str, Any]] | CallToolResult
     ):
+        if self._raw_mcp_result is not None:
+            return self._raw_mcp_result
+
         # An error result must round-trip through CallToolResult so isError
         # reaches the client; the plain content/tuple returns can't carry it.
         if self.meta is not None or self.is_error:
@@ -214,6 +233,7 @@ class Tool(FastMCPComponent):
 
     KEY_PREFIX: ClassVar[str] = "tool"
 
+    return_type: Annotated[SkipJsonSchema[Any], Field(exclude=True)] = None
     parameters: Annotated[
         dict[str, Any], Field(description="JSON schema for tool parameters")
     ]
@@ -250,21 +270,28 @@ class Tool(FastMCPComponent):
         **overrides: Any,
     ) -> MCPTool:
         """Convert the FastMCP tool to an MCP tool."""
-        title = None
+        # Title precedence follows the effective (post-override) values, so a
+        # caller renaming or re-annotating a tool doesn't get a stale title.
+        name = overrides.get("name", self.name)
+        annotations = overrides.get("annotations", self.annotations)
+        if isinstance(annotations, dict):
+            annotations = ToolAnnotations(**annotations)
 
         if self.title:
             title = self.title
-        elif self.annotations and self.annotations.title:
-            title = self.annotations.title
+        elif annotations and annotations.title:
+            title = annotations.title
+        else:
+            title = _default_title(name)
 
         mcp_tool = MCPTool(
-            name=overrides.get("name", self.name),
+            name=name,
             title=overrides.get("title", title),
             description=overrides.get("description", self.description),
             input_schema=overrides.get("inputSchema", self.parameters),
             output_schema=overrides.get("outputSchema", self.output_schema),
             icons=overrides.get("icons", self.icons),
-            annotations=overrides.get("annotations", self.annotations),
+            annotations=annotations,
             execution=overrides.get("execution", self.execution),
             _meta=overrides.get(  # type: ignore[call-arg]  # _meta is Pydantic alias for meta field
                 "_meta", self.get_meta()
@@ -346,17 +373,19 @@ class Tool(FastMCPComponent):
         if isinstance(raw_value, ToolResult):
             return raw_value
 
-        if _HAS_PREFAB:
-            if isinstance(raw_value, _PrefabApp):
-                return _prefab_to_tool_result(
-                    raw_value,
-                    fastmcp_app_name=_get_fastmcp_app_name(self),
-                )
-            if isinstance(raw_value, _PrefabComponent):
-                return _prefab_to_tool_result(
-                    _PrefabApp(view=raw_value),
-                    fastmcp_app_name=_get_fastmcp_app_name(self),
-                )
+        if isinstance(raw_value, CallToolResult):
+            return ToolResult.from_mcp_result(raw_value)
+
+        if is_prefab_app(raw_value):
+            return _prefab_to_tool_result(
+                raw_value,
+                fastmcp_app_name=_get_fastmcp_app_name(self),
+            )
+        if is_prefab_component(raw_value):
+            return _prefab_to_tool_result(
+                prefab_app_from_component(raw_value),
+                fastmcp_app_name=_get_fastmcp_app_name(self),
+            )
 
         content = _convert_to_content(raw_value)
 
@@ -364,23 +393,28 @@ class Tool(FastMCPComponent):
         if isinstance(raw_value, bytes):
             return ToolResult(content=content)
 
+        is_content_result = isinstance(
+            raw_value, ContentBlock | Audio | Image | File
+        ) or (
+            isinstance(raw_value, list | tuple)
+            and any(
+                isinstance(item, ContentBlock | Audio | Image | File)
+                for item in raw_value
+            )
+        )
+
         # Skip structured content for ContentBlock types only if no output_schema
         # (if output_schema exists, MCP SDK requires structured_content)
-        if self.output_schema is None and (
-            isinstance(raw_value, ContentBlock | Audio | Image | File)
-            or (
-                isinstance(raw_value, list | tuple)
-                and any(isinstance(item, ContentBlock) for item in raw_value)
-            )
-        ):
+        if self.output_schema is None and is_content_result:
             return ToolResult(content=content)
 
         try:
-            structured = pydantic_core.to_jsonable_python(
-                raw_value, by_alias=resolve_serialize_by_alias(raw_value)
-            )
+            structured = _serialize_to_jsonable(raw_value, self.return_type)
         except (pydantic_core.PydanticSerializationError, UnicodeDecodeError):
             return ToolResult(content=content)
+
+        if not is_content_result:
+            content = _convert_to_content(structured)
 
         if self.output_schema is None:
             # No schema - only use structured_content for dicts
@@ -396,86 +430,14 @@ class Tool(FastMCPComponent):
             meta={"fastmcp": {"wrap_result": True}} if wrap_result else None,
         )
 
-    @overload
-    async def _run(
-        self,
-        arguments: dict[str, Any],
-        task_meta: None = None,
-    ) -> ToolResult: ...
+    async def _run(self, arguments: dict[str, Any]) -> ToolResult:
+        """Server entry point for tool execution.
 
-    @overload
-    async def _run(
-        self,
-        arguments: dict[str, Any],
-        task_meta: TaskMeta,
-    ) -> mcp_types.CreateTaskResult: ...
-
-    async def _run(
-        self,
-        arguments: dict[str, Any],
-        task_meta: TaskMeta | None = None,
-    ) -> ToolResult | mcp_types.CreateTaskResult:
-        """Server entry point that handles task routing.
-
-        This allows ANY Tool subclass to support background execution by setting
-        task_config.mode to "supported" or "required". The server calls this
-        method instead of run() directly.
-
-        Args:
-            arguments: Tool arguments
-            task_meta: If provided, execute as background task and return
-                CreateTaskResult. If None (default), execute synchronously and
-                return ToolResult.
-
-        Returns:
-            ToolResult when task_meta is None.
-            CreateTaskResult when task_meta is provided.
-
-        Subclasses can override this to customize task routing behavior.
-        For example, FastMCPProviderTool overrides to delegate to child
-        middleware without submitting to Docket.
+        The server calls this method instead of ``run()`` directly so that
+        subclasses can customize dispatch. For example, ``FastMCPProviderTool``
+        overrides this to delegate to child-server middleware.
         """
-        from fastmcp.server.tasks.routing import check_background_task
-
-        task_result = await check_background_task(
-            component=self,
-            task_type="tool",
-            arguments=arguments,
-            task_meta=task_meta,
-        )
-        if task_result:
-            return task_result
-
         return await self.run(arguments)
-
-    def register_with_docket(self, docket: Docket) -> None:
-        """Register this tool with docket for background execution."""
-        if not self.task_config.supports_tasks():
-            return
-        docket.register(self.run, names=[self.key])
-
-    async def add_to_docket(  # type: ignore[override]
-        self,
-        docket: Docket,
-        arguments: dict[str, Any],
-        *,
-        fn_key: str | None = None,
-        task_key: str | None = None,
-        **kwargs: Any,
-    ) -> Execution:
-        """Schedule this tool for background execution via docket.
-
-        Args:
-            docket: The Docket instance
-            arguments: Tool arguments
-            fn_key: Function lookup key in Docket registry (defaults to self.key)
-            task_key: Redis storage key for the result
-            **kwargs: Additional kwargs passed to docket.add()
-        """
-        lookup_key = fn_key or self.key
-        if task_key:
-            kwargs["key"] = task_key
-        return await docket.add(lookup_key, **kwargs)(arguments)
 
     @classmethod
     def from_tool(
@@ -574,15 +536,17 @@ def _get_tool_resolver(app_name: str | None = None) -> Callable[..., str] | None
 
 
 def _prefab_to_json(app: Any, fastmcp_app_name: str | None = None) -> dict[str, Any]:
-    """Call PrefabApp.to_json() with the hash-based resolver.
+    """Serialize a PrefabApp, addressing its peer-tool references by identity.
 
-    The resolver prefixes peer-tool references with a deterministic hash
-    derived from the app name + tool name. The dispatcher recognizes that
-    format and routes calls via ``get_tool_by_hash`` which walks the
-    provider tree recursively — same pattern as the old ``get_app_tool``.
+    The resolver writes each reference as ``<hash>_<local_name>``, and the
+    identity behind it is recorded in the payload's meta so that servers
+    can re-address the reference on the way out without losing track of
+    what it points at.
     """
+    from fastmcp.server.providers.prefab_payload import annotate_payload_identities
+
     data = app.to_json(tool_resolver=_get_tool_resolver(fastmcp_app_name))
-    return data
+    return annotate_payload_identities(data)
 
 
 def _get_fastmcp_app_name(tool: Tool) -> str | None:

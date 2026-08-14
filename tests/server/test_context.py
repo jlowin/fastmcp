@@ -1,42 +1,18 @@
 from unittest.mock import MagicMock
 
 import pytest
-from mcp_types import ModelPreferences
 
 from fastmcp.server.context import (
     Context,
     reset_transport,
     set_transport,
 )
-from fastmcp.server.sampling.run import _parse_model_preferences
 from fastmcp.server.server import FastMCP
 
 
 @pytest.fixture
 def context():
     return Context(fastmcp=FastMCP())
-
-
-class TestParseModelPreferences:
-    def test_parse_model_preferences_string(self, context):
-        mp = _parse_model_preferences("claude-haiku-4-5")
-        assert isinstance(mp, ModelPreferences)
-        assert mp.hints is not None
-        assert mp.hints[0].name == "claude-haiku-4-5"
-
-    def test_parse_model_preferences_list(self, context):
-        mp = _parse_model_preferences(["claude-haiku-4-5", "claude"])
-        assert isinstance(mp, ModelPreferences)
-        assert mp.hints is not None
-        assert [h.name for h in mp.hints] == ["claude-haiku-4-5", "claude"]
-
-    def test_parse_model_preferences_object(self, context):
-        obj = ModelPreferences(hints=[])
-        assert _parse_model_preferences(obj) is obj
-
-    def test_parse_model_preferences_invalid_type(self, context):
-        with pytest.raises(ValueError):
-            _parse_model_preferences(model_preferences=123)  # pyright: ignore[reportArgumentType] # type: ignore[invalid-argument-type]  # ty:ignore[invalid-argument-type]
 
 
 class TestSessionId:
@@ -498,9 +474,7 @@ class TestTransportIntegration:
 
     async def test_transport_set_via_http_middleware(self):
         """Test that transport is set per-request via HTTP middleware."""
-        from fastmcp import Client
-        from fastmcp.client.transports import StreamableHttpTransport
-        from fastmcp.utilities.tests import run_server_async
+        from fastmcp.utilities.tests import asgi_client
 
         mcp = FastMCP("test")
         observed_transport = None
@@ -511,9 +485,7 @@ class TestTransportIntegration:
             observed_transport = ctx.transport
             return observed_transport or "none"
 
-        async with run_server_async(mcp, transport="streamable-http") as url:
-            transport = StreamableHttpTransport(url=url)
-            async with Client(transport=transport) as client:
-                result = await client.call_tool("get_transport", {})
-                assert observed_transport == "streamable-http"
-                assert result.data == "streamable-http"
+        async with asgi_client(mcp, transport="streamable-http") as client:
+            result = await client.call_tool("get_transport", {})
+            assert observed_transport == "streamable-http"
+            assert result.data == "streamable-http"

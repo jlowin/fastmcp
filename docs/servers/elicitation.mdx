@@ -27,7 +27,7 @@ Elicitation reaches the user two different ways, depending on the protocol era t
 - **On handshake-era connections (≤ 2025-11-25)**, a running tool calls [`ctx.elicit()`](#requesting-input-on-handshake-connections). The tool pauses mid-execution, the server sends a request over the session back-channel, and the tool resumes with the answer. This is the original elicitation API and the rest of this page's first half covers it in full.
 - **On the modern protocol (2026-07-28)**, that back-channel is gone — server-initiated requests were removed from the wire (SEP-2577), so a tool cannot issue a request mid-execution and block on the answer. Instead a tool asks for input by *returning* a description of what it needs; each round completes normally and the client issues a new call with the answer attached. This is the [guard pattern](#elicitation-on-the-modern-protocol), covered in the second half.
 
-The era gate is strict: `ctx.elicit()` only works on handshake connections, and the guard pattern only works on modern ones. A tool that returns a guard result on a handshake connection — or calls `ctx.elicit()` on a modern one — raises a clear era error rather than failing obscurely. A server that serves both eras may need both paths; branch on `ctx.protocol_version` to pick the right one. `fastmcp.Client` drives whichever the connection negotiated automatically.
+The era gate is strict: `ctx.elicit()` only works on handshake connections, and the guard pattern only works on modern ones. A tool that returns a guard result on a handshake connection — or calls `ctx.elicit()` on a modern one — raises a clear era error rather than failing obscurely. A server that serves both eras may need both paths; branch on `ctx.request_context.protocol_version` to pick the right one. `fastmcp.Client` drives whichever the connection negotiated automatically.
 
 ## Requesting input on handshake connections
 
@@ -187,9 +187,9 @@ async def confirm_purchase(ctx: Context) -> str:
 
 These arguments only apply when FastMCP is adding the wrapper. For structured responses (`BaseModel`, dataclass, `TypedDict`), set the metadata on the individual fields via `Field(title=..., description=...)` — passing `response_title` or `response_description` alongside a model type raises `TypeError`.
 
-### Empty Responses
+### Confirmations
 
-Passing `None` as the response type creates an empty-object schema and returns an accepted result with `data == {}`. This form is deprecated because some clients render empty forms poorly; prefer an explicit response type such as `bool` for confirmations.
+`response_type` is required. When all you want is a yes/no answer, ask for a `bool` rather than an empty schema — an empty schema gives the client nothing to render, and some clients show an empty, non-functional form.
 
 ```python
 @mcp.tool
@@ -412,7 +412,7 @@ The following tool books a flight across three rounds: it asks for a destination
 
 ```python
 from fastmcp import FastMCP, Context
-from fastmcp.types import InputRequiredResult, ElicitRequest, ElicitRequestFormParams
+from mcp.types import InputRequiredResult, ElicitRequest, ElicitRequestFormParams
 
 mcp = FastMCP("Booking Server")
 
@@ -539,13 +539,66 @@ connection negotiated '2025-11-25'. Use ctx.elicit() for server-initiated input
 on handshake-era connections.
 ```
 
-If you need to support both eras, branch on `ctx.protocol_version`: return an `InputRequiredResult` on modern connections and fall back to [`ctx.elicit()`](#requesting-input-on-handshake-connections) on handshake-era ones.
+If you need to support both eras, branch on `ctx.request_context.protocol_version`: return an `InputRequiredResult` on modern connections and fall back to [`ctx.elicit()`](#requesting-input-on-handshake-connections) on handshake-era ones.
+
+### Prompts and resources
+
+`InputRequiredResult` is a **result type**, not a tools feature: any request can resolve to one. Prompts, resources, and resource templates ask for input exactly the way tools do — return an `InputRequiredResult`, read `ctx.input_responses` on the next round, and the client re-issues the same `prompts/get` or `resources/read` with the answer attached.
+
+This prompt gathers the context it needs before rendering:
+
+```python
+from fastmcp import FastMCP, Context
+from mcp.types import InputRequiredResult, ElicitRequest, ElicitRequestFormParams
+
+mcp = FastMCP("Reporting Server")
+
+ask_for_quarter = InputRequiredResult(
+    result_type="input_required",
+    input_requests={
+        "quarter": ElicitRequest(
+            method="elicitation/create",
+            params=ElicitRequestFormParams(
+                message="Which quarter should the summary cover?",
+                requested_schema={
+                    "type": "object",
+                    "properties": {"quarter": {"type": "string"}},
+                    "required": ["quarter"],
+                },
+            ),
+        )
+    },
+)
+
+
+@mcp.prompt
+async def summarize(ctx: Context) -> str | InputRequiredResult:
+    responses = ctx.input_responses
+    if responses is None:
+        return ask_for_quarter
+    quarter = responses["quarter"].content["quarter"]
+    return f"Summarize the {quarter} results."
+```
+
+Resources and resource templates work the same way, with the URI standing in for the tool name:
+
+```python
+@mcp.resource("report://summary")
+async def report(ctx: Context) -> str | InputRequiredResult:
+    responses = ctx.input_responses
+    if responses is None:
+        return ask_for_quarter
+    quarter = responses["quarter"].content["quarter"]
+    return f"Revenue report for {quarter}"
+```
+
+The same protocol requirement applies: returning an `InputRequiredResult` from a prompt or resource needs a 2026-07-28 connection, and FastMCP names the era mismatch if one arrives on an older one. Client-side, `read_resource` and `get_prompt` drive the loop the way `call_tool` does, so a configured elicitation handler answers all three without extra wiring.
 
 ### Sampling and roots
 
-Elicitation is the most common request to carry this way, and **roots** requests work identically — the `input_requests` map holds them the same way, and each answer comes back in `ctx.input_responses` under its key (an `ElicitResult` or `ListRootsResult`). See [Client Roots](/clients/roots) for what a roots request contains. `fastmcp.Client` answers both from the handlers you already configured, so a guard tool that mixes them needs no extra client wiring.
+Elicitation is the most common request to carry this way, and the map carries the others just as well. A `ListRootsRequest` or a `CreateMessageRequest` sits in `input_requests` exactly as an `ElicitRequest` does, and its answer arrives in `ctx.input_responses` under the same key as a `ListRootsResult` or a `CreateMessageResult`. One map can mix all three, and `fastmcp.Client` answers each from the handlers it already has — `elicitation_handler=`, `roots=`, and `sampling_handler=` — so a tool that asks for a mixture needs no extra client wiring. [Client Roots](/clients/roots) covers what a roots request contains.
 
-The map can structurally hold a **sampling** request too (its answer would be a `CreateMessageResult`), but SEP-2577 deprecated server-initiated sampling on the modern protocol, so reach for a direct server-side LLM call instead of routing generation through a guard round. See [Sampling](/servers/sampling).
+Roots and sampling differ in how well they suit the round trip. A server asks for roots once and then has what it needs, so the extra round buys the whole answer. Generation rarely works out that way, because every round is a full request-response cycle and a tool that generates in a loop pays that cost each time — [call an LLM directly from your server](/servers/sampling) unless the point is specifically to use the caller's model.
 
 ### Middleware
 

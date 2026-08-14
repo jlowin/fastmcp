@@ -2,18 +2,15 @@
 
 from __future__ import annotations
 
-import uuid
-import weakref
-from typing import TYPE_CHECKING, Any, Literal, cast, overload
+from typing import TYPE_CHECKING, Any, cast
 
 import mcp_types
 from mcp.client.caching import CacheMode
-from pydantic import AnyUrl, RootModel
+from pydantic import AnyUrl
 
 if TYPE_CHECKING:
     from fastmcp.client.client import Client
 
-from fastmcp.client.tasks import ResourceTask
 from fastmcp.client.telemetry import client_span
 from fastmcp.telemetry import inject_trace_context
 from fastmcp.utilities.logging import get_logger
@@ -21,11 +18,6 @@ from fastmcp.utilities.logging import get_logger
 logger = get_logger(__name__)
 
 AUTO_PAGINATION_MAX_PAGES = 250
-
-# Type alias for task response union (SEP-1686 graceful degradation)
-ResourceTaskResponseUnion = RootModel[
-    mcp_types.CreateTaskResult | mcp_types.ReadResourceResult
-]
 
 
 class ClientResourcesMixin:
@@ -272,54 +264,23 @@ class ClientResourcesMixin:
             )
             return result
 
-    @overload
     async def read_resource(
         self: Client,
         uri: AnyUrl | str,
         *,
         version: str | None = None,
         meta: dict[str, Any] | None = None,
-        task: Literal[False] = False,
-    ) -> list[mcp_types.TextResourceContents | mcp_types.BlobResourceContents]: ...
-
-    @overload
-    async def read_resource(
-        self: Client,
-        uri: AnyUrl | str,
-        *,
-        version: str | None = None,
-        meta: dict[str, Any] | None = None,
-        task: Literal[True],
-        task_id: str | None = None,
-        ttl: int = 60000,
-    ) -> ResourceTask: ...
-
-    async def read_resource(
-        self: Client,
-        uri: AnyUrl | str,
-        *,
-        version: str | None = None,
-        meta: dict[str, Any] | None = None,
-        task: bool = False,
-        task_id: str | None = None,
-        ttl: int = 60000,
-    ) -> (
-        list[mcp_types.TextResourceContents | mcp_types.BlobResourceContents]
-        | ResourceTask
-    ):
+    ) -> list[mcp_types.TextResourceContents | mcp_types.BlobResourceContents]:
         """Read the contents of a resource or resolved template.
 
         Args:
             uri (AnyUrl | str): The URI of the resource to read. Can be a string or an AnyUrl object.
             version (str | None): Specific version to read. If None, reads highest version.
             meta (dict[str, Any] | None): Optional request-level metadata.
-            task (bool): If True, execute as background task (SEP-1686). Defaults to False.
-            task_id (str | None): Optional client-provided task ID (auto-generated if not provided).
-            ttl (int): Time to keep results available in milliseconds (default 60s).
 
         Returns:
-            list[mcp_types.TextResourceContents | mcp_types.BlobResourceContents] | ResourceTask:
-                A list of content objects if task=False, or a ResourceTask object if task=True.
+            list[mcp_types.TextResourceContents | mcp_types.BlobResourceContents]:
+                A list of content objects.
 
         Raises:
             RuntimeError: If called while the client is not connected.
@@ -333,11 +294,6 @@ class ClientResourcesMixin:
                 "version": version,
             }
 
-        if task:
-            return await self._read_resource_as_task(
-                uri, task_id, ttl, meta=request_meta or None
-            )
-
         if isinstance(uri, str):
             try:
                 uri = AnyUrl(uri)  # Ensure AnyUrl
@@ -347,77 +303,3 @@ class ClientResourcesMixin:
                 ) from e
         result = await self.read_resource_mcp(uri, meta=request_meta or None)
         return result.contents
-
-    async def _read_resource_as_task(
-        self: Client,
-        uri: AnyUrl | str,
-        task_id: str | None = None,
-        ttl: int = 60000,
-        meta: dict[str, Any] | None = None,
-    ) -> ResourceTask:
-        """Read a resource for background execution (SEP-1686).
-
-        Returns a ResourceTask object that handles both background and immediate execution.
-
-        Args:
-            uri: Resource URI to read
-            task_id: Optional client-provided task ID (ignored, for backward compatibility)
-            ttl: Time to keep results available in milliseconds (default 60s)
-            meta: Optional metadata to pass with the request (e.g., version info)
-
-        Returns:
-            ResourceTask: Future-like object for accessing task status and results
-        """
-        # Per SEP-1686 final spec: client sends only ttl, server generates taskId
-        # Inject trace context into meta for propagation to server.
-        # SDK v2: request `_meta` is `RequestParamsMeta` (a TypedDict), not
-        # the old `RequestParams.Meta` nested model.
-        propagated_meta = inject_trace_context(meta)
-        request_meta = cast(
-            "mcp_types.RequestParamsMeta | None",
-            propagated_meta if propagated_meta else None,
-        )
-
-        # SDK v2: ReadResourceRequestParams.uri is a plain string, but resources
-        # are stored under the AnyUrl-normalized form, so normalize to match.
-        uri_str = str(AnyUrl(uri)) if isinstance(uri, str) else str(uri)
-
-        # SDK v2: ReadResourceRequestParams has no `task` field, so this request
-        # cannot carry task metadata over the wire and the server graceful-
-        # degrades to immediate execution (sdk-feedback #3). `ttl` is retained on
-        # the public API but has no wire representation here.
-        request = mcp_types.ReadResourceRequest(
-            params=mcp_types.ReadResourceRequestParams(
-                uri=uri_str,
-                _meta=request_meta,  # type: ignore[unknown-argument]  # pydantic alias
-            )
-        )
-
-        # Server returns CreateTaskResult (task accepted) or ReadResourceResult (graceful degradation)
-        wrapped_result = await self._await_with_session_monitoring(
-            self.session.send_request(
-                request=request,  # type: ignore[arg-type]
-                result_type=ResourceTaskResponseUnion,
-            )
-        )
-        raw_result = wrapped_result.root
-
-        if isinstance(raw_result, mcp_types.CreateTaskResult):
-            # Task was accepted - extract task info from CreateTaskResult
-            server_task_id = raw_result.task.task_id
-            self._submitted_task_ids.add(server_task_id)
-
-            task_obj = ResourceTask(
-                self, server_task_id, uri=str(uri), immediate_result=None
-            )
-            self._task_registry[server_task_id] = weakref.ref(task_obj)
-            return task_obj
-        else:
-            # Graceful degradation - server returned ReadResourceResult
-            synthetic_task_id = task_id or str(uuid.uuid4())
-            return ResourceTask(
-                self,
-                synthetic_task_id,
-                uri=str(uri),
-                immediate_result=raw_result.contents,
-            )

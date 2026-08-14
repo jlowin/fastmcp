@@ -25,10 +25,11 @@ from fastmcp.tools.function_tool import DecoratedTool, FunctionTool, ToolMeta
         "from fastmcp.resources import Resource, resource",
         "from fastmcp.prompts import Prompt, prompt",
         "import sys; import fastmcp.apps.config; assert 'fastmcp.tools.function_tool' not in sys.modules",
-        "from fastmcp.server.auth.authorization import AuthCheck",
+        "from fastmcp.server.auth import AuthCheck",
         "from fastmcp.server import Context, FastMCP, create_proxy",
     ],
 )
+@pytest.mark.subprocess_heavy
 def test_component_import_works_in_fresh_interpreter(statement: str):
     result = subprocess.run(
         [sys.executable, "-c", statement],

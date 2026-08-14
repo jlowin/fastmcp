@@ -42,14 +42,11 @@ class TestCacheConstruction:
     def test_cache_none_is_disabled_by_default(self):
         """Caching is opt-in: the default `cache=None` builds no cache, so a legacy
         connection is byte-identical to pre-v4 behavior (no handler wrapping)."""
-        from fastmcp.client.tasks import TaskNotificationHandler
-
         client = Client(FastMCP("x"))
         assert client._response_cache is None
-        # The message handler is the bare default, not a cache-evicting wrapper.
-        assert isinstance(
-            client._session_kwargs["message_handler"], TaskNotificationHandler
-        )
+        # No cache means no cache-evicting wrapper: the message handler is the
+        # bare default (None), not a wrapper.
+        assert client._session_kwargs.get("message_handler") is None
 
     def test_cache_true_builds_default(self):
         client = Client(FastMCP("x"), cache=True)

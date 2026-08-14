@@ -97,30 +97,39 @@ def _parse_mcp_servers(
     if not servers_dict:
         return []
 
-    normalized = {
-        name: _normalize_server_entry(entry)
-        for name, entry in servers_dict.items()
-        if isinstance(entry, dict)
-    }
+    discovered: list[DiscoveredServer] = []
+    for name, entry in servers_dict.items():
+        if not isinstance(entry, dict):
+            continue
 
-    try:
-        config = MCPConfig.from_dict({"mcpServers": normalized})
-    except Exception as exc:
-        logger.warning("Could not parse MCP servers from %s: %s", config_path, exc)
-        return []
+        normalized = _normalize_server_entry(entry)
+        try:
+            config = MCPConfig.from_dict({"mcpServers": {name: normalized}})
+        except Exception as exc:
+            logger.warning(
+                "Could not parse MCP server %r from %s: %s",
+                name,
+                config_path,
+                exc,
+            )
+            continue
 
-    return [
-        DiscoveredServer(
-            name=name, source=source, config=server, config_path=config_path
+        discovered.append(
+            DiscoveredServer(
+                name=name,
+                source=source,
+                config=config.mcpServers[name],
+                config_path=config_path,
+            )
         )
-        for name, server in config.mcpServers.items()
-    ]
+
+    return discovered
 
 
 def _parse_mcp_config(path: Path, source: str) -> list[DiscoveredServer]:
     """Parse an mcpServers-style JSON file into discovered servers."""
     try:
-        text = path.read_text()
+        text = path.read_text(encoding="utf-8")
     except OSError as exc:
         logger.debug("Could not read %s: %s", path, exc)
         return []
@@ -158,7 +167,7 @@ def _scan_claude_code(start_dir: Path) -> list[DiscoveredServer]:
     """Scan ``~/.claude.json`` for global and project-scoped MCP servers."""
     path = Path.home() / ".claude.json"
     try:
-        text = path.read_text()
+        text = path.read_text(encoding="utf-8")
     except OSError:
         return []
 
@@ -269,7 +278,7 @@ def _scan_goose() -> list[DiscoveredServer]:
 
     path = config_dir / "config.yaml"
     try:
-        text = path.read_text()
+        text = path.read_text(encoding="utf-8")
     except OSError:
         return []
 

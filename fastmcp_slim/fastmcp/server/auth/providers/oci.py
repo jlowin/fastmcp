@@ -141,6 +141,7 @@ class OCIProvider(OIDCProxy):
         fallback_refresh_token_expiry_seconds: int | None = None,
         fastmcp_access_token_expiry_seconds: int | None = None,
         token_expiry_threshold_seconds: int = 0,
+        enable_cimd: bool = True,
     ) -> None:
         """Initialize OCI OIDC provider.
 
@@ -156,7 +157,10 @@ class OCIProvider(OIDCProxy):
             resource_base_url: Optional public base URL for the protected resource metadata
                 and token audience. Defaults to ``base_url``.
             audience: OCI API audience (optional)
-            issuer_url: Issuer URL for OCI IAM Domain metadata. This will override issuer URL from the discovery URL.
+            issuer_url: Issuer URL for OAuth metadata (defaults to base_url). This is
+                this server's own OAuth identity, not the OCI IAM Domain's — it has no
+                effect on the upstream issuer taken from the discovery URL. Use a
+                root-level URL to avoid 404s during discovery when mounting under a path.
             required_scopes: Required OCI scopes (defaults to ["openid"])
             redirect_path: Redirect path configured in OCI IAM Domain Integrated Application. The default is "/auth/callback".
             allowed_client_redirect_uris: List of allowed redirect URI patterns for MCP clients.
@@ -171,6 +175,8 @@ class OCIProvider(OIDCProxy):
                 refresh gracefully (e.g. `mcp-remote`). See `OAuthProxy` for details.
             token_expiry_threshold_seconds: Number of seconds before actual expiry to
                 treat a token as expired, refreshing early to avoid races. Defaults to 0.
+            enable_cimd: Enable CIMD (Client ID Metadata Document) support for URL-based
+                client IDs (default True). Set to False to disable.
         """
         # Parse scopes if provided as string
         oci_required_scopes = (
@@ -197,6 +203,7 @@ class OCIProvider(OIDCProxy):
             fallback_refresh_token_expiry_seconds=fallback_refresh_token_expiry_seconds,
             fastmcp_access_token_expiry_seconds=fastmcp_access_token_expiry_seconds,
             token_expiry_threshold_seconds=token_expiry_threshold_seconds,
+            enable_cimd=enable_cimd,
         )
 
         logger.debug(

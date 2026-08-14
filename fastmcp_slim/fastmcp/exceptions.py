@@ -5,6 +5,8 @@ from typing import Any
 
 from mcp_types import INTERNAL_ERROR, INVALID_PARAMS, ErrorData
 
+from fastmcp import _warnings
+
 try:
     from mcp import MCPError
 except ImportError:
@@ -30,14 +32,7 @@ except ImportError:
 # see the migration notes.
 McpError = MCPError
 
-
-class FastMCPDeprecationWarning(DeprecationWarning):
-    """Deprecation warning for FastMCP APIs.
-
-    Subclass of DeprecationWarning so that standard warning filters
-    still apply, but FastMCP can selectively enable its own warnings
-    without affecting other libraries in the process.
-    """
+FastMCPDeprecationWarning = _warnings.FastMCPDeprecationWarning
 
 
 class FastMCPError(Exception):
@@ -93,6 +88,30 @@ class ResourceSecurityError(NotFoundError):
 
 class AuthorizationError(FastMCPError):
     """Error when authorization check fails."""
+
+
+class InsufficientScopeError(AuthorizationError):
+    """Authorization failed because the token is missing required OAuth scopes.
+
+    Unlike a bare ``AuthorizationError``, this carries the specific scopes the
+    caller must obtain. A component-level scope shortfall can then be signalled
+    as a spec-correct ``insufficient_scope`` step-up (SEP-2350 / RFC 6750 §3),
+    naming exactly what to re-authorize for instead of an opaque denial. The
+    named scopes are only the *unmet* ones, so an existing grant is accumulated
+    rather than replaced when the caller re-authorizes.
+    """
+
+    def __init__(
+        self,
+        required_scopes: list[str],
+        *,
+        message: str | None = None,
+    ) -> None:
+        self.required_scopes = list(required_scopes)
+        if message is None:
+            named = ", ".join(self.required_scopes) or "(unknown)"
+            message = f"Insufficient scope. Required: {named}"
+        super().__init__(message)
 
 
 def to_mcp_error(exc: Exception, *, default_code: int = INTERNAL_ERROR) -> MCPError:

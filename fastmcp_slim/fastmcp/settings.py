@@ -2,7 +2,6 @@ from __future__ import annotations as _annotations
 
 import inspect
 import os
-from datetime import timedelta
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
@@ -21,6 +20,8 @@ ENV_FILE = os.getenv("FASTMCP_ENV_FILE", ".env")
 
 LOG_LEVEL = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
 
+TELEMETRY_MODE = Literal["native", "propagation_only", "off"]
+
 MCP_LOG_LEVEL = Literal[
     "debug", "info", "notice", "warning", "error", "critical", "alert", "emergency"
 ]
@@ -28,109 +29,6 @@ MCP_LOG_LEVEL = Literal[
 DuplicateBehavior = Literal["warn", "error", "replace", "ignore"]
 
 TEN_MB_IN_BYTES = 1024 * 1024 * 10
-
-
-class DocketSettings(BaseSettings):
-    """Docket worker configuration."""
-
-    model_config = SettingsConfigDict(
-        env_prefix="FASTMCP_DOCKET_",
-        extra="ignore",
-    )
-
-    name: Annotated[
-        str,
-        Field(
-            description=inspect.cleandoc(
-                """
-                Name for the Docket queue. All servers/workers sharing the same name
-                and backend URL will share a task queue.
-                """
-            ),
-        ),
-    ] = "fastmcp"
-
-    url: Annotated[
-        str,
-        Field(
-            description=inspect.cleandoc(
-                """
-                URL for the Docket backend. Supports:
-                - memory:// - In-memory backend (single process only)
-                - redis://host:port/db - Redis/Valkey backend (distributed, multi-process)
-
-                Example: redis://localhost:6379/0
-
-                Default is memory:// for single-process scenarios. Use Redis or Valkey
-                when coordinating tasks across multiple processes (e.g., additional
-                workers via the fastmcp tasks CLI).
-                """
-            ),
-        ),
-    ] = "memory://"
-
-    worker_name: Annotated[
-        str | None,
-        Field(
-            description=inspect.cleandoc(
-                """
-                Name for the Docket worker. If None, Docket will auto-generate
-                a unique worker name.
-                """
-            ),
-        ),
-    ] = None
-
-    concurrency: Annotated[
-        int,
-        Field(
-            description=inspect.cleandoc(
-                """
-                Maximum number of tasks the worker can process concurrently.
-                """
-            ),
-        ),
-    ] = 10
-
-    redelivery_timeout: Annotated[
-        timedelta,
-        Field(
-            description=inspect.cleandoc(
-                """
-                Task redelivery timeout. If a worker doesn't complete
-                a task within this time, the task will be redelivered to another
-                worker.
-                """
-            ),
-        ),
-    ] = timedelta(seconds=300)
-
-    reconnection_delay: Annotated[
-        timedelta,
-        Field(
-            description=inspect.cleandoc(
-                """
-                Delay between reconnection attempts when the worker
-                loses connection to the Docket backend.
-                """
-            ),
-        ),
-    ] = timedelta(seconds=5)
-
-    minimum_check_interval: Annotated[
-        timedelta,
-        Field(
-            description=inspect.cleandoc(
-                """
-                How frequently the worker polls for new tasks. Lower
-                values reduce latency for task pickup at the cost of
-                more CPU usage. The default of 50ms is a good balance;
-                increase for high-volume production deployments where
-                tasks are long-running.
-                """
-            ),
-        ),
-    ] = timedelta(milliseconds=50)
 
 
 class Settings(BaseSettings):
@@ -185,8 +83,6 @@ class Settings(BaseSettings):
             return v.upper()
         return v
 
-    docket: DocketSettings = DocketSettings()
-
     enable_rich_logging: Annotated[
         bool,
         Field(
@@ -205,24 +101,6 @@ class Settings(BaseSettings):
             description=inspect.cleandoc(
                 """
                 If True, will use rich tracebacks for logging.
-                """
-            )
-        ),
-    ] = True
-
-    enable_telemetry: Annotated[
-        bool,
-        Field(
-            description=inspect.cleandoc(
-                """
-                Whether FastMCP's native OpenTelemetry instrumentation is active.
-                Enabled by default: FastMCP uses only the OpenTelemetry API, so
-                span creation is a no-op with negligible overhead unless an
-                OpenTelemetry SDK and exporter are configured. Set to False to
-                turn instrumentation off entirely, in which case FastMCP's span
-                helpers become a transparent pass-through: no FastMCP spans are
-                created even when an SDK is configured, and the surrounding OTel
-                trace context is left untouched.
                 """
             )
         ),
@@ -273,6 +151,31 @@ class Settings(BaseSettings):
         ),
     ] = True
 
+    telemetry_mode: Annotated[
+        TELEMETRY_MODE,
+        Field(
+            description=inspect.cleandoc(
+                """
+                Controls FastMCP's native OpenTelemetry instrumentation.
+
+                - `native` (default): FastMCP creates MCP spans and propagates
+                  trace context through request `_meta`. FastMCP uses only the
+                  OpenTelemetry API, so span creation is a no-op with negligible
+                  overhead unless an SDK and exporter are configured.
+                - `propagation_only`: FastMCP still injects and extracts trace
+                  context, and still parents downstream spans from the incoming
+                  `_meta` context, but creates none of its own MCP spans. Use
+                  this when another instrumentation layer owns the MCP span
+                  hierarchy and FastMCP's spans would duplicate it.
+                - `off`: FastMCP's span helpers become a transparent
+                  pass-through. No spans are created even when an SDK is
+                  configured, and the surrounding OTel context is left
+                  untouched — no trace context is extracted or attached.
+                """
+            ),
+        ),
+    ] = "native"
+
     client_init_timeout: Annotated[
         float | None,
         Field(
@@ -286,24 +189,6 @@ class Settings(BaseSettings):
             description="Maximum time to wait for a clean disconnect before giving up, in seconds.",
         ),
     ] = 5
-
-    client_task_poll_interval: Annotated[
-        float,
-        Field(
-            description=inspect.cleandoc(
-                """
-                Ceiling, in seconds, for the fallback poll backoff while waiting on a
-                background task (SEP-1686). Applies only when the server does not
-                advertise its own pollInterval: in that case Task.wait() starts polling
-                fast (~20ms) and doubles up to this ceiling, so quick tasks resolve
-                promptly while long-running tasks don't hammer the server. When the
-                server does advertise a pollInterval, that interval is honored exactly
-                and this setting is ignored. Must be positive.
-                """
-            ),
-            gt=0,
-        ),
-    ] = 0.5
 
     # Transport settings
     transport: Literal["stdio", "http", "sse", "streamable-http"] = "stdio"

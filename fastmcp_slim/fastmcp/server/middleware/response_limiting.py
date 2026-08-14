@@ -118,6 +118,12 @@ class ResponseLimitingMiddleware(Middleware):
         if isinstance(result, InputRequiredToolResult):
             return result
 
+        # A task-augmented call returns a CreateTaskResult (the tasks extension)
+        # up through this middleware — a small acknowledgement with no tool
+        # content to measure or truncate. Pass any non-ToolResult through.
+        if not isinstance(result, ToolResult):
+            return result
+
         # Check if we should limit this tool
         if self.tools is not None and context.message.name not in self.tools:
             return result

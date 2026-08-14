@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 from mcp import MCPError
 from mcp_types import INTERNAL_ERROR, INVALID_PARAMS
+from mcp_types.jsonrpc import MISSING_REQUIRED_CLIENT_CAPABILITY
 
 from fastmcp import Client, FastMCP
 from fastmcp.exceptions import (
@@ -71,6 +72,20 @@ class TestWireErrorCodes:
         assert exc_info.value.error.code == INVALID_PARAMS
         assert "Resource not found" in exc_info.value.error.message
 
+    async def test_resource_not_found_echoes_uri_in_data(self):
+        """SEP-2164 SHOULD: the error names which URI was missing.
+
+        A client that pipelined several reads cannot otherwise tell which one
+        failed from the message alone.
+        """
+        mcp = FastMCP("test-server")
+
+        async with Client(mcp) as client:
+            with pytest.raises(MCPError) as exc_info:
+                await client.read_resource_mcp("config://missing")
+
+        assert exc_info.value.error.data == {"uri": "config://missing"}
+
     async def test_prompt_not_found_uses_invalid_params(self):
         mcp = FastMCP("test-server")
 
@@ -80,3 +95,45 @@ class TestWireErrorCodes:
 
         assert exc_info.value.error.code == INVALID_PARAMS
         assert "Unknown prompt" in exc_info.value.error.message
+
+
+class TestMissingClientCapabilityFromTool:
+    """A tool's `-32021` must reach the wire, not become an `isError` result.
+
+    SEP-2575 makes this error a statement about the *request* — the server
+    cannot service it at all — so flattening it into a tool result would drop
+    the code and tell the client the call succeeded. Every other `MCPError`
+    raised under a tool still masks into a result, since those describe how the
+    call went rather than whether it could run.
+    """
+
+    @staticmethod
+    def _server() -> FastMCP:
+        mcp = FastMCP("capability-test")
+
+        @mcp.tool
+        async def needs_sampling() -> str:
+            raise MCPError(
+                code=MISSING_REQUIRED_CLIENT_CAPABILITY,
+                message="Client did not declare the required 'sampling' capability",
+                data={"requiredCapabilities": {"sampling": {}}},
+            )
+
+        @mcp.tool
+        async def upstream_failed() -> str:
+            raise MCPError(code=INTERNAL_ERROR, message="upstream exploded")
+
+        return mcp
+
+    async def test_capability_error_propagates_as_protocol_error(self):
+        async with Client(self._server()) as client:
+            with pytest.raises(MCPError) as exc_info:
+                await client.call_tool("needs_sampling")
+
+        assert exc_info.value.error.code == MISSING_REQUIRED_CLIENT_CAPABILITY
+        assert exc_info.value.error.data == {"requiredCapabilities": {"sampling": {}}}
+
+    async def test_other_mcp_errors_still_become_tool_errors(self):
+        async with Client(self._server()) as client:
+            with pytest.raises(ToolError):
+                await client.call_tool("upstream_failed")

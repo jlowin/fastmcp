@@ -11,13 +11,13 @@ import anyio
 import uvicorn
 from mcp.server.lowlevel.server import NotificationOptions
 from mcp.server.stdio import stdio_server
+from mcp.server.streamable_http import EventStore
 from starlette.middleware import Middleware as ASGIMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
 from starlette.routing import BaseRoute, Route
 
 import fastmcp
-from fastmcp.server.event_store import EventStore
 from fastmcp.server.http import (
     HostOriginProtection,
     StarletteWithLifespan,
@@ -28,7 +28,6 @@ from fastmcp.server.http import (
 from fastmcp.server.providers.base import Provider
 from fastmcp.server.providers.fastmcp_provider import FastMCPProvider
 from fastmcp.server.providers.wrapped_provider import _WrappedProvider
-from fastmcp.utilities.cli import log_server_banner
 from fastmcp.utilities.logging import get_logger, temporary_log_level
 
 if TYPE_CHECKING:
@@ -230,6 +229,8 @@ class TransportMixin:
 
         # Display server banner
         if show_banner:
+            from fastmcp.utilities.cli import log_server_banner
+
             log_server_banner(server=self)
 
         token = set_transport("stdio")
@@ -337,6 +338,8 @@ class TransportMixin:
 
         # Display server banner
         if show_banner:
+            from fastmcp.utilities.cli import log_server_banner
+
             log_server_banner(server=self)
         uvicorn_config_from_user = uvicorn_config or {}
 

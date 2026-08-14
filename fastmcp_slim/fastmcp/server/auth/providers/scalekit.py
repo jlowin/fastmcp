@@ -125,15 +125,22 @@ class ScalekitProvider(RemoteAuthProvider):
 
         # Create default JWT verifier if none provided
         if token_verifier is None:
+            # Scalekit is migrating the `iss` claim from the bare environment URL
+            # to a resource-scoped issuer. Accept both forms so tokens minted
+            # before and after the migration validate against the same provider.
+            expected_issuers = [
+                self.environment_url,
+                f"{self.environment_url}/resources/{self.resource_id}",
+            ]
             logger.debug(
                 "Creating default JWTVerifier for Scalekit: jwks_uri=%s issuer=%s required_scopes=%s",
                 f"{self.environment_url}/keys",
-                self.environment_url,
+                expected_issuers,
                 self.required_scopes,
             )
             token_verifier = JWTVerifier(
                 jwks_uri=f"{self.environment_url}/keys",
-                issuer=self.environment_url,
+                issuer=expected_issuers,
                 algorithm="RS256",
                 audience=self.resource_id,
                 required_scopes=self.required_scopes or None,

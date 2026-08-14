@@ -35,13 +35,13 @@ jobs:
           private-key: ${{ secrets.MARVIN_APP_PRIVATE_KEY }}
 
       - name: Set up Python 3.10
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: "3.10"
 
       # Install UV package manager
       - name: Install UV
-        uses: astral-sh/setup-uv@v7
+        uses: astral-sh/setup-uv@v9.0.0
 
       # Install dependencies
       - name: Install dependencies

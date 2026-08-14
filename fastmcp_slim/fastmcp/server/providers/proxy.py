@@ -10,8 +10,11 @@ from __future__ import annotations
 import base64
 import inspect
 import time
+import warnings
 from collections.abc import Awaitable, Callable, Sequence
-from typing import TYPE_CHECKING, Any, cast
+from copy import deepcopy
+from dataclasses import dataclass, replace
+from typing import TYPE_CHECKING, Any, Generic, Literal, TypeVar, cast
 
 import anyio
 import httpx2
@@ -20,6 +23,7 @@ from mcp import ClientSession
 from mcp.server.connection import Connection
 from mcp.server.context import ServerRequestContext
 from mcp.shared.exceptions import MCPError
+from mcp.shared.inbound import x_mcp_header_map
 from mcp_types import (
     METHOD_NOT_FOUND,
     BlobResourceContents,
@@ -27,9 +31,11 @@ from mcp_types import (
     TextResourceContents,
 )
 from mcp_types.version import MODERN_PROTOCOL_VERSIONS
+from pydantic import ValidationError
 from pydantic.networks import AnyUrl
 
-from fastmcp.client.client import Client, SDKServer
+from fastmcp._warnings import FastMCPDeprecationWarning
+from fastmcp.client.client import Client, SDKServer, _connection_failure
 from fastmcp.client.elicitation import ElicitResult, create_elicitation_callback
 from fastmcp.client.logging import LogMessage, create_log_callback
 from fastmcp.client.roots import RootsList, create_roots_callback
@@ -37,12 +43,16 @@ from fastmcp.client.sampling import create_sampling_callback
 from fastmcp.client.telemetry import client_span
 from fastmcp.client.transports import ClientTransportT
 from fastmcp.client.transports.base import TransportOptions
-from fastmcp.exceptions import ResourceError
+from fastmcp.exceptions import ResourceError, ToolError
 from fastmcp.mcp_config import MCPConfig
 from fastmcp.prompts import Message, Prompt, PromptResult
-from fastmcp.prompts.base import PromptArgument
+from fastmcp.prompts.base import InputRequiredPromptResult, PromptArgument
 from fastmcp.resources import Resource, ResourceTemplate
-from fastmcp.resources.base import ResourceContent, ResourceResult
+from fastmcp.resources.base import (
+    InputRequiredResourceResult,
+    ResourceContent,
+    ResourceResult,
+)
 from fastmcp.resources.template import expand_uri_template
 from fastmcp.server.context import Context
 from fastmcp.server.dependencies import fastmcp_request_ctx, get_context
@@ -50,11 +60,11 @@ from fastmcp.server.middleware import CallNext, Middleware, MiddlewareContext
 from fastmcp.server.providers.aggregate import ProviderErrorStrategy
 from fastmcp.server.providers.base import Provider
 from fastmcp.server.server import FastMCP
-from fastmcp.server.tasks.config import TaskConfig
 from fastmcp.telemetry import inject_trace_context
 from fastmcp.tools.base import InputRequiredToolResult, Tool, ToolResult
 from fastmcp.utilities.components import FastMCPComponent, get_fastmcp_metadata
 from fastmcp.utilities.logging import get_logger
+from fastmcp.utilities.tasks import TaskConfig
 from fastmcp.utilities.versions import VersionSpec, version_sort_key
 
 if TYPE_CHECKING:
@@ -66,6 +76,7 @@ logger = get_logger(__name__)
 
 # Type alias for client factory functions
 ClientFactoryT = Callable[[], Client] | Callable[[], Awaitable[Client]]
+ProxyIdentity = Literal["proxy", "upstream"]
 
 
 class _ForwardingClientSession(ClientSession):
@@ -93,11 +104,132 @@ PROXY_TRANSPORT_OPTIONS = TransportOptions(
 )
 
 
+#: Transport-level failures that can escape a backend connection attempt.
+#: `Client._connect` wraps most connect failures in a ``RuntimeError("Client
+#: failed to connect: ...")``, but a transport can also surface an httpx or
+#: anyio stream error directly. Every proxy entry point that opens a backend
+#: connection normalizes these into an ``MCPError`` so callers see a protocol
+#: error instead of a raw transport exception.
+_PROXY_TRANSPORT_CAUSES: tuple[type[Exception], ...] = (
+    TimeoutError,
+    httpx2.HTTPError,
+    anyio.ClosedResourceError,
+    anyio.EndOfStream,
+    anyio.BrokenResourceError,
+)
+_PROXY_TRANSPORT_ERRORS: tuple[type[Exception], ...] = (
+    RuntimeError,
+    *_PROXY_TRANSPORT_CAUSES,
+)
+
+
+def _has_transport_cause(error: RuntimeError) -> bool:
+    cause = error.__cause__
+    while cause is not None:
+        if isinstance(cause, _PROXY_TRANSPORT_CAUSES):
+            return True
+        cause = cause.__cause__
+    return False
+
+
 def _proxy_upstream_error(error: Exception) -> MCPError:
+    """Report an unreachable backend the same way however the failure arrived.
+
+    Depending on where the dead connection is noticed, the proxy sees either
+    FastMCP's own `RuntimeError("Client failed to connect: ...")` or the raw
+    transport error underneath it. Both describe one thing — the proxy could
+    not reach its upstream — so both are presented identically rather than
+    leaking the race into the message the front client reads.
+    """
     return MCPError(
         code=mcp_types.INTERNAL_ERROR,
-        message=str(error),
+        message=str(_connection_failure(error)),
     )
+
+
+# Request `_meta` keys that describe one negotiated MCP connection. They never
+# cross the proxy: a modern backend session stamps its own negotiated values on
+# every request, and a handshake-era backend must not receive them at all.
+_CONNECTION_META_KEYS = frozenset(
+    {
+        mcp_types.PROTOCOL_VERSION_META_KEY,
+        mcp_types.CLIENT_INFO_META_KEY,
+        mcp_types.CLIENT_CAPABILITIES_META_KEY,
+    }
+)
+
+
+def _forwardable_request_meta(ctx: Context | None) -> dict[str, Any] | None:
+    """Frontend request metadata that may cross onto the backend connection.
+
+    This is the proxy's one sanctioned read of the inbound request's `_meta`:
+    progress tokens, tracing, task, and application metadata pass through,
+    while connection-owned keys (`_CONNECTION_META_KEYS`) are dropped because
+    they describe the frontend connection, not the backend one.
+    """
+    request_context = ctx.request_context if ctx is not None else None
+    if request_context is None or not request_context.meta:
+        return None
+    forwarded = {
+        key: value
+        for key, value in request_context.meta.items()
+        if key not in _CONNECTION_META_KEYS
+    }
+    return forwarded or None
+
+
+def _forwardable_server_meta(meta: dict[str, Any] | None) -> dict[str, Any]:
+    """Backend result metadata that may cross onto the frontend connection."""
+    return {
+        key: value
+        for key, value in (meta or {}).items()
+        if key not in _CONNECTION_META_KEYS and key != mcp_types.SERVER_INFO_META_KEY
+    }
+
+
+def _session_request_meta(
+    meta: dict[str, Any] | None,
+) -> mcp_types.RequestParamsMeta | None:
+    """Adapt forwardable metadata for a direct backend-session call.
+
+    Direct session calls bypass the high-level client mixins, so trace context
+    is injected here, matching what the mixins do on the legacy client paths.
+    """
+    return cast(
+        "mcp_types.RequestParamsMeta | None", inject_trace_context(meta) or None
+    )
+
+
+async def _relay_read_resource(
+    client: Client, uri: str, ctx: Context | None
+) -> (
+    list[mcp_types.TextResourceContents | mcp_types.BlobResourceContents]
+    | mcp_types.InputRequiredResult
+):
+    """Read a backend resource, surfacing a guard ask rather than driving it.
+
+    Mirrors `ProxyTool.run`: on a modern backend the low-level session is used
+    so an `InputRequiredResult` (SEP-2322) comes back as a result for the parent
+    to forward, instead of the high-level client trying to answer it here — the
+    proxy has no back-channel to the real user, so driving it fails outright.
+    The inbound request's continuation state travels down so the backend guard
+    sees the client's answers on its own `ctx.input_responses`.
+    """
+    meta = _forwardable_request_meta(ctx)
+    if client.protocol_version not in MODERN_PROTOCOL_VERSIONS:
+        return await client.read_resource(uri, meta=meta)
+    result = await client._await_with_session_monitoring(
+        client.session.read_resource(
+            uri,
+            meta=_session_request_meta(meta),
+            input_responses=ctx.input_responses if ctx else None,
+            request_state=ctx.request_state if ctx else None,
+            allow_input_required=True,
+        )
+    )
+    if isinstance(result, mcp_types.InputRequiredResult):
+        return result
+    return list(result.contents)
 
 
 def _stash_proxy_request_context(client: Client, ctx: Context) -> None:
@@ -123,7 +255,16 @@ def _stash_proxy_request_context(client: Client, ctx: Context) -> None:
 
 
 class ProxyInitializeMiddleware(Middleware):
+    """Deprecated middleware for forwarding instructions during initialization."""
+
     def __init__(self, proxy: FastMCPProxy) -> None:
+        warnings.warn(
+            "`ProxyInitializeMiddleware` is deprecated and will be removed in a "
+            "future release. `FastMCPProxy` now installs "
+            "`ProxyMetadataMiddleware` automatically.",
+            FastMCPDeprecationWarning,
+            stacklevel=2,
+        )
         self.proxy = proxy
 
     async def on_initialize(
@@ -145,22 +286,24 @@ class ProxyInitializeMiddleware(Middleware):
                         ctx._fastmcp,
                     )
             async with client:
-                await client.initialize()
-                # Capture the upstream's instructions while the session is live;
-                # `initialize_result` clears once the client context exits.
-                init_result = client.initialize_result
-                if init_result is not None:
-                    upstream_instructions = init_result.instructions
+                # Entering the context already ran connect-time negotiation.
+                # `initialize()` returns the handshake result on a legacy backend,
+                # but raises on a modern (server/discover) backend, which has no
+                # InitializeResult. That mismatch only arises when an explicit
+                # `mode=` pins the backend to a different era than this legacy
+                # front (the era-mirroring default keeps the two in lockstep, so
+                # a legacy front always reaches a legacy backend here). Skip the
+                # handshake-only call when the backend negotiated the modern era.
+                if client.protocol_version not in MODERN_PROTOCOL_VERSIONS:
+                    await client.initialize()
+                    # Capture the upstream's instructions while the session is
+                    # live; `initialize_result` clears once the context exits.
+                    init_result = client.initialize_result
+                    if init_result is not None:
+                        upstream_instructions = init_result.instructions
         except MCPError:
             raise
-        except (
-            RuntimeError,
-            TimeoutError,
-            httpx2.HTTPError,
-            anyio.ClosedResourceError,
-            anyio.EndOfStream,
-            anyio.BrokenResourceError,
-        ) as error:
+        except _PROXY_TRANSPORT_ERRORS as error:
             raise _proxy_upstream_error(error) from error
 
         result = await call_next(context)
@@ -247,15 +390,11 @@ class ProxyTool(Tool):
             async with client:
                 ctx = context or get_context()
                 _stash_proxy_request_context(client, ctx)
-                # Forward the inbound request's `_meta` block (trace context,
-                # version, etc.) to the backend. In SDK v2 the request context
-                # exposes the lifted `_meta` dict directly; task submission is a
-                # first-class params field rather than context state, so there
-                # is no separate task-metadata injection here.
-                req_ctx = ctx.request_context
-                meta: dict[str, Any] | None = (
-                    dict(req_ctx.meta) if req_ctx is not None and req_ctx.meta else None
-                )
+                # Forward the inbound request's hop-safe `_meta` (trace
+                # context, progress token, etc.) to the backend. Task
+                # submission is a first-class params field rather than context
+                # state, so there is no separate task-metadata injection here.
+                meta = _forwardable_request_meta(ctx)
 
                 if client.protocol_version in MODERN_PROTOCOL_VERSIONS:
                     # Modern backend: call the session directly (not
@@ -266,10 +405,19 @@ class ProxyTool(Tool):
                     # round. Forward the inbound request's continuation state
                     # down so the backend guard tool sees the client's answers
                     # on its own `ctx.input_responses` / `ctx.request_state`.
-                    request_meta = cast(
-                        "mcp_types.RequestParamsMeta | None",
-                        inject_trace_context(meta) or None,
-                    )
+                    request_meta = _session_request_meta(meta)
+                    # SEP-2243: a modern backend rejects a `tools/call` whose
+                    # `x-mcp-header` argument is not mirrored into an `Mcp-Param-*`
+                    # header. The SDK client emits those headers only for tools it
+                    # has listed (it caches the annotation map on `list_tools`),
+                    # but a proxied call goes straight to `call_tool` on a fresh
+                    # session. Seed the session's map from the backend tool's
+                    # advertised schema so the header is emitted and the call is
+                    # accepted; an unannotated schema yields an empty map and no
+                    # headers, matching the client's own behavior.
+                    header_map = x_mcp_header_map(self.parameters)
+                    if header_map:
+                        client.session._x_mcp_header_maps[backend_name] = header_map
                     result = await client._await_with_session_monitoring(
                         client.session.call_tool(
                             name=backend_name,
@@ -386,9 +534,12 @@ class ProxyResource(Resource):
         ) as span:
             span.set_attribute("fastmcp.provider.type", "ProxyProvider")
             client = await self._get_client()
+            ctx = get_context()
             async with client:
-                _stash_proxy_request_context(client, get_context())
-                result = await client.read_resource(backend_uri)
+                _stash_proxy_request_context(client, ctx)
+                result = await _relay_read_resource(client, backend_uri, ctx)
+            if isinstance(result, mcp_types.InputRequiredResult):
+                return InputRequiredResourceResult(result)
             if not result:
                 raise ResourceError(
                     f"Remote server returned empty content for {backend_uri}"
@@ -484,9 +635,28 @@ class ProxyTemplate(ResourceTemplate):
         backend_template = self._backend_uri_template or self.uri_template
         parameterized_uri = expand_uri_template(backend_template, params)
         client = await self._get_client()
+        ctx = context or get_context()
         async with client:
-            _stash_proxy_request_context(client, context or get_context())
-            result = await client.read_resource(parameterized_uri)
+            _stash_proxy_request_context(client, ctx)
+            result = await _relay_read_resource(client, parameterized_uri, ctx)
+
+        if isinstance(result, mcp_types.InputRequiredResult):
+            # The backend template asked for input. `InputRequiredResourceResult`
+            # is a `ResourceResult`, so caching it on the returned resource lets
+            # the ask ride the ordinary read path out to the parent's wire
+            # handler, which unwraps it.
+            return ProxyResource(
+                client_factory=self._client_factory,
+                uri=parameterized_uri,
+                name=self.name,
+                title=self.title,
+                description=self.description,
+                mime_type=self.mime_type or "text/plain",
+                icons=self.icons,
+                meta=self.meta,
+                tags=get_fastmcp_metadata(self.meta).get("tags", []),
+                _cached_content=InputRequiredResourceResult(result),
+            )
 
         if not result:
             raise ResourceError(
@@ -603,9 +773,28 @@ class ProxyPrompt(Prompt):
         ) as span:
             span.set_attribute("fastmcp.provider.type", "ProxyProvider")
             client = await self._get_client()
+            ctx = get_context()
             async with client:
-                _stash_proxy_request_context(client, get_context())
-                result = await client.get_prompt(backend_name, arguments)
+                _stash_proxy_request_context(client, ctx)
+                meta = _forwardable_request_meta(ctx)
+                if client.protocol_version in MODERN_PROTOCOL_VERSIONS:
+                    # See `_relay_read_resource`: surface a backend guard's ask
+                    # instead of trying to answer it inside the proxy.
+                    raw = await client._await_with_session_monitoring(
+                        client.session.get_prompt(
+                            backend_name,
+                            arguments,
+                            meta=_session_request_meta(meta),
+                            input_responses=ctx.input_responses if ctx else None,
+                            request_state=ctx.request_state if ctx else None,
+                            allow_input_required=True,
+                        )
+                    )
+                    if isinstance(raw, mcp_types.InputRequiredResult):
+                        return InputRequiredPromptResult(raw)
+                    result = raw
+                else:
+                    result = await client.get_prompt(backend_name, arguments, meta=meta)
             # Convert GetPromptResult to PromptResult, preserving meta from result
             # (not the static prompt meta which includes fastmcp tags)
             # Convert PromptMessages to Messages
@@ -630,12 +819,15 @@ class ProxyPrompt(Prompt):
 # -----------------------------------------------------------------------------
 
 
-class _CacheEntry:
+_ComponentT = TypeVar("_ComponentT")
+
+
+class _CacheEntry(Generic[_ComponentT]):
     """A cached sequence of components with a monotonic timestamp."""
 
     __slots__ = ("items", "timestamp")
 
-    def __init__(self, items: Sequence[Any], timestamp: float):
+    def __init__(self, items: Sequence[_ComponentT], timestamp: float):
         self.items = items
         self.timestamp = timestamp
 
@@ -676,8 +868,8 @@ class ProxyProvider(Provider):
         mcp = FastMCP("Proxy Server")
         mcp.add_provider(proxy)
 
-        # Can also add with namespace
-        mcp.add_provider(proxy.with_namespace("remote"))
+        # Can also add with a namespace
+        mcp.add_provider(proxy, namespace="remote")
         ```
     """
 
@@ -729,6 +921,8 @@ class ProxyProvider(Provider):
                 tools = []
             else:
                 raise
+        except _PROXY_TRANSPORT_ERRORS as error:
+            raise _proxy_upstream_error(error) from error
         self._tools_cache = _CacheEntry(tools, time.monotonic())
         return tools
 
@@ -746,6 +940,54 @@ class ProxyProvider(Provider):
         if not matching:
             return None
         return max(matching, key=version_sort_key)
+
+    async def get_tool_by_hash(self, tool_hash: str, tool_name: str) -> Tool | None:
+        """Resolve an identity against the remote listing.
+
+        The base implementation looks the tool up by its registered name,
+        which assumes the name survived to here. Across a proxy it need not:
+        a backend that mounts its app under a namespace advertises
+        ``crm_save``, and nothing named ``save`` was ever listed. Matching on
+        the identity carried in meta is what the identity is for.
+
+        A remote that mounts one app twice sends back two tools claiming one
+        identity, exactly as a local composition would. That is refused here
+        on the same terms ``AggregateProvider`` refuses it, so a duplicated
+        app is caught wherever it is composed rather than only nearby.
+        """
+        from fastmcp.server.providers.addressing import TOOL_HASH_META_KEY
+
+        cache = self._tools_cache
+        if cache is None or not cache.is_fresh(self._cache_ttl):
+            await self._list_tools()
+            cache = self._tools_cache
+        assert cache is not None
+
+        matches: list[Tool] = []
+        for tool in cache.items:
+            meta = tool.meta or {}
+            fastmcp_meta = meta.get("fastmcp")
+            ui_meta = meta.get("ui")
+            visibility = (
+                ui_meta.get("visibility", []) if isinstance(ui_meta, dict) else []
+            )
+            if (
+                isinstance(fastmcp_meta, dict)
+                and fastmcp_meta.get(TOOL_HASH_META_KEY) == tool_hash
+                and "app" in visibility
+            ):
+                matches.append(tool)
+
+        if not matches:
+            return None
+        distinct = {tool.name for tool in matches}
+        if len(distinct) > 1:
+            raise ToolError(
+                f"Ambiguous app tool {tool_name!r}: {len(distinct)} components share "
+                f"the identity {tool_hash!r}. The same app is composed more than "
+                f"once, so this call cannot be routed to a single tool."
+            )
+        return max(matches, key=version_sort_key)
 
     # -------------------------------------------------------------------------
     # Resource methods
@@ -766,6 +1008,8 @@ class ProxyProvider(Provider):
                 resources = []
             else:
                 raise
+        except _PROXY_TRANSPORT_ERRORS as error:
+            raise _proxy_upstream_error(error) from error
         self._resources_cache = _CacheEntry(resources, time.monotonic())
         return resources
 
@@ -803,6 +1047,8 @@ class ProxyProvider(Provider):
                 templates = []
             else:
                 raise
+        except _PROXY_TRANSPORT_ERRORS as error:
+            raise _proxy_upstream_error(error) from error
         self._templates_cache = _CacheEntry(templates, time.monotonic())
         return templates
 
@@ -840,6 +1086,8 @@ class ProxyProvider(Provider):
                 prompts = []
             else:
                 raise
+        except _PROXY_TRANSPORT_ERRORS as error:
+            raise _proxy_upstream_error(error) from error
         self._prompts_cache = _CacheEntry(prompts, time.monotonic())
         return prompts
 
@@ -875,9 +1123,196 @@ class ProxyProvider(Provider):
     # because client cleanup is handled per-request
 
 
+@dataclass(frozen=True)
+class _UpstreamServerMetadata:
+    instructions: str | None
+    server_info: mcp_types.Implementation | None
+    meta: dict[str, Any]
+
+    @classmethod
+    def from_result(
+        cls,
+        result: mcp_types.InitializeResult | mcp_types.DiscoverResult,
+        server_info: mcp_types.Implementation | None,
+    ) -> _UpstreamServerMetadata:
+        """Detach forwarded values from the backend session's adopted result."""
+        return cls(
+            instructions=result.instructions,
+            server_info=(
+                server_info.model_copy(deep=True) if server_info is not None else None
+            ),
+            meta=deepcopy(result.meta or {}),
+        )
+
+    @classmethod
+    def from_client(cls, client: Client) -> _UpstreamServerMetadata | None:
+        result = client.session.initialize_result or client.session.discover_result
+        if result is None:
+            return None
+        return cls.from_result(result, client.session.server_info)
+
+    @classmethod
+    def from_discover(cls, result: mcp_types.DiscoverResult) -> _UpstreamServerMetadata:
+        raw_server_info = (result.meta or {}).get(mcp_types.SERVER_INFO_META_KEY)
+        try:
+            server_info = (
+                mcp_types.Implementation.model_validate(raw_server_info)
+                if raw_server_info is not None
+                else None
+            )
+        except ValidationError:
+            server_info = None
+        return cls.from_result(result, server_info)
+
+
+class ProxyMetadataMiddleware(Middleware):
+    """Forward optional server metadata from a ``ProxyProvider`` backend.
+
+    Instructions and namespaced metadata are forwarded with frontend values
+    taking precedence. Protocol versions, capabilities, cache policy, and result
+    type are never copied from the backend. ``identity`` controls whether server
+    identity remains the gateway's or uses the backend's when available.
+    """
+
+    def __init__(
+        self,
+        provider: ProxyProvider,
+        *,
+        identity: ProxyIdentity = "proxy",
+    ) -> None:
+        if identity not in ("proxy", "upstream"):
+            raise ValueError("identity must be 'proxy' or 'upstream'")
+        self.provider = provider
+        self.identity = identity
+
+    async def _read_connected(self, client: Client) -> _UpstreamServerMetadata | None:
+        """Read metadata without changing the client's adopted negotiation state."""
+        if client.mode in MODERN_PROTOCOL_VERSIONS and client.prior_discover is None:
+            # An exact pin adopts a synthetic result without probing. Read the
+            # real result directly, but do not adopt it into this borrowed session.
+            raw = await client.session.send_discover(client.mode)
+            result_type = raw.get("resultType")
+            if (
+                isinstance(result_type, str)
+                and result_type not in mcp_types.CORE_RESULT_TYPES
+            ):
+                return None
+            try:
+                result = mcp_types.DiscoverResult.model_validate(raw)
+            except ValidationError as error:
+                logger.debug("Could not read upstream server metadata: %r", error)
+                return None
+            return _UpstreamServerMetadata.from_discover(result)
+        return _UpstreamServerMetadata.from_client(client)
+
+    async def _read_upstream(
+        self, client: Client, context: Context | None
+    ) -> _UpstreamServerMetadata | None:
+        if context is not None:
+            _stash_proxy_request_context(client, context)
+
+        try:
+            if client.is_connected():
+                return await self._read_connected(client)
+            async with client:
+                return await self._read_connected(client)
+        except (MCPError, *_PROXY_TRANSPORT_ERRORS) as error:
+            if isinstance(error, RuntimeError) and not _has_transport_cause(error):
+                raise
+            logger.debug("Could not read upstream server metadata: %r", error)
+            return None
+
+    def _updates(
+        self,
+        result: mcp_types.InitializeResult | mcp_types.DiscoverResult,
+        upstream: _UpstreamServerMetadata,
+    ) -> dict[str, Any]:
+        meta = _forwardable_server_meta(upstream.meta)
+        meta.update(result.meta or {})
+
+        updates: dict[str, Any] = {"meta": meta or None}
+        if result.instructions is None and upstream.instructions is not None:
+            updates["instructions"] = upstream.instructions
+        if self.identity == "upstream" and upstream.server_info is not None:
+            if isinstance(result, mcp_types.InitializeResult):
+                updates["server_info"] = upstream.server_info
+            else:
+                meta[mcp_types.SERVER_INFO_META_KEY] = upstream.server_info.model_dump(
+                    by_alias=True, mode="json", exclude_none=True
+                )
+                updates["meta"] = meta
+        return updates
+
+    async def on_initialize(
+        self,
+        context: MiddlewareContext[mcp_types.InitializeRequest],
+        call_next: CallNext[
+            mcp_types.InitializeRequest, mcp_types.InitializeResult | None
+        ],
+    ) -> mcp_types.InitializeResult | None:
+        # Factory errors must occur before the legacy response is committed.
+        client = await self.provider._get_client()
+        result = await call_next(context)
+        if result is None:
+            return None
+        upstream = await self._read_upstream(client, context.fastmcp_context)
+        if upstream is None:
+            return result
+        return result.model_copy(update=self._updates(result, upstream))
+
+    async def on_discover(
+        self,
+        context: MiddlewareContext[mcp_types.DiscoverRequest],
+        call_next: CallNext[
+            mcp_types.DiscoverRequest,
+            mcp_types.DiscoverResult | dict[str, Any],
+        ],
+    ) -> mcp_types.DiscoverResult | dict[str, Any]:
+        result = await call_next(context)
+        if not isinstance(result, mcp_types.DiscoverResult):
+            return result
+        client = await self.provider._get_client()
+        upstream = await self._read_upstream(client, context.fastmcp_context)
+        if upstream is None:
+            return result
+        return result.model_copy(update=self._updates(result, upstream))
+
+
 # -----------------------------------------------------------------------------
 # Factory Functions
 # -----------------------------------------------------------------------------
+
+
+def _mirror_front_era_mode() -> str | None:
+    """Return the backend connect ``mode`` that mirrors the front connection's era.
+
+    A proxy is a server on its front and a client on its back. The two protocol
+    eras have mutually exclusive interaction models on a single session, so the
+    whole chain must speak one era end-to-end: a modern front must reach a modern
+    backend (a guard tool's `InputRequiredResult` round-trips), and a handshake
+    front must reach a handshake backend (server-initiated sampling / elicitation
+    / roots push-forwarding works). Rather than pin its own era, the proxy speaks
+    on its back whatever era was negotiated on its front.
+
+    Reads the negotiated protocol version from the active front request context:
+
+    - modern front → that exact version, so the backend negotiates the same era
+      (pinning the version rather than ``"auto"`` makes the eras truly match).
+    - handshake front → ``"legacy"``.
+    - no request context (e.g. proxy construction before any request) → ``None``,
+      leaving the factory's configured default mode in place.
+    """
+    try:
+        ctx = get_context()
+    except RuntimeError:
+        return None
+    rc = ctx.request_context
+    if rc is None:
+        return None
+    version = rc.protocol_version
+    if version in MODERN_PROTOCOL_VERSIONS:
+        return version
+    return "legacy"
 
 
 def _create_client_factory(
@@ -913,7 +1348,13 @@ def _create_client_factory(
             credentials get forwarded upstream.
             """
             fresh = c.new()
-            fresh._transport_options = PROXY_TRANSPORT_OPTIONS
+            # The caller chose this client's era, so a multi-server MCPConfig
+            # target's mounted backend legs should negotiate it too rather than
+            # stopping at the composite router (see
+            # `TransportOptions.backend_mode`).
+            fresh._transport_options = replace(
+                PROXY_TRANSPORT_OPTIONS, backend_mode=fresh.mode
+            )
             return fresh
 
         if client.is_connected() and type(client) is ProxyClient:
@@ -949,12 +1390,42 @@ def _create_client_factory(
 
         return fresh_client_factory
     else:
-        # target is not a Client, so it's compatible with ProxyClient.__init__
-        client_kwargs: dict[str, Any] = {} if mode is None else {"mode": mode}
+        # target is not a Client, so it's compatible with ProxyClient.__init__.
+        #
+        # With no explicit mode, the backend MIRRORS the front connection's
+        # negotiated era per request (see `_mirror_front_era_mode`): a fresh
+        # client is built for each request and its mode is set from the front
+        # era, so the whole chain speaks one era end-to-end. Because every
+        # request gets its own client whose mode is derived at call time, front
+        # connections of different eras never share a backend session — there is
+        # no era to bleed across the (metadata-only) provider caches.
+        #
+        # An explicit mode pins the backend era regardless of the front. This
+        # breaks era-consistency and is only appropriate when the backend speaks
+        # a single era; the mismatch surfaces through the normal era gates.
+        explicit_mode = mode is not None
+        client_kwargs: dict[str, Any] = {"mode": mode} if explicit_mode else {}
         base_client = ProxyClient(cast(Any, target), **client_kwargs)
 
         def proxy_client_factory() -> Client:
-            return base_client.new()
+            fresh = base_client.new()
+            backend_mode = mode
+            if not explicit_mode:
+                backend_mode = _mirror_front_era_mode()
+                if backend_mode is not None:
+                    fresh.mode = backend_mode
+            if backend_mode is not None:
+                # A multi-server MCPConfig target reaches its real backends
+                # through proxies mounted on a composite router, so setting the
+                # era on this client alone would stop at the router. Carry the
+                # era down to those backend legs too (see
+                # `TransportOptions.backend_mode`), resolved here — at the
+                # moment a client is built for this request — so it tracks the
+                # front era rather than whatever was true at construction.
+                fresh._transport_options = replace(
+                    PROXY_TRANSPORT_OPTIONS, backend_mode=backend_mode
+                )
+            return fresh
 
         return proxy_client_factory
 
@@ -988,6 +1459,7 @@ class FastMCPProxy(FastMCP):
         *,
         client_factory: ClientFactoryT,
         provider_error_strategy: ProviderErrorStrategy = "warn",
+        identity: ProxyIdentity = "proxy",
         **kwargs,
     ):
         """Initialize the proxy server.
@@ -1002,14 +1474,17 @@ class FastMCPProxy(FastMCP):
             provider_error_strategy: How provider errors should affect aggregate
                 operations. Defaults to ``"warn"`` for compatibility; use
                 ``"raise"`` when the proxy should surface upstream failures.
+            identity: Whether clients see the proxy's server identity or the
+                upstream server's when available. Defaults to ``"proxy"``
+                for compatibility.
             **kwargs: Additional settings for the FastMCP server.
         """
         super().__init__(**kwargs)
         self.provider_error_strategy = provider_error_strategy
         self.client_factory = client_factory
-        provider: Provider = ProxyProvider(client_factory)
+        provider = ProxyProvider(client_factory)
         self.add_provider(provider)
-        self.middleware.append(ProxyInitializeMiddleware(self))
+        self.middleware.append(ProxyMetadataMiddleware(provider, identity=identity))
         self._setup_proxy_ping_handler()
 
     async def _get_client(self) -> Client:
@@ -1041,9 +1516,19 @@ class FastMCPProxy(FastMCP):
 async def default_proxy_roots_handler(
     context: ServerRequestContext[Any, Any],
 ) -> RootsList:
-    """Forward list roots request from remote server to proxy's connected clients."""
+    """Forward list roots request from remote server to proxy's connected clients.
+
+    A handshake-era backend can still issue `roots/list`, and the proxy is that
+    backend's client, so it relays the request onto its own front session. This
+    reaches the wire through the SDK session rather than a `Context` method:
+    `ctx.list_roots()` is not part of FastMCP's server-authoring API, because
+    SEP-2577 removed server-initiated requests from the modern protocol. The
+    relay exists only for handshake-era interop on both legs.
+    """
     ctx = get_context()
-    return await ctx.list_roots()
+    # Deprecated upstream in SDK v2; the handshake-era relay is the one caller.
+    result = await ctx.session.list_roots()  # ty: ignore[deprecated]
+    return result.roots
 
 
 async def default_proxy_sampling_handler(
@@ -1051,16 +1536,27 @@ async def default_proxy_sampling_handler(
     params: mcp_types.CreateMessageRequestParams,
     context: ServerRequestContext[Any, Any],
 ) -> mcp_types.CreateMessageResult:
-    """Forward sampling request from remote server to proxy's connected clients."""
+    """Forward sampling request from remote server to proxy's connected clients.
+
+    Relays through the SDK session for the same reason as
+    `default_proxy_roots_handler`: server-initiated sampling is not part of
+    FastMCP's server-authoring API, and this path only ever runs when both legs
+    of the proxy speak the handshake era.
+    """
     ctx = get_context()
-    result = await ctx.sample(
-        list(messages),
+    # Deprecated upstream in SDK v2; the handshake-era relay is the one caller.
+    result = await ctx.session.create_message(  # ty: ignore[deprecated]
+        messages=list(messages),
         system_prompt=params.system_prompt,
         temperature=params.temperature,
         max_tokens=params.max_tokens,
         model_preferences=params.model_preferences,
+        related_request_id=ctx.origin_request_id,
     )
-    content = mcp_types.TextContent(type="text", text=result.text or "")
+    text = (
+        result.content.text if isinstance(result.content, mcp_types.TextContent) else ""
+    )
+    content = mcp_types.TextContent(type="text", text=text)
     return mcp_types.CreateMessageResult(
         role="assistant",
         model="fastmcp-client",
@@ -1161,12 +1657,7 @@ def _restore_request_context(
 
 
 def _make_restoring_handler(handler: Callable, rc_ref: list[Any]) -> Callable:
-    """Wrap a proxy handler to restore request_ctx before delegating.
-
-    The wrapper is a plain ``async def`` so it passes
-    ``inspect.isfunction()`` checks in handler registration paths
-    (e.g., ``create_roots_callback``).
-    """
+    """Wrap a proxy handler to restore request_ctx before delegating."""
 
     async def wrapper(*args: Any, **kwargs: Any) -> Any:
         _restore_request_context(rc_ref)
@@ -1200,6 +1691,12 @@ class ProxyClient(Client[ClientTransportT]):
     _proxy_rc_ref: list[Any]
     _proxy_restoring_handler_keys: set[str]
 
+    # A proxy forwards calls; it must not advertise task support to its backend.
+    # Proxied tools run synchronously (forbidden mode), and the proxy has no path
+    # to drive a backend task on the front connection's behalf, so the internal
+    # tasks client extension is not folded into a proxy's backend client.
+    _auto_internal_extensions: bool = False
+
     def __init__(
         self,
         transport: ClientTransportT
@@ -1214,13 +1711,23 @@ class ProxyClient(Client[ClientTransportT]):
     ):
         if "name" not in kwargs:
             kwargs["name"] = self.generate_name()
-        # ProxyClient defaults to the handshake era: a dual-era backend serves
-        # both, and a single proxy session can only be one era. Handshake keeps
-        # the server-initiated push forwarding (sampling / elicitation / roots,
-        # via the handlers installed below) that proxies rely on. To round-trip
-        # an upstream guard tool's InputRequiredResult (SEP-2322) instead, opt
-        # into the modern era explicitly with `create_proxy(target, mode="auto")`
-        # — the two are mutually exclusive per session.
+        # ProxyClient itself defaults to the handshake era when constructed
+        # directly: a single proxy session can only be one era, and handshake
+        # keeps the server-initiated push forwarding (sampling / elicitation /
+        # roots, via the handlers installed below) that proxies rely on. When a
+        # proxy is created from a non-Client target (`create_proxy(target)` /
+        # `_create_client_factory`) with no explicit mode, the factory instead
+        # MIRRORS the front connection's negotiated era onto this client per
+        # request, so the whole chain speaks one era end-to-end. An explicit
+        # `mode=` (e.g. `create_proxy(target, mode="auto")`) pins the era and
+        # overrides mirroring. The eras are mutually exclusive per session.
+        #
+        # The handshake default is pinned explicitly rather than inherited from
+        # `Client`, whose own default is `"auto"`: mirroring only applies when
+        # there is a front request to mirror, so this is the fallback for a
+        # directly-constructed ProxyClient, and it must not drift with the
+        # client default.
+        kwargs.setdefault("mode", "legacy")
         # Install context-restoring handler wrappers BEFORE super().__init__
         # registers them with the Client's session kwargs.
         self._proxy_rc_ref = [None]
@@ -1300,10 +1807,12 @@ class StatefulProxyClient(ProxyClient[ClientTransportT]):
         return cast(StatefulProxyClient[ClientTransportT], super().new())
 
     async def __aexit__(self, exc_type, exc_value, traceback) -> None:  # type: ignore[override]  # ty:ignore[invalid-method-override]
-        """The stateful proxy client will be forced disconnected when the session is exited.
-
-        So we do nothing here.
-        """
+        """Release this context without disconnecting the persistent session."""
+        with anyio.CancelScope(shield=True):
+            async with self._session_state.lock:
+                self._session_state.nesting_counter = max(
+                    0, self._session_state.nesting_counter - 1
+                )
 
     async def clear(self):
         """Clear all cached clients and force disconnect them."""

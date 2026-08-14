@@ -3,7 +3,13 @@ from typing import Annotated, Any
 
 import pytest
 from inline_snapshot import snapshot
-from mcp_types import AudioContent, EmbeddedResource, ImageContent, TextContent
+from mcp_types import (
+    AudioContent,
+    CallToolResult,
+    EmbeddedResource,
+    ImageContent,
+    TextContent,
+)
 from pydantic import AnyUrl, BaseModel, Field, TypeAdapter
 from typing_extensions import TypedDict
 
@@ -130,6 +136,13 @@ class TestToolFromFunctionOutputSchema:
         tool = Tool.from_function(func)
         assert tool.output_schema is None
 
+    async def test_call_tool_result_return_annotation_no_output_schema(self):
+        def func() -> CallToolResult:
+            return CallToolResult(content=[])
+
+        tool = Tool.from_function(func)
+        assert tool.output_schema is None
+
     async def test_tool_result_subclass_return_annotation_no_output_schema(self):
         class MyToolResult(ToolResult):
             def __init__(self, data: str):
@@ -217,6 +230,10 @@ class TestToolFromFunctionOutputSchema:
 
         tool = Tool.from_function(func)
         assert tool.output_schema is None
+
+        result = await tool.run({})
+        assert result.structured_content is None
+        assert len(result.content) == 1
 
     async def test_mixed_unserializable_return_annotation(self):
         class Unserializable:

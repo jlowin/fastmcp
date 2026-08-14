@@ -153,10 +153,11 @@ class FastMCPServerMiddleware:
 
     Dispatch shapes:
 
-    - ``initialize`` runs the *whole* FastMCP chain here (``on_message`` ->
-      ``on_request`` -> ``on_initialize``) because there is no interior handler
-      adapter for it: the SDK builds the ``InitializeResult`` directly, so this is
-      the only place ``on_initialize`` can observe it or veto with ``MCPError``.
+    - Negotiation runs the *whole* FastMCP chain here: ``initialize`` dispatches
+      through ``on_initialize`` and ``server/discover`` through ``on_discover``.
+      Neither has an interior FastMCP handler adapter, and the SDK serializes both
+      results before returning through its middleware seam, so this root adapter
+      restores core results to typed models before FastMCP middleware observes them.
     - The component methods (``tools/call``, ``tools/list``, ``resources/read``,
       ...) still run their FastMCP chain *interior*, in the handler adapter, where
       ``on_call_tool`` receives the typed component result and a tool exception
@@ -192,6 +193,8 @@ class FastMCPServerMiddleware:
                 return await call_next(ctx)
             if ctx.method == "initialize" and ctx.request_id is not None:
                 return await self._run_initialize_mw(fastmcp, ctx, call_next)
+            if ctx.method == "server/discover" and ctx.request_id is not None:
+                return await self._run_discover_mw(fastmcp, ctx, call_next)
             if ctx.request_id is not None and ctx.method in _INTERIOR_METHODS:
                 return await self._dispatch_component(fastmcp, ctx, call_next)
             return await self._run_outer_mw(fastmcp, ctx, call_next, _raise=None)
@@ -317,6 +320,62 @@ class FastMCPServerMiddleware:
         finally:
             for var, token in reversed(tokens):
                 var.reset(token)
+
+    async def _run_discover_mw(
+        self,
+        fastmcp: FastMCP,
+        ctx: ServerRequestContext,
+        call_next: CallNext,
+    ) -> HandlerResult:
+        """Run discovery through the typed FastMCP middleware hook."""
+        from fastmcp.server.context import Context
+        from fastmcp.server.middleware.middleware import MiddlewareContext
+
+        try:
+            discover_message = mcp_types.DiscoverRequest.model_validate(
+                {"method": "server/discover", "params": ctx.params}, by_name=False
+            )
+        except ValidationError as exc:
+            return await self._run_outer_mw(fastmcp, ctx, call_next, _raise=exc)
+
+        async def call_original_handler(
+            _mw_ctx: MiddlewareContext,
+        ) -> mcp_types.DiscoverResult | dict[str, Any]:
+            message = _mw_ctx.message
+            params = (
+                message.params.model_dump(by_alias=True, mode="json", exclude_none=True)
+                if message.params is not None
+                else None
+            )
+            raw = await call_next(replace(ctx, params=params))
+            if isinstance(raw, mcp_types.DiscoverResult):
+                return raw
+            if isinstance(raw, Mapping):
+                result = dict(raw)
+                result_type = result.get("resultType")
+                if (
+                    isinstance(result_type, str)
+                    and result_type not in mcp_types.CORE_RESULT_TYPES
+                ):
+                    return result
+                return mcp_types.DiscoverResult.model_validate(result)
+            raise TypeError(
+                "server/discover handler returned "
+                f"{type(raw).__name__}; expected DiscoverResult or mapping"
+            )
+
+        async with Context(fastmcp=fastmcp, session=ctx.session) as fastmcp_ctx:
+            mw_context = MiddlewareContext(
+                message=discover_message,
+                source="client",
+                type="request",
+                method="server/discover",
+                fastmcp_context=fastmcp_ctx,
+            )
+            return await fastmcp._run_middleware(
+                mw_context,
+                cast("FastMCPCallNext[Any, Any]", call_original_handler),
+            )
 
     async def _run_initialize_mw(
         self,
@@ -461,13 +520,9 @@ class LowLevelServer(_Server[LifespanResultT]):
         # ensure we use the FastMCP notification options
         if notification_options is None:
             notification_options = self.notification_options
-        merged = {
-            **self.fastmcp.experimental_capabilities,
-            **(experimental_capabilities or {}),
-        }
         return super().create_initialization_options(
             notification_options=notification_options,
-            experimental_capabilities=merged or None,
+            experimental_capabilities=experimental_capabilities,
             extensions=extensions,
         )
 
@@ -479,25 +534,45 @@ class LowLevelServer(_Server[LifespanResultT]):
         *,
         protocol_version: str | None = None,
     ) -> mcp_types.ServerCapabilities:
-        """Override to set capabilities.tasks as a first-class field per SEP-1686
-        and advertise the MCP Apps UI extension.
+        """Override to advertise registered extensions and the MCP Apps UI extension.
 
-        ``ServerCapabilities.tasks`` and ``ServerCapabilities.extensions`` are
-        real declared fields in v2, so we update them directly.
+        ``ServerCapabilities.extensions`` is a real declared field in v2, so we
+        update it directly. The
+        `FastMCP(experimental_capabilities=...)` merge also lives here rather
+        than in `create_initialization_options`: the modern `server/discover`
+        handler calls this directly, without going through
+        `create_initialization_options` at all, so merging there only reached
+        the handshake-era `initialize` response and silently dropped
+        constructor-configured experimental capabilities from `discover`.
         """
-        from fastmcp.server.tasks.capabilities import get_task_capabilities
-
+        merged_experimental = {
+            **self.fastmcp.experimental_capabilities,
+            **(experimental_capabilities or {}),
+        }
         capabilities = super().get_capabilities(
             notification_options,
-            experimental_capabilities,
+            merged_experimental or None,
             extensions,
             protocol_version=protocol_version,
         )
 
+        # Advertise every registered extension's settings under
+        # capabilities.extensions[identifier]. The hand-rolled UI splice stays
+        # for now (MCP Apps migrates onto the extension API in a later phase);
+        # the two coexist. Advertisement is unconditional — the SDK's pre-2026
+        # version sieve strips capabilities.extensions on legacy eras, a known
+        # limitation (sdk-feedback #2).
         existing_extensions = capabilities.extensions or {}
+        registered_extensions = {
+            extension.identifier: extension.settings()
+            for extension in self.fastmcp._extensions.values()
+        }
         return capabilities.model_copy(
             update={
-                "tasks": get_task_capabilities(),
-                "extensions": {**existing_extensions, UI_EXTENSION_ID: {}},
+                "extensions": {
+                    **existing_extensions,
+                    UI_EXTENSION_ID: {},
+                    **registered_extensions,
+                },
             }
         )

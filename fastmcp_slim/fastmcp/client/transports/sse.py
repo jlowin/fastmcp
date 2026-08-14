@@ -16,6 +16,10 @@ from pydantic import AnyUrl
 from typing_extensions import Unpack
 
 from fastmcp.client.auth.bearer import BearerAuth
+from fastmcp.client.auth.client_credentials import (
+    ClientCredentialsOAuthProvider,
+    PrivateKeyJWTOAuthProvider,
+)
 from fastmcp.client.auth.oauth import OAuth
 from fastmcp.client.dependencies import get_http_headers
 from fastmcp.client.transports.base import (
@@ -28,6 +32,10 @@ from fastmcp.utilities.timeout import normalize_timeout_to_timedelta
 
 class SSETransport(ClientTransport):
     """Transport implementation that connects to an MCP server via Server-Sent Events."""
+
+    # SSE predates the sessionless modern era and cannot serve it; a client with
+    # `mode="auto"` negotiates the legacy handshake directly over SSE.
+    legacy_only = True
 
     def __init__(
         self,
@@ -83,6 +91,11 @@ class SSETransport(ClientTransport):
                 factory = self.httpx_client_factory or self._make_verify_factory()
                 if factory is not None:
                     auth.httpx_client_factory = factory
+            resolved = auth
+        elif isinstance(
+            auth, (ClientCredentialsOAuthProvider, PrivateKeyJWTOAuthProvider)
+        ):
+            auth._bind(self.url)
             resolved = auth
         elif isinstance(auth, str):
             resolved = BearerAuth(auth)

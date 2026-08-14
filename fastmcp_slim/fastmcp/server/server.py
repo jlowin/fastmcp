@@ -14,16 +14,12 @@ from contextlib import (
     AbstractAsyncContextManager,
     asynccontextmanager,
 )
-from dataclasses import replace
 from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Generic, Literal, TypeVar, cast, overload
 
 import httpx2
 import mcp_types
-from key_value.aio.adapters.pydantic import PydanticAdapter
-from key_value.aio.protocols import AsyncKeyValue
-from key_value.aio.stores.memory import MemoryStore
 from mcp.server.lowlevel.server import LifespanResultT
 from mcp.server.request_state import RequestStateSecurity
 from mcp.shared.exceptions import MCPError
@@ -32,6 +28,7 @@ from mcp_types import (
     CallToolRequestParams,
     ToolAnnotations,
 )
+from mcp_types.jsonrpc import MISSING_REQUIRED_CLIENT_CAPABILITY
 from pydantic import AnyUrl
 from pydantic import ValidationError as PydanticValidationError
 from starlette.routing import BaseRoute
@@ -68,6 +65,7 @@ from fastmcp.resources.security import (
 from fastmcp.resources.template import ResourceTemplate
 from fastmcp.server.auth import AuthCheck, AuthContext, AuthProvider, run_auth_checks
 from fastmcp.server.caching import build_cache_hints
+from fastmcp.server.completions import CompletionHandler
 from fastmcp.server.lifespan import Lifespan
 from fastmcp.server.low_level import LowLevelServer
 from fastmcp.server.middleware import CallNext, Middleware, MiddlewareContext
@@ -79,7 +77,6 @@ from fastmcp.server.middleware.middleware import (
 from fastmcp.server.mixins import LifespanMixin, MCPOperationsMixin, TransportMixin
 from fastmcp.server.providers import LocalProvider, Provider
 from fastmcp.server.providers.aggregate import AggregateProvider
-from fastmcp.server.tasks.config import TaskConfig, TaskMeta
 from fastmcp.server.telemetry import server_span
 from fastmcp.server.transforms import (
     ToolTransform,
@@ -91,8 +88,9 @@ from fastmcp.tools.base import Tool, ToolResult
 from fastmcp.tools.function_tool import FunctionTool
 from fastmcp.tools.tool_transform import ToolTransformConfig
 from fastmcp.utilities.components import FastMCPComponent, _coerce_version
-from fastmcp.utilities.exceptions import HTTP_STATUS_ERRORS, TIMEOUT_ERRORS
+from fastmcp.utilities.exceptions import get_http_status_code, is_timeout_error
 from fastmcp.utilities.logging import get_logger
+from fastmcp.utilities.tasks import TaskConfig
 from fastmcp.utilities.types import AnyFunction, FastMCPBaseModel, NotSet, NotSetT
 from fastmcp.utilities.versions import (
     VersionSpec,
@@ -100,21 +98,19 @@ from fastmcp.utilities.versions import (
 )
 
 if TYPE_CHECKING:
+    from key_value.aio.adapters.pydantic import PydanticAdapter
+    from key_value.aio.protocols import AsyncKeyValue
+
     from fastmcp.client import Client
     from fastmcp.client.client import SDKServer
-    from fastmcp.client.sampling import SamplingHandler
     from fastmcp.client.transports import ClientTransport, ClientTransportT
+    from fastmcp.server.extensions import ServerExtension
     from fastmcp.server.providers.openapi import ComponentFn as OpenAPIComponentFn
     from fastmcp.server.providers.openapi import RouteMap
     from fastmcp.server.providers.openapi import RouteMapFn as OpenAPIRouteMapFn
     from fastmcp.server.providers.proxy import FastMCPProxy
 
 logger = get_logger(__name__)
-
-# Both-library catch tuples for user-supplied code that may still raise legacy
-# httpx exceptions; see fastmcp.utilities.exceptions for the defensive import.
-_ACTIONABLE_HTTP_STATUS_ERRORS = HTTP_STATUS_ERRORS
-_ACTIONABLE_TIMEOUT_ERRORS = TIMEOUT_ERRORS
 
 
 def _version_request_meta(
@@ -144,8 +140,9 @@ def _version_request_meta(
 
 
 # The MCP SDK warns "Tool X not listed, no validation will be performed"
-# for every call to app-only tools (hidden from list_tools by design).
-# This fires even when validate_input=False. Suppress it.
+# for every call addressed by hashed backend name, since that address is
+# an identity rather than a listed tool name. This fires even when
+# validate_input=False. Suppress it.
 class _SuppressUnlistedToolWarning(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         return "not listed, no validation" not in record.getMessage()
@@ -177,11 +174,13 @@ _REMOVED_KWARGS: dict[str, str] = {
     "include_tags": "Use `server.enable(tags=..., only=True)` after creating the server.",
     "exclude_tags": "Use `server.disable(tags=...)` after creating the server.",
     "tool_transformations": "Use `server.add_transform(ToolTransform(...))` after creating the server.",
+    "sampling_handler": "Server-initiated sampling was removed from MCP by SEP-2577. Call an LLM directly from your tool.",
+    "sampling_handler_behavior": "Server-initiated sampling was removed from MCP by SEP-2577. Call an LLM directly from your tool.",
 }
 
 
 def _check_removed_kwargs(kwargs: dict[str, Any]) -> None:
-    """Raise helpful TypeErrors for kwargs removed in v3."""
+    """Raise helpful TypeErrors for kwargs FastMCP no longer accepts."""
     for key in kwargs:
         if key in _REMOVED_KWARGS:
             raise TypeError(
@@ -220,64 +219,18 @@ def _get_auth_context() -> tuple[bool, Any]:
     return (False, get_access_token())
 
 
-def _is_backend_tool(tool: Tool) -> bool:
-    """Check whether a tool is handled specially as backend tool
+def _tool_identity(tool: Tool) -> str | None:
+    """Read a tool's stable identity hash, if it carries one."""
+    from fastmcp.server.providers.addressing import TOOL_HASH_META_KEY
 
-    Tools registered via ``@app.tool()`` (without ``model=True``) have
-    ``meta["ui"]["visibility"] == ["app"]`` — they are callable by app UIs
-    but should not appear in tool list the client passes to the model.
-
-    They are handled specially for in various ways - e.g. they are looked
-    up via get_app_tool(), and don't appear in the tools/list output.
-    (FIXME: the latter isn't correct behavior according to the mcp-apps spec.)
-
-    Returns True (a backend tool) when:
-    - The tool has ``meta.fastmcp.app``.
-    - The tool has ``meta.ui.visibility``.
-    - The visibility is precisely ``["app"]``.
-
-    Returns False otherwise.
-    """
     meta = tool.meta
     if not meta:
-        return False
-    fastmcp = meta.get("fastmcp")
-    if not isinstance(fastmcp, dict):
-        return False
-    if fastmcp.get("app") is None:
-        return False
-    ui = meta.get("ui")
-    if not isinstance(ui, dict):
-        return False
-    visibility = ui.get("visibility")
-    if not isinstance(visibility, list):
-        return False
-    return len(visibility) == 1 and visibility[0] == "app"
-
-
-def _is_app_visible(tool: Tool) -> bool:
-    """Check whether a tool has explicitly opted into app-callable visibility.
-
-    Gates the dispatcher's hashed-name routing path: only tools whose
-    ``meta.ui.visibility`` list contains ``"app"`` can be reached via
-    ``<hash>_<local_name>`` calls. Tools without an explicit visibility
-    declaration are NOT app-callable — they must be reached by their
-    display name through the normal transform-aware resolution path.
-
-    This is the inverse of the "everything is dot-callable" trap: the
-    hashed-name path is an opt-in mechanism for FastMCPApp backend tools,
-    not a general bypass for arbitrary tools.
-    """
-    meta = tool.meta
-    if not meta:
-        return False
-    ui = meta.get("ui")
-    if not isinstance(ui, dict):
-        return False
-    visibility = ui.get("visibility")
-    if not isinstance(visibility, list):
-        return False
-    return "app" in visibility
+        return None
+    fastmcp_meta = meta.get("fastmcp")
+    if not isinstance(fastmcp_meta, dict):
+        return None
+    identity = fastmcp_meta.get(TOOL_HASH_META_KEY)
+    return identity if isinstance(identity, str) else None
 
 
 @asynccontextmanager
@@ -354,8 +307,6 @@ class FastMCP(
         cache_scope: Literal["public", "private"] | None = None,
         tasks: bool | None = None,
         session_state_store: AsyncKeyValue | None = None,
-        sampling_handler: SamplingHandler | None = None,
-        sampling_handler_behavior: Literal["always", "fallback"] | None = None,
         client_log_level: mcp_types.LoggingLevel | None = None,
         experimental_capabilities: dict[str, dict[str, Any]] | None = None,
         **kwargs: Any,
@@ -377,12 +328,8 @@ class FastMCP(
         self._additional_http_routes: list[BaseRoute] = []
 
         # Session-scoped state store (shared across all requests)
-        self._state_storage: AsyncKeyValue = session_state_store or MemoryStore()
-        self._state_store: PydanticAdapter[StateValue] = PydanticAdapter[StateValue](
-            key_value=self._state_storage,
-            pydantic_model=StateValue,
-            default_collection="fastmcp_state",
-        )
+        self._state_storage: AsyncKeyValue | None = session_state_store
+        self.__state_store: PydanticAdapter[StateValue] | None = None
 
         # Create LocalProvider for local components
         self._local_provider: LocalProvider = LocalProvider(
@@ -513,7 +460,19 @@ class FastMCP(
             experimental_capabilities or {}
         )
 
+        # Server-level argument completion handler (set via @mcp.completion).
+        # The completions capability is declared only once this is set, because
+        # add_completion_handler registers the low-level completion/complete
+        # handler at that point (the SDK derives the capability from the handler).
+        self._completion_handler: CompletionHandler | None = None
+
         self.middleware: list[Middleware] = list(middleware or [])
+
+        # Registered server extensions (SEP-2133), keyed by reverse-DNS
+        # identifier. Populated by add_extension; consumed by the low-level
+        # server (capability advertisement), the tool-call path (interception),
+        # and the lifespan manager (extension lifespans).
+        self._extensions: dict[str, ServerExtension] = {}
 
         if dereference_schemas:
             from fastmcp.server.middleware.dereference import (
@@ -525,13 +484,24 @@ class FastMCP(
         # Set up MCP protocol handlers
         self._setup_handlers()
 
-        self.sampling_handler: SamplingHandler | None = sampling_handler
-        self.sampling_handler_behavior: Literal["always", "fallback"] = (
-            sampling_handler_behavior or "fallback"
-        )
-
     def __repr__(self) -> str:
         return f"{type(self).__name__}({self.name!r})"
+
+    @property
+    def _state_store(self) -> PydanticAdapter[StateValue]:
+        """Create the session-state adapter only when state is first used."""
+        if self.__state_store is None:
+            from key_value.aio.adapters.pydantic import PydanticAdapter
+            from key_value.aio.stores.memory import MemoryStore
+
+            if self._state_storage is None:
+                self._state_storage = MemoryStore()
+            self.__state_store = PydanticAdapter[StateValue](
+                key_value=self._state_storage,
+                pydantic_model=StateValue,
+                default_collection="fastmcp_state",
+            )
+        return self.__state_store
 
     @property
     def name(self) -> str:
@@ -628,6 +598,78 @@ class FastMCP(
     def add_middleware(self, middleware: Middleware) -> None:
         self.middleware.append(middleware)
 
+    def add_extension(self, extension: ServerExtension) -> None:
+        """Register a server extension (SEP-2133).
+
+        An extension contributes a negotiated capability, additive request
+        methods, a `tools/call` interceptor, and an optional lifespan — each
+        with access to FastMCP-level constructs (the component registry,
+        `Context`, auth scope). Its capability is advertised only while it is
+        registered.
+
+        The extension is bound to this server (so its handlers and interceptor
+        can reach it), its method bindings are wired onto the low-level server,
+        and it is recorded for capability advertisement, interception, and
+        lifespan entry. Registering two extensions with the same identifier is
+        an error, as is registering after the server's lifespan has started —
+        the extension's lifespan could no longer run, leaving it silently
+        half-active.
+
+        Extensions are served by the server they are registered on. A mounted
+        child's extensions do not propagate to the root: the root serves the
+        wire, so only root-registered extensions advertise capabilities and
+        answer methods (matching the lifespan, which also defers to the root).
+        Register extensions on the server you run.
+        """
+        from fastmcp.server.extensions import (
+            build_method_handler,
+            validate_extension_identifier,
+        )
+
+        validate_extension_identifier(
+            extension.identifier, owner=type(extension).__name__
+        )
+        if extension.identifier in self._extensions:
+            raise ValueError(
+                f"An extension with identifier {extension.identifier!r} is "
+                "already registered."
+            )
+        if self._lifespan_result_set:
+            raise RuntimeError(
+                f"Cannot register extension {extension.identifier!r}: the "
+                "server's lifespan has already started, so the extension's "
+                "lifespan would never run. Register extensions before serving."
+            )
+
+        extension._bind(self)
+        for binding in extension.methods():
+            self._mcp_server.add_request_handler(
+                binding.method,
+                binding.params_type,
+                build_method_handler(binding),
+            )
+        self._extensions[extension.identifier] = extension
+
+    def _compose_tool_call_interceptors(
+        self, call_next: CallNext[Any, Any]
+    ) -> CallNext[Any, Any]:
+        """Nest every extension's `tools/call` interceptor around ``call_next``.
+
+        Composes at the innermost point of the tool-call dispatch — after the
+        FastMCP middleware chain, before the tool body — so each interceptor is
+        the last gate before execution. First-registered extension is outermost.
+        A server with no extensions returns ``call_next`` unchanged, so there is
+        zero behaviour change.
+        """
+        from fastmcp.server.extensions import wrap_tool_call_interceptor
+
+        chain = call_next
+        for extension in reversed(list(self._extensions.values())):
+            chain = cast(
+                "CallNext[Any, Any]", wrap_tool_call_interceptor(extension, chain)
+            )
+        return chain
+
     def add_provider(self, provider: Provider, *, namespace: str = "") -> None:
         """Add a provider for dynamic tools, resources, and prompts.
 
@@ -648,7 +690,7 @@ class FastMCP(
         """Replace placeholder Prefab URIs with per-tool hashed ones.
 
         For each tool whose ``meta.ui.resourceUri`` is the placeholder,
-        reads the tool's stored hash from ``meta.fastmcp._tool_hash``
+        reads the tool's stored hash from ``meta.fastmcp.tool_hash``
         and rewrites the URI to the per-tool form. Also strips CSP from
         tool meta (it belongs on the resource). Produces ``model_copy``
         views — originals are untouched.
@@ -661,6 +703,78 @@ class FastMCP(
         return [
             rewrite_tool_meta_for_wire(t) if _is_prefab_tool(t) else t for t in tools
         ]
+
+    async def _rebind_prefab_tool_names(self, result: Any) -> Any:
+        """Re-address a Prefab payload's tool references to this server's names.
+
+        Runs on the way out of every ``tools/call``, above the middleware
+        chain so a payload is re-addressed however it was produced. Servers
+        unwind innermost-first, so the outermost server rewrites last and its
+        names — the only ones a client can actually invoke — are what ship.
+
+        A call does not always answer with a tool result: submitting a task
+        answers with the task's metadata. Anything that is not a tool result
+        passes through untouched.
+
+        An identity claimed by more than one tool is not bound. That happens
+        when one app is composed into a server twice, which leaves no fact
+        anywhere in the listing that says which copy a UI belongs to. The
+        reference keeps its identity-addressed form, and the dispatcher
+        reports the ambiguity rather than binding to a coin flip.
+        """
+        from fastmcp.server.providers.prefab_payload import (
+            payload_has_identities,
+            rewrite_payload_tool_names,
+        )
+
+        if not isinstance(result, ToolResult):
+            return result
+
+        payload = result.structured_content
+        if not payload_has_identities(payload):
+            return result
+
+        # Binding is safe only where one identity, one name, and one
+        # component all agree. Each is tracked separately: collapsing them
+        # early is what lets a duplicated app pass as a single tool.
+        #
+        # The middleware chain runs, because the binding has to describe the
+        # listing a client will actually see. Middleware adds, removes and
+        # shadows tools — an injected tool sharing a backend's name owns that
+        # name at call time, and a listing taken beneath middleware would not
+        # know it exists.
+        claimed_by: dict[str, list[Tool]] = {}
+        owners_of: dict[str, set[str | None]] = {}
+        for tool in await self.list_tools():
+            identity = _tool_identity(tool)
+            owners_of.setdefault(tool.name, set()).add(identity)
+            if identity is not None:
+                claimed_by.setdefault(identity, []).append(tool)
+
+        def resolve(identity: str) -> str | None:
+            tools = claimed_by.get(identity, [])
+            names = {tool.name for tool in tools}
+            if len(names) != 1:
+                # Several names carry this identity: the app is composed more
+                # than once and nothing says which copy the UI belongs to.
+                return None
+
+            # One name can still be several components. `key` is the canonical
+            # identity — type, name and version — so versions of one tool have
+            # distinct keys while copies of one app repeat a key. A repeat
+            # means two components are indistinguishable, which is worse than
+            # the renamed case, not better.
+            if len({tool.key for tool in tools}) != len(tools):
+                return None
+
+            (name,) = names
+            # And the name has to lead back. Two apps can each expose `save`,
+            # or a plain tool can share the name — binding then hands one
+            # app's button to someone else's implementation.
+            return name if owners_of.get(name) == {identity} else None
+
+        rewrite_payload_tool_names(payload, resolve)
+        return result
 
     # -------------------------------------------------------------------------
     # Provider interface overrides - inherited from AggregateProvider
@@ -720,7 +834,7 @@ class FastMCP(
     async def list_tools(self, *, run_middleware: bool = True) -> Sequence[Tool]:
         """List all enabled tools from providers.
 
-        Overrides Provider.list_tools() to add visibility filtering, auth filtering,
+        Overrides Provider.list_tools() to add enabled filtering, auth filtering,
         and middleware execution. Returns all versions (no deduplication).
         Protocol handlers deduplicate for MCP wire format.
         """
@@ -740,11 +854,14 @@ class FastMCP(
 
             # Core logic: list tools
             with server_span("tools/list", "tools/list", self.name, "tool", ""):
-                # Get all tools, apply session transforms, then filter enabled
-                # and model-visible (app-only tools are hidden from the model).
+                # Get all tools, apply session transforms, then filter enabled.
+                # App-only tools (meta.ui.visibility == ["app"]) are listed:
+                # the mcp-apps spec puts visibility filtering on the host, and
+                # a tool absent from tools/list cannot be forwarded by any
+                # intermediary that routes by name.
                 tools = list(await super().list_tools())
                 tools = await apply_session_transforms(tools)
-                tools = [t for t in tools if is_enabled(t) and not _is_backend_tool(t)]
+                tools = [t for t in tools if is_enabled(t)]
 
                 # Rewrite per-tool Prefab renderer URIs based on the tool's
                 # mount-point address. The walk pairs each tool with the
@@ -802,7 +919,7 @@ class FastMCP(
     ) -> Tool | None:
         """Get a tool by name, filtering disabled tools.
 
-        Overrides Provider.get_tool() to add visibility filtering after all
+        Overrides Provider.get_tool() to filter disabled tools after all
         transforms (including session-level) have been applied. This ensures
         session transforms can override provider-level disables.
 
@@ -822,18 +939,18 @@ class FastMCP(
 
         # Apply session transforms to single item
         tools = await apply_session_transforms([tool])
-        if tools and is_enabled(tools[0]) and not _is_backend_tool(tools[0]):
+        if tools and is_enabled(tools[0]):
             return tools[0]
 
-        # The highest version is disabled (or app-only). If an explicit version
-        # was requested, respect that. Otherwise fall back to the next-highest
-        # enabled, model-visible version.
+        # The highest version is disabled. If an explicit version was
+        # requested, respect that. Otherwise fall back to the next-highest
+        # enabled version.
         if version is not None:
             return None
 
         all_tools = [t for t in await super().list_tools() if t.name == name]
         all_tools = list(await apply_session_transforms(all_tools))
-        enabled = [t for t in all_tools if is_enabled(t) and not _is_backend_tool(t)]
+        enabled = [t for t in all_tools if is_enabled(t)]
 
         skip_auth, token = _get_auth_context()
         authorized: list[Tool] = []
@@ -1244,7 +1361,6 @@ class FastMCP(
             return None
         return max(authorized, key=version_sort_key)
 
-    @overload
     async def call_tool(
         self,
         name: str,
@@ -1252,29 +1368,7 @@ class FastMCP(
         *,
         version: VersionSpec | None = None,
         run_middleware: bool = True,
-        task_meta: None = None,
-    ) -> ToolResult: ...
-
-    @overload
-    async def call_tool(
-        self,
-        name: str,
-        arguments: dict[str, Any] | None = None,
-        *,
-        version: VersionSpec | None = None,
-        run_middleware: bool = True,
-        task_meta: TaskMeta,
-    ) -> mcp_types.CreateTaskResult: ...
-
-    async def call_tool(
-        self,
-        name: str,
-        arguments: dict[str, Any] | None = None,
-        *,
-        version: VersionSpec | None = None,
-        run_middleware: bool = True,
-        task_meta: TaskMeta | None = None,
-    ) -> ToolResult | mcp_types.CreateTaskResult:
+    ) -> ToolResult:
         """Call a tool by name.
 
         This is the public API for executing tools. By default, middleware is applied.
@@ -1285,13 +1379,9 @@ class FastMCP(
             version: Specific version to call. If None, calls highest version.
             run_middleware: If True (default), apply the middleware chain.
                 Set to False when called from middleware to avoid re-applying.
-            task_meta: If provided, execute as a background task and return
-                CreateTaskResult. If None (default), execute synchronously and
-                return ToolResult.
 
         Returns:
-            ToolResult when task_meta is None.
-            CreateTaskResult when task_meta is provided.
+            ToolResult.
 
         A guard tool that requests client input (SEP-2322 multi-round-trip)
         returns an ``InputRequiredToolResult`` (a ``ToolResult`` subclass); it
@@ -1340,16 +1430,26 @@ class FastMCP(
                     method="tools/call",
                     fastmcp_context=ctx,
                 )
-                return await self._dispatch_component_middleware(
+                # Extension tools/call interceptors compose here, at the
+                # innermost point of dispatch: the FastMCP middleware chain wraps
+                # the whole thing (so it observes every call), and the
+                # interceptors sit between it and the tool body (so each is the
+                # last gate before execution).
+                dispatched = await self._dispatch_component_middleware(
                     context=mw_context,
-                    call_next=lambda context: self.call_tool(
-                        context.message.name,
-                        context.message.arguments or {},
-                        version=version,
-                        run_middleware=False,
-                        task_meta=task_meta,
+                    call_next=self._compose_tool_call_interceptors(
+                        lambda context: self.call_tool(
+                            context.message.name,
+                            context.message.arguments or {},
+                            version=version,
+                            run_middleware=False,
+                        )
                     ),
                 )
+                # Above the chain, so a Prefab payload is re-addressed however
+                # it was produced — middleware can answer a call itself, and
+                # such a result never reaches the core path below.
+                return await self._rebind_prefab_tool_names(dispatched)
 
             # Core logic: find and execute tool
             with server_span(
@@ -1388,10 +1488,8 @@ class FastMCP(
                 if tool is None:
                     raise NotFoundError(f"Unknown tool: {name!r}")
                 span.set_attributes(tool.get_span_attributes())
-                if task_meta is not None and task_meta.fn_key is None:
-                    task_meta = replace(task_meta, fn_key=tool.key)
                 try:
-                    return await tool._run(arguments or {}, task_meta=task_meta)
+                    return await tool._run(arguments or {})
                 except ValidationError as e:
                     # Argument-validation failure (a bad call). FunctionTool
                     # converts pydantic's call-validation error into fastmcp's
@@ -1422,18 +1520,32 @@ class FastMCP(
                     )
                     raise
                 except Exception as e:
+                    # Most MCPErrors raised under a tool describe how the call
+                    # went — a timeout, an upstream error a proxy forwarded —
+                    # and are masked into an `isError` result like any other
+                    # failure. A missing-client-capability error is different:
+                    # it says the request cannot be serviced at all, and
+                    # SEP-2575 requires it on the wire as -32021 (HTTP 400).
+                    # Flattening it into a result would drop the code and tell
+                    # the client the call had succeeded.
+                    if (
+                        isinstance(e, MCPError)
+                        and e.error.code == MISSING_REQUIRED_CLIENT_CAPABILITY
+                    ):
+                        logger.debug(
+                            "Tool %r requires a client capability the client did "
+                            "not declare",
+                            name,
+                        )
+                        raise
                     logger.exception(f"Error calling tool {name!r}")
                     # Handle actionable errors that should reach the LLM
                     # even when masking is enabled
-                    if isinstance(e, _ACTIONABLE_HTTP_STATUS_ERRORS):
-                        if (
-                            cast("httpx2.HTTPStatusError", e).response.status_code
-                            == 429
-                        ):
-                            raise ToolError(
-                                "Rate limited by upstream API, please retry later"
-                            ) from e
-                    if isinstance(e, _ACTIONABLE_TIMEOUT_ERRORS):
+                    if get_http_status_code(e) == 429:
+                        raise ToolError(
+                            "Rate limited by upstream API, please retry later"
+                        ) from e
+                    if is_timeout_error(e):
                         raise ToolError(
                             "Upstream request timed out, please retry"
                         ) from e
@@ -1442,34 +1554,13 @@ class FastMCP(
                         raise ToolError(f"Error calling tool {name!r}") from e
                     raise ToolError(f"Error calling tool {name!r}: {e}") from e
 
-    @overload
     async def read_resource(
         self,
         uri: str,
         *,
         version: VersionSpec | None = None,
         run_middleware: bool = True,
-        task_meta: None = None,
-    ) -> ResourceResult: ...
-
-    @overload
-    async def read_resource(
-        self,
-        uri: str,
-        *,
-        version: VersionSpec | None = None,
-        run_middleware: bool = True,
-        task_meta: TaskMeta,
-    ) -> mcp_types.CreateTaskResult: ...
-
-    async def read_resource(
-        self,
-        uri: str,
-        *,
-        version: VersionSpec | None = None,
-        run_middleware: bool = True,
-        task_meta: TaskMeta | None = None,
-    ) -> ResourceResult | mcp_types.CreateTaskResult:
+    ) -> ResourceResult:
         """Read a resource by URI.
 
         This is the public API for reading resources. By default, middleware is applied.
@@ -1480,25 +1571,14 @@ class FastMCP(
             version: Specific version to read. If None, reads highest version.
             run_middleware: If True (default), apply the middleware chain.
                 Set to False when called from middleware to avoid re-applying.
-            task_meta: If provided, execute as a background task and return
-                CreateTaskResult. If None (default), execute synchronously and
-                return ResourceResult.
 
         Returns:
-            ResourceResult when task_meta is None.
-            CreateTaskResult when task_meta is provided.
+            ResourceResult.
 
         Raises:
             NotFoundError: If resource not found or disabled
             ResourceError: If resource read fails
         """
-        # Note: fn_key enrichment happens here after finding the resource/template.
-        # Resources and templates use different key formats:
-        # - Resources use resource.key (derived from the concrete URI)
-        # - Templates use template.key (the template pattern)
-        # For mounted servers, the parent's provider sets fn_key to the
-        # namespaced key before delegating, ensuring correct Docket routing.
-
         async with fastmcp.server.context.Context(fastmcp=self) as ctx:
             if run_middleware:
                 mw_context = MiddlewareContext(
@@ -1517,7 +1597,6 @@ class FastMCP(
                         str(context.message.uri),
                         version=version,
                         run_middleware=False,
-                        task_meta=task_meta,
                     ),
                 )
 
@@ -1540,16 +1619,14 @@ class FastMCP(
                 synthesized = await synthesize_prefab_resource_by_uri(self, uri)
                 if synthesized is not None:
                     span.set_attributes(synthesized.get_span_attributes())
-                    return await synthesized._read(task_meta=task_meta)
+                    return await synthesized._read()
 
                 # Try concrete resources first (transforms + auth via _get_resource)
                 resource = await self.get_resource(uri, version=version)
                 if resource is not None:
                     span.set_attributes(resource.get_span_attributes())
-                    if task_meta is not None and task_meta.fn_key is None:
-                        task_meta = replace(task_meta, fn_key=resource.key)
                     try:
-                        return await resource._read(task_meta=task_meta)
+                        return await resource._read()
                     except FastMCPError as e:
                         logger.log(
                             e.log_level,
@@ -1563,15 +1640,11 @@ class FastMCP(
                     except Exception as e:
                         logger.exception(f"Error reading resource {uri!r}")
                         # Handle actionable errors that should reach the LLM
-                        if isinstance(e, _ACTIONABLE_HTTP_STATUS_ERRORS):
-                            if (
-                                cast("httpx2.HTTPStatusError", e).response.status_code
-                                == 429
-                            ):
-                                raise ResourceError(
-                                    "Rate limited by upstream API, please retry later"
-                                ) from e
-                        if isinstance(e, _ACTIONABLE_TIMEOUT_ERRORS):
+                        if get_http_status_code(e) == 429:
+                            raise ResourceError(
+                                "Rate limited by upstream API, please retry later"
+                            ) from e
+                        if is_timeout_error(e):
                             raise ResourceError(
                                 "Upstream request timed out, please retry"
                             ) from e
@@ -1613,10 +1686,8 @@ class FastMCP(
                         )
                         raise ResourceSecurityError(f"Unknown resource: {uri!r}")
 
-                if task_meta is not None and task_meta.fn_key is None:
-                    task_meta = replace(task_meta, fn_key=template.key)
                 try:
-                    return await template._read(uri, params, task_meta=task_meta)
+                    return await template._read(uri, params)
                 except FastMCPError as e:
                     logger.log(
                         e.log_level, f"Error reading resource {uri!r}", exc_info=True
@@ -1628,15 +1699,11 @@ class FastMCP(
                 except Exception as e:
                     logger.exception(f"Error reading resource {uri!r}")
                     # Handle actionable errors that should reach the LLM
-                    if isinstance(e, _ACTIONABLE_HTTP_STATUS_ERRORS):
-                        if (
-                            cast("httpx2.HTTPStatusError", e).response.status_code
-                            == 429
-                        ):
-                            raise ResourceError(
-                                "Rate limited by upstream API, please retry later"
-                            ) from e
-                    if isinstance(e, _ACTIONABLE_TIMEOUT_ERRORS):
+                    if get_http_status_code(e) == 429:
+                        raise ResourceError(
+                            "Rate limited by upstream API, please retry later"
+                        ) from e
+                    if is_timeout_error(e):
                         raise ResourceError(
                             "Upstream request timed out, please retry"
                         ) from e
@@ -1645,7 +1712,6 @@ class FastMCP(
                         raise ResourceError(f"Error reading resource {uri!r}") from e
                     raise ResourceError(f"Error reading resource {uri!r}: {e}") from e
 
-    @overload
     async def render_prompt(
         self,
         name: str,
@@ -1653,29 +1719,7 @@ class FastMCP(
         *,
         version: VersionSpec | None = None,
         run_middleware: bool = True,
-        task_meta: None = None,
-    ) -> PromptResult: ...
-
-    @overload
-    async def render_prompt(
-        self,
-        name: str,
-        arguments: dict[str, Any] | None = None,
-        *,
-        version: VersionSpec | None = None,
-        run_middleware: bool = True,
-        task_meta: TaskMeta,
-    ) -> mcp_types.CreateTaskResult: ...
-
-    async def render_prompt(
-        self,
-        name: str,
-        arguments: dict[str, Any] | None = None,
-        *,
-        version: VersionSpec | None = None,
-        run_middleware: bool = True,
-        task_meta: TaskMeta | None = None,
-    ) -> PromptResult | mcp_types.CreateTaskResult:
+    ) -> PromptResult:
         """Render a prompt by name.
 
         This is the public API for rendering prompts. By default, middleware is applied.
@@ -1687,13 +1731,9 @@ class FastMCP(
             version: Specific version to render. If None, renders highest version.
             run_middleware: If True (default), apply the middleware chain.
                 Set to False when called from middleware to avoid re-applying.
-            task_meta: If provided, execute as a background task and return
-                CreateTaskResult. If None (default), execute synchronously and
-                return PromptResult.
 
         Returns:
-            PromptResult when task_meta is None.
-            CreateTaskResult when task_meta is provided.
+            PromptResult.
 
         Raises:
             NotFoundError: If prompt not found or disabled
@@ -1719,7 +1759,6 @@ class FastMCP(
                         context.message.arguments,
                         version=version,
                         run_middleware=False,
-                        task_meta=task_meta,
                     ),
                 )
 
@@ -1737,10 +1776,8 @@ class FastMCP(
                 if prompt is None:
                     raise NotFoundError(f"Unknown prompt: {name!r}")
                 span.set_attributes(prompt.get_span_attributes())
-                if task_meta is not None and task_meta.fn_key is None:
-                    task_meta = replace(task_meta, fn_key=prompt.key)
                 try:
-                    return await prompt._render(arguments, task_meta=task_meta)
+                    return await prompt._render(arguments)
                 except FastMCPError as e:
                     logger.log(
                         e.log_level, f"Error rendering prompt {name!r}", exc_info=True
@@ -1946,7 +1983,6 @@ class FastMCP(
         annotations: Annotations | dict[str, Any] | None = None,
         meta: dict[str, Any] | None = None,
         app: AppConfig | dict[str, Any] | bool | None = None,
-        task: bool | TaskConfig | None = None,
         auth: AuthCheck | list[AuthCheck] | None = None,
         security: ResourceSecurity | None | InheritSecurity = INHERIT_SECURITY,
     ) -> Callable[[F], F]:
@@ -2046,7 +2082,6 @@ class FastMCP(
             tags=tags,
             annotations=annotations,
             meta=meta,
-            task=task if task is not None else self._support_tasks_by_default,
             auth=auth,
             security=security,
         )
@@ -2076,7 +2111,6 @@ class FastMCP(
         icons: list[mcp_types.Icon] | None = None,
         tags: set[str] | None = None,
         meta: dict[str, Any] | None = None,
-        task: bool | TaskConfig | None = None,
         auth: AuthCheck | list[AuthCheck] | None = None,
     ) -> F: ...
 
@@ -2092,7 +2126,6 @@ class FastMCP(
         icons: list[mcp_types.Icon] | None = None,
         tags: set[str] | None = None,
         meta: dict[str, Any] | None = None,
-        task: bool | TaskConfig | None = None,
         auth: AuthCheck | list[AuthCheck] | None = None,
     ) -> Callable[[F], F]: ...
 
@@ -2107,7 +2140,6 @@ class FastMCP(
         icons: list[mcp_types.Icon] | None = None,
         tags: set[str] | None = None,
         meta: dict[str, Any] | None = None,
-        task: bool | TaskConfig | None = None,
         auth: AuthCheck | list[AuthCheck] | None = None,
     ) -> (
         Callable[[AnyFunction], FunctionPrompt]
@@ -2192,9 +2224,86 @@ class FastMCP(
             icons=icons,
             tags=tags,
             meta=meta,
-            task=task if task is not None else self._support_tasks_by_default,
             auth=auth,
         )
+
+    def add_completion_handler(self, handler: CompletionHandler) -> None:
+        """Register the server's argument-completion handler.
+
+        A server has a single completion handler that answers every
+        `completion/complete` request, switching on the reference (a prompt or
+        resource template) and the argument being completed. Registering it also
+        registers the low-level `completion/complete` handler, which is what
+        makes the SDK declare the completions capability — so the capability is
+        advertised exactly when the server can answer. Calling this again
+        replaces the handler.
+
+        Args:
+            handler: A callable taking the reference, the
+                `CompletionArgument`, and the optional `CompletionContext`, and
+                returning candidate values (a `Completion`, a list of strings,
+                or None). May be sync or async.
+        """
+        self._completion_handler = handler
+        self._register_completion_handler()
+
+    @overload
+    def completion(self, handler: CompletionHandler) -> CompletionHandler: ...
+
+    @overload
+    def completion(
+        self,
+    ) -> Callable[[CompletionHandler], CompletionHandler]: ...
+
+    def completion(
+        self,
+        handler: CompletionHandler | None = None,
+    ) -> CompletionHandler | Callable[[CompletionHandler], CompletionHandler]:
+        """Decorator to register the server's argument-completion handler.
+
+        The handler answers `completion/complete` requests for prompt arguments
+        and resource-template parameters. It receives the reference being
+        completed, the argument (its name and the partial value typed so far),
+        and the context of arguments already supplied, and returns candidate
+        values. Return a list of strings, a `Completion` (to include pagination
+        hints), or None when the reference/argument is not one it handles — an
+        unhandled reference yields an empty completion, not an error.
+
+        Registering a handler declares the completions capability; a server with
+        none does not advertise it. This works identically on the handshake and
+        modern protocol eras.
+
+        Supports both `@mcp.completion` and `@mcp.completion()`.
+
+        Example:
+
+            ```python
+            from fastmcp import FastMCP
+            from mcp_types import Completion, PromptReference
+
+            mcp = FastMCP("Completion Server")
+
+            @mcp.prompt
+            def poem(theme: str) -> str:
+                return f"Write a poem about {theme}"
+
+            @mcp.completion
+            def complete(ref, argument, context):
+                if isinstance(ref, PromptReference) and ref.name == "poem":
+                    if argument.name == "theme":
+                        options = ["nature", "love", "adventure"]
+                        return [o for o in options if o.startswith(argument.value)]
+                return None
+            ```
+        """
+
+        def register(fn: CompletionHandler) -> CompletionHandler:
+            self.add_completion_handler(fn)
+            return fn
+
+        if handler is None:
+            return register
+        return register(handler)
 
     def mount(
         self,
@@ -2286,10 +2395,10 @@ class FastMCP(
         Args:
             openapi_spec: OpenAPI schema as a dictionary
             client: Optional httpx2 AsyncClient for making HTTP requests.
-                An httpx (v1) AsyncClient is also accepted and works via
-                duck-typing. If not provided, a default client is created
-                using the first
+                If not provided, a default client is created using the first
                 server URL from the OpenAPI spec with a 30-second timeout.
+                Legacy httpx clients are temporarily accepted with a deprecation
+                warning.
             name: Name for the MCP server
             route_maps: Optional list of RouteMap objects defining route mappings
             route_map_fn: Optional callable for advanced route type mapping
@@ -2419,10 +2528,16 @@ def create_proxy(
             - A Path to a server script
             - An MCPConfig or dict
         mode: Protocol-era negotiation for auto-created proxy clients (a
-            non-Client target). Defaults to the handshake era; pass
-            `"auto"` to negotiate the modern era so an upstream guard
-            tool's `InputRequiredResult` (SEP-2322) round-trips. Ignored
-            when `target` is already a `Client` (which carries its own mode).
+            non-Client target). By default (``None``) the backend MIRRORS the
+            front connection's negotiated era per request, so the whole chain
+            speaks one era end-to-end: a modern front reaches a modern backend
+            (a guard tool's `InputRequiredResult` (SEP-2322) round-trips) and a
+            handshake front reaches a handshake backend (server-initiated
+            sampling / elicitation / roots push-forwarding works). Pass an
+            explicit mode (e.g. ``"auto"`` or a version string) to pin the
+            backend era regardless of the front; this overrides mirroring and is
+            appropriate when the backend only speaks one era. Ignored when
+            `target` is already a `Client` (which carries its own mode).
         **settings: Additional settings passed to FastMCPProxy (name, etc.)
 
     Returns:
