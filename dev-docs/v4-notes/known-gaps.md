@@ -2,17 +2,17 @@
 title: Known Gaps and Upstream Dependencies
 ---
 
-The migration ships with a set of deliberate gaps: temporary shims, xfailed tests, and pins that depend on the MCP Python SDK v2 reaching GA. Each is tracked here with its removal trigger. This page is the checklist for the beta-to-stable transition and the advisory relationship with the SDK team.
+The migration ships with a small set of deliberate compatibility boundaries and expected test gaps. FastMCP now depends on the stable MCP Python SDK 2.0 line; this page tracks what remains for the beta-to-stable transition and the advisory relationship with the SDK team.
 
 ## The xfail register
 
-Roughly forty `xfail` markers across the test tree name the SDK gaps and removed protocol surfaces they wait on. Re-running the suite against a new SDK beta surfaces which have closed (a strict xfail that starts passing fails the suite, prompting removal of the marker). They cluster in three areas — but the largest cluster is no longer a set of gaps to close.
+The unit suite has three expected xfails. Two are strict SDK compatibility checks, so an upstream fix turns them into failures and prompts us to remove the markers.
 
-**Task suite (`tests/server/tasks/`, `tests/client/tasks/`) — SEP-1686 wire layer being removed; engine rebuilt on SEP-2663.** The large majority. These cover the 2025 task protocol (SEP-1686), which left the core MCP spec and was reworked into the `io.modelcontextprotocol/tasks` extension (SEP-2663). FastMCP's SEP-1686 *wire* machinery (capability advertisement, the `tasks/get|result|list|cancel` handlers, the push notification/elicitation relay) is slated for removal, so the wire-protocol xfails disappear with the code they cover — they are not waiting on an SDK fix. The Docket/Redis *execution engine* underneath is not discarded: it is extracted into the planned `fastmcp-tasks` package and re-adapted to the SEP-2663 polling shape (see [Background Tasks (SEP-2663)](background-tasks.md)). The two SDK gaps these were originally filed against — **sdk-feedback #1** (SEP-1686 task result types omitted from the method registries) and **sdk-feedback #3** (no `task` field on `ReadResourceRequestParams` / `GetPromptRequestParams`) — are moot: they patched the SEP-1686 wire shape, which SEP-2663 replaces with a `CreateTaskResult` claimed on `tools/call`. The gap that matters for the rebuild is **sdk-feedback #2** (extensions capability stripped at pre-2026 negotiated versions) — it now gates a flagship feature and is escalated accordingly.
+**Stateless HTTP elicitation (`tests/client/test_streamable_http.py`).** One parametrized case exercises server-initiated elicitation over stateless HTTP. The sessionless protocol has no server-to-client back-channel, so the case is expected to xfail by construction. Guard-mode elicitation is the supported modern path.
 
-**Protocol eras (`tests/server/test_protocol_eras.py`).** One remaining strict xfail, and it too is task-related: the v2 SDK high-level client exposes no `task=` parameter on `call_tool`, so a SEP-1686 task-augmented `tools/call` cannot be submitted through it. It resolves with the SEP-1686 wire-layer removal above; the SEP-2663 rebuild submits tasks by advertising the extension capability and claiming a `CreateTaskResult`, not through a `task=` params field. The earlier strict xfail for the `ctx.elicit` / `ctx.sample` "Method not found" degradation (sdk-feedback #10) is **gone** — the era-gating shipped in #4448 flipped it to a passing test.
+**MCP Apps (`tests/test_apps.py`).** Two strict xfails track **sdk-feedback #2**: the SDK strips `capabilities.extensions` at pre-2026 negotiated versions, so the UI extension cannot be advertised to legacy-era clients. Modern clients receive the extension normally.
 
-**MCP Apps (`tests/test_apps.py`).** Two xfails tied to **sdk-feedback #2** — the `extensions` capability is stripped by the pre-2026 version sieve, so the UI extension can't be advertised to legacy-era clients.
+Credential-gated GitHub integration suites also use conditional xfail markers when their environment variables are absent. Those are test-environment controls rather than product gaps and are not part of the GA decision.
 
 ## Shims and their removal triggers
 
@@ -20,14 +20,11 @@ Every shim in the migration is temporary and carries a documented removal trigge
 
 | Shim | Location | Removal trigger |
 | --- | --- | --- |
-| `_sdk_patches.py` — task registry widening | `fastmcp_slim/fastmcp/_sdk_patches.py` | Removed with FastMCP's SEP-1686 wire machinery (`server/tasks/`), which is slated for removal now that the 2025 task protocol left the spec. The SEP-2663 rebuild does not need it — `CreateTaskResult` is claimed on `tools/call` through the extensions mechanism, which the SDK registries already admit. |
 | `_compat.py` — camelCase field bridge | `fastmcp_slim/fastmcp/_compat.py` | User-migration aid; removed in a future release after users migrate reads to snake_case. Users can preview removal with `mcp_camelcase_compat = False`. |
 | `FastMCPRequestContext` ContextVar | `fastmcp_slim/fastmcp/server/dependencies.py` | The SDK deliberately passes context as an argument with no ContextVar; FastMCP's public `get_context()` needs ambient access, and the shim also lifts `_meta`, which the SDK's `TypedDict` drops. No planned removal — this is a permanent boundary, not a beta gap. |
 | `FastMCPServerMiddleware` | `fastmcp_slim/fastmcp/server/low_level.py` | Already the native SDK `ServerMiddleware` path; no cleaner hook exists. Permanent. |
 | Client `get_session_id` header sniff | `fastmcp_slim/fastmcp/client/transports/http.py` | SDK exposes session id (or an `on_session_created` callback) from `streamable_http_client`, at parity with `sse_client` (sdk-feedback #5). |
 | `_sdk_context_shim.py` — generic handler aliases | `fastmcp_slim/fastmcp/client/_sdk_context_shim.py` | The SDK's `ClientRequestContext` is not subscriptable, so FastMCP keeps the public generic `SamplingHandler`/`RootsHandler`/`ElicitationHandler` aliases. Permanent unless the SDK makes the context subscriptable (sdk-feedback #7). |
-
-The `TaskNotificationHandler` binding (sdk-feedback #8) is the client-side equivalent: it registers a `NotificationBinding` for the SEP-1686 `notifications/tasks/status` because the SDK no longer tees custom server notifications to the message handler. It goes away with the SEP-1686 wire machinery it serves; the `fastmcp-tasks` client half registers its own binding for the SEP-2663 `notifications/tasks` shape when it ships (push notifications are deferred to a later `fastmcp-tasks` version — v1 is polling-only).
 
 ## Statelessness on 2026-07-28
 
@@ -80,6 +77,8 @@ Separately, the [SDK delegation round two](feature-program.md#sdk-delegation-rou
 
 The beta-to-stable transition is a small set of tracked steps:
 
-- **Swap the pins.** When `mcp 2.0.0` reaches GA, change `mcp-types==2.0.0b1` (core) and the `mcp` pin (the `[mcp]` extra) in `fastmcp_slim/pyproject.toml` from the beta to the stable release, and cut `4.0.0` instead of another pre-release.
-- **Re-run the xfail suite against the GA SDK.** Any strict xfail that starts passing means a gap closed — remove the marker and, where applicable, the corresponding shim.
-- **Confirm `release/3.x`** is cut from pre-merge `main` and receiving upstream security patches for users who stay on the SDK v1 line.
+- **Stable SDK dependencies — complete.** `fastmcp-slim` requires `mcp>=2.0.0,<3.0.0` and `mcp-types>=2.0.0,<3.0.0`; the lock resolves both to 2.0.0.
+- **Re-run the full suite before GA.** Confirm the three expected xfails above remain the complete set. If either strict Apps xfail starts passing, remove the marker and the corresponding compatibility note.
+- **Make the extension compatibility decision explicit.** GA can accept Apps and other extensions as modern-era capabilities, or wait for the SDK to preserve `capabilities.extensions` on legacy handshakes. Record that choice in the public protocol-support docs.
+- **Prepare the stable docs.** Remove prerelease installation guidance, add the `4.0.0: Fourmidable` changelog and update entries, and merge those changes to `main` before tagging so the stable docs publication PR contains them.
+- **Keep the 3.x maintenance line available — complete.** `release/3.x` is protected and continues receiving security and compatibility patches for SDK v1 users.
