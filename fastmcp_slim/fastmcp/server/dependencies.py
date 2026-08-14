@@ -547,9 +547,9 @@ def get_http_headers(
     Never raises an exception, even if there is no active HTTP request (in which case
     an empty dict is returned).
 
-    By default, strips problematic headers like `content-length` and `authorization`
-    that cause issues if forwarded to downstream services. If `include_all` is True,
-    all headers are returned.
+    By default, strips problematic headers like `content-length`, and credential
+    headers like `authorization` and `cookie`, that cause issues if forwarded to
+    downstream services. If `include_all` is True, all headers are returned.
 
     The `include` parameter allows specific headers to be included even if they would
     normally be excluded. This is useful for proxy transports that need to forward
@@ -570,6 +570,7 @@ def get_http_headers(
             "expect",
             "accept",
             "authorization",
+            "cookie",
             # Proxy-related headers
             "proxy-authenticate",
             "proxy-authorization",

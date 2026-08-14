@@ -177,6 +177,39 @@ async def test_get_http_headers_excludes_content_type(sse_server: ASGIServer):
             assert headers["x-custom-header"] == "should-be-included"
 
 
+async def test_get_http_headers_excludes_cookie(sse_server: ASGIServer):
+    """get_http_headers() must not leak the caller's Cookie to a backend.
+
+    The OpenAPI provider forwards this mapping to the upstream named in the
+    spec, so a session cookie scoped to the MCP host would otherwise reach a
+    separate origin on every tool call. Callers that genuinely need it can ask
+    for it back with `include={"cookie"}`, the same escape hatch authorization
+    uses.
+    """
+    from fastmcp.server.dependencies import get_http_headers
+
+    server = FastMCP()
+
+    @server.tool
+    def default_headers() -> dict[str, str]:
+        return get_http_headers()
+
+    @server.tool
+    def opted_in_headers() -> dict[str, str]:
+        return get_http_headers(include={"cookie"})
+
+    async with asgi_server(server, transport="sse") as running_server:
+        async with running_server.client(
+            headers={"Cookie": "session=alice-secret", "X-Keep": "yes"}
+        ) as client:
+            default = (await client.call_tool("default_headers")).data
+            assert "cookie" not in default
+            assert default["x-keep"] == "yes"
+
+            opted_in = (await client.call_tool("opted_in_headers")).data
+            assert opted_in["cookie"] == "session=alice-secret"
+
+
 def _worker_snapshot_headers() -> dict[str, str]:
     """Read the HTTP headers snapshotted at task submission from inside a worker."""
     task_info = get_task_context()
