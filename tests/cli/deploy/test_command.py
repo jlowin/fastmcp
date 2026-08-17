@@ -318,6 +318,31 @@ async def test_json_login_reports_stable_device_failures(
     assert CredentialStore().path.exists() is False
 
 
+async def test_logout_does_not_modify_environment_or_stored_credentials(
+    use_horizon_api: Callable[[HorizonAuthAPI], None],
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    api = HorizonAuthAPI()
+    use_horizon_api(api)
+    monkeypatch.setenv("HORIZON_API_KEY", "fmcp_environment_key")
+    CredentialStore().save("fmcp_stored_key")
+
+    await logout(json_output=True)
+
+    assert json.loads(capsys.readouterr().out) == {
+        "ok": True,
+        "command": "logout",
+        "credentialSource": "environment",
+        "localCredentialRemoved": False,
+        "remoteRevoked": False,
+    }
+    stored_key = CredentialStore().load()
+    assert stored_key is not None
+    assert stored_key.get_secret_value() == "fmcp_stored_key"
+    assert api.requests == []
+
+
 async def test_logout_revokes_the_remote_key_and_clears_local_state(
     use_horizon_api: Callable[[HorizonAuthAPI], None],
     capsys: pytest.CaptureFixture[str],

@@ -45,6 +45,8 @@ Login does not select or store a deployment organization.
 
 For an agent or a CI process, set `HORIZON_API_KEY` instead of storing a key.
 The CLI never writes the environment value to its credential file.
+When this variable controls the session, logout does not revoke or remove any credential.
+Remove the variable from the environment to sign out.
 
 ## The Platform
 

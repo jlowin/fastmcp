@@ -110,10 +110,12 @@ fastmcp login --host https://horizon.example.com
 Login stores only the personal Horizon API key.
 It does not select or store a deployment organization.
 `fastmcp whoami` gets the current user from Horizon.
-`fastmcp logout` attempts to revoke the active key and always removes the local credential.
+`fastmcp logout` attempts to revoke the stored key and always removes its local credential.
 
 Set `HORIZON_API_KEY` to use an environment credential instead.
 The CLI gives that value first precedence and never stores it.
+When this variable controls the session, logout does not revoke or remove any credential.
+Remove the variable from your environment to sign out.
 
 Use `--json` for stable command results.
 During JSON login, the verification challenge goes to stderr and the final result goes to stdout.

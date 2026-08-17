@@ -5,6 +5,7 @@ import pytest
 from fastmcp.cli.deploy.horizon_client import DeviceAuthorization, HorizonUser
 from fastmcp.cli.deploy.output import (
     emit_device_challenge,
+    emit_environment_logout,
     emit_error,
     emit_identity,
     emit_logout,
@@ -114,6 +115,32 @@ def test_json_error_has_stable_fields(
         },
         "localCredentialRemoved": True,
         "remoteCredentialMayRemain": True,
+    }
+
+
+def test_tty_environment_logout_explains_that_no_action_was_taken(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    emit_environment_logout(json_output=False)
+
+    output = capsys.readouterr().out
+    assert "Horizon Account" in output
+    assert "This session uses HORIZON_API_KEY." in output
+    assert "Remove it from your environment to sign out." in output
+    assert "No credential was revoked or removed." in output
+
+
+def test_json_environment_logout_has_stable_fields(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    emit_environment_logout(json_output=True)
+
+    assert json.loads(capsys.readouterr().out) == {
+        "ok": True,
+        "command": "logout",
+        "credentialSource": "environment",
+        "localCredentialRemoved": False,
+        "remoteRevoked": False,
     }
 
 

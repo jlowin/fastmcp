@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import platform
 import sys
 import webbrowser
@@ -38,6 +39,7 @@ from fastmcp.cli.deploy.output import (
     CommandName,
     ErrorCategory,
     emit_device_challenge,
+    emit_environment_logout,
     emit_error,
     emit_identity,
     emit_logout,
@@ -309,6 +311,10 @@ async def logout(
 ) -> None:
     """Revoke the current Horizon key and remove the local credential."""
     credentials = CredentialStore()
+
+    if os.environ.get("HORIZON_API_KEY"):
+        emit_environment_logout(json_output=json_output)
+        return
 
     try:
         configuration = ConfigurationStore().load()

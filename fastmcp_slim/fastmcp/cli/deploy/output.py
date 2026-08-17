@@ -179,6 +179,40 @@ def emit_identity(
     console.print()
 
 
+def emit_environment_logout(*, json_output: bool) -> None:
+    """Explain why logout cannot change an environment credential."""
+    if json_output:
+        _write_json(
+            {
+                "ok": True,
+                "command": "logout",
+                "credentialSource": "environment",
+                "localCredentialRemoved": False,
+                "remoteRevoked": False,
+            }
+        )
+        return
+
+    message = Group(
+        Text("This session uses HORIZON_API_KEY.", style="bold"),
+        Text("Remove it from your environment to sign out."),
+        Text("No credential was revoked or removed.", style="dim"),
+    )
+    console.print()
+    console.print(
+        Panel(
+            message,
+            title=Text("Horizon Account", style="bold cyan"),
+            title_align="left",
+            box=box.ROUNDED,
+            border_style="cyan",
+            padding=(1, 2),
+            width=60,
+        )
+    )
+    console.print()
+
+
 def emit_logout(
     *,
     remote_revoked: bool,
