@@ -1,5 +1,7 @@
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from pathlib import Path
 from unittest.mock import Mock
 from urllib.parse import parse_qs
 
@@ -11,6 +13,7 @@ import fastmcp
 import fastmcp.cli.deploy.authentication as authentication_module
 import fastmcp.cli.deploy.command as command_module
 from fastmcp.cli.deploy.command import login, logout, whoami
+from fastmcp.cli.deploy.configuration import ConfigurationStore
 from fastmcp.cli.deploy.credentials import CredentialStore
 from fastmcp.cli.deploy.horizon_client import HorizonClient
 from fastmcp.cli.deploy.state import StateFileError
@@ -23,14 +26,18 @@ class HorizonAuthAPI:
         token_error: str | None = None,
         revoke_status: int = 204,
         invalid_api_key: str | None = None,
+        on_request: Callable[[httpx2.Request], None] | None = None,
     ) -> None:
         self.token_error = token_error
         self.revoke_status = revoke_status
         self.invalid_api_key = invalid_api_key
+        self.on_request = on_request
         self.requests: list[httpx2.Request] = []
 
     def __call__(self, request: httpx2.Request) -> httpx2.Response:
         self.requests.append(request)
+        if self.on_request is not None:
+            self.on_request(request)
         path = request.url.path
         if path == "/api/v0/oauth/device/authorization":
             return httpx2.Response(
@@ -94,6 +101,38 @@ def use_horizon_api(
         monkeypatch.setattr(command_module, "HorizonClient", client)
 
     return use
+
+
+def test_session_snapshot_reads_host_and_credential_under_one_lock(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[str] = []
+    configuration_load = ConfigurationStore.load
+    credential_load = CredentialStore.load
+
+    @contextmanager
+    def lock(directory: Path) -> Iterator[None]:
+        events.append("lock")
+        yield
+        events.append("unlock")
+
+    def load_configuration(store: ConfigurationStore):
+        events.append("configuration")
+        return configuration_load(store)
+
+    def load_credential(store: CredentialStore):
+        events.append("credential")
+        return credential_load(store)
+
+    monkeypatch.setattr(command_module, "state_lock", lock)
+    monkeypatch.setattr(ConfigurationStore, "load", load_configuration)
+    monkeypatch.setattr(CredentialStore, "load", load_credential)
+
+    configuration, credential = command_module._load_session_snapshot(CredentialStore())
+
+    assert configuration.api_origin == "https://horizon.prefect.io"
+    assert credential is None
+    assert events == ["lock", "configuration", "credential", "unlock"]
 
 
 @pytest.fixture(autouse=True)
@@ -278,6 +317,46 @@ async def test_json_whoami_reports_a_failed_rejected_key_cleanup(
 
     result = json.loads(capsys.readouterr().out)
     assert result["error"]["category"] == "state_error"
+
+
+async def test_whoami_does_not_clear_a_newer_host_credential(
+    use_horizon_api: Callable[[HorizonAuthAPI], None],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    credentials = CredentialStore()
+    credentials.save("fmcp_stale_key")
+    switched = False
+
+    def switch_host(request: httpx2.Request) -> None:
+        nonlocal switched
+        if request.url.path != "/api/v0/me" or switched:
+            return
+        switched = True
+        ConfigurationStore().set_api_origin(
+            "https://dev.horizon.prefect.io",
+            credentials=credentials,
+        )
+        credentials.save_for_origin(
+            "fmcp_new_key",
+            expected_api_origin="https://dev.horizon.prefect.io",
+        )
+
+    api = HorizonAuthAPI(
+        invalid_api_key="fmcp_stale_key",
+        on_request=switch_host,
+    )
+    use_horizon_api(api)
+
+    with pytest.raises(SystemExit, match="1"):
+        await whoami(json_output=True)
+
+    result = json.loads(capsys.readouterr().out)
+    assert result["error"]["category"] == "authentication_invalid"
+    assert ConfigurationStore().load().api_origin == ("https://dev.horizon.prefect.io")
+    stored_key = credentials.load()
+    assert stored_key is not None
+    assert stored_key.get_secret_value() == "fmcp_new_key"
+    assert api.requests[0].url.host == "horizon.prefect.io"
 
 
 async def test_json_whoami_does_not_start_device_authorization(

@@ -9,6 +9,7 @@ import webbrowser
 from typing import Annotated, NoReturn
 
 from cyclopts import Parameter
+from pydantic import SecretStr
 from rich.status import Status
 
 import fastmcp
@@ -18,13 +19,14 @@ from fastmcp.cli.deploy.authentication import (
     DeviceAuthorizationExpiredError,
     authorize_device,
 )
-from fastmcp.cli.deploy.configuration import ConfigurationStore
+from fastmcp.cli.deploy.configuration import (
+    ConfigurationStore,
+    HorizonConfiguration,
+)
 from fastmcp.cli.deploy.credentials import (
     AuthenticationRequiredError,
     CredentialStore,
     ResolvedCredential,
-    resolve_credential,
-    revoke_and_clear_credential,
 )
 from fastmcp.cli.deploy.horizon_client import (
     DeviceAuthorization,
@@ -46,7 +48,7 @@ from fastmcp.cli.deploy.output import (
     start_device_approval_status,
     stop_device_approval_status,
 )
-from fastmcp.cli.deploy.state import StateFileError
+from fastmcp.cli.deploy.state import StateFileError, state_lock
 
 JsonOption = Annotated[
     bool,
@@ -76,6 +78,27 @@ def _device_metadata() -> DeviceMetadata:
         architecture=platform.machine().lower() or None,
         client_version=fastmcp.__version__,
     )
+
+
+def _load_session_snapshot(
+    credentials: CredentialStore,
+) -> tuple[HorizonConfiguration, ResolvedCredential | None]:
+    with state_lock(credentials.path.parent):
+        configuration = ConfigurationStore(credentials.path.parent).load()
+        environment_key = os.environ.get("HORIZON_API_KEY")
+        if environment_key:
+            credential = ResolvedCredential(
+                api_key=SecretStr(environment_key),
+                source="environment",
+            )
+        else:
+            stored_key = credentials.load()
+            credential = (
+                ResolvedCredential(api_key=stored_key, source="stored")
+                if stored_key is not None
+                else None
+            )
+    return configuration, credential
 
 
 def _fail(
@@ -179,11 +202,10 @@ async def login(
 
     try:
         configuration_store = ConfigurationStore()
-        if host is None:
-            configuration = configuration_store.load()
-        else:
+        requested_configuration: HorizonConfiguration | None = None
+        if host is not None:
             try:
-                configuration = configuration_store.set_api_origin(
+                requested_configuration = configuration_store.set_api_origin(
                     host,
                     credentials=credentials,
                 )
@@ -194,6 +216,13 @@ async def login(
                     "The Horizon host must be an HTTP origin.",
                     json_output=json_output,
                 )
+
+        configuration, credential = _load_session_snapshot(credentials)
+        if (
+            requested_configuration is not None
+            and configuration.api_origin != requested_configuration.api_origin
+        ):
+            raise StateFileError("The Horizon host changed during login")
 
         async def device_authorization():
             approval_status: Status | None = None
@@ -215,11 +244,16 @@ async def login(
             finally:
                 stop_device_approval_status(approval_status)
 
-        credential = await resolve_credential(
-            credentials,
-            authorize=device_authorization,
-            expected_api_origin=configuration.api_origin,
-        )
+        async def interactive_credential() -> ResolvedCredential:
+            api_key = await device_authorization()
+            credentials.save_for_origin(
+                api_key,
+                expected_api_origin=configuration.api_origin,
+            )
+            return ResolvedCredential(api_key=api_key, source="interactive")
+
+        if credential is None:
+            credential = await interactive_credential()
 
         try:
             user = await _get_user(
@@ -227,25 +261,27 @@ async def login(
                 credential,
             )
         except HorizonUnauthorizedError:
-            if credential.source == "interactive":
-                credentials.clear()
-                raise
             if credential.source == "environment":
                 raise
 
-            credentials.clear()
-            credential = await resolve_credential(
-                credentials,
-                authorize=device_authorization,
+            credentials.clear_if_matches(
+                credential.api_key,
                 expected_api_origin=configuration.api_origin,
             )
+            if credential.source == "interactive":
+                raise
+
+            credential = await interactive_credential()
             try:
                 user = await _get_user(
                     configuration.api_origin,
                     credential,
                 )
             except HorizonUnauthorizedError:
-                credentials.clear()
+                credentials.clear_if_matches(
+                    credential.api_key,
+                    expected_api_origin=configuration.api_origin,
+                )
                 raise
     except (
         AuthenticationRequiredError,
@@ -270,19 +306,28 @@ async def whoami(
 ) -> None:
     """Show the current Prefect Horizon user."""
     credentials = CredentialStore()
+    configuration: HorizonConfiguration | None = None
     credential: ResolvedCredential | None = None
 
     try:
-        configuration = ConfigurationStore().load()
-        credential = await resolve_credential(credentials)
+        configuration, credential = _load_session_snapshot(credentials)
+        if credential is None:
+            raise AuthenticationRequiredError("Horizon authentication is required")
         user = await _get_user(
             configuration.api_origin,
             credential,
         )
     except HorizonUnauthorizedError as error:
-        if credential is not None and credential.source == "stored":
+        if (
+            configuration is not None
+            and credential is not None
+            and credential.source == "stored"
+        ):
             try:
-                credentials.clear()
+                credentials.clear_if_matches(
+                    credential.api_key,
+                    expected_api_origin=configuration.api_origin,
+                )
             except StateFileError as cleanup_error:
                 _fail_for_expected_error(
                     "whoami",
@@ -317,33 +362,22 @@ async def logout(
         return
 
     try:
-        configuration = ConfigurationStore().load()
-        credential = await resolve_credential(credentials)
-    except AuthenticationRequiredError:
-        emit_logout(remote_revoked=False, json_output=json_output)
-        return
-    except StateFileError:
-        try:
-            credentials.clear()
-        except StateFileError as error:
-            _fail_for_expected_error("logout", error, json_output=json_output)
-        _fail(
-            "logout",
-            "remote_revocation_failed",
-            "The local credential was removed, but the remote key can remain active.",
-            json_output=json_output,
-            details={
-                "localCredentialRemoved": True,
-                "remoteCredentialMayRemain": True,
-            },
-        )
+        configuration, credential = _load_session_snapshot(credentials)
+        if credential is None:
+            emit_logout(remote_revoked=False, json_output=json_output)
+            return
 
-    try:
         async with HorizonClient(
             configuration.api_origin,
             api_key=credential.api_key,
         ) as client:
-            await revoke_and_clear_credential(client, credentials)
+            try:
+                await client.revoke_current_api_key()
+            finally:
+                credentials.clear_if_matches(
+                    credential.api_key,
+                    expected_api_origin=configuration.api_origin,
+                )
     except HorizonUnauthorizedError:
         emit_logout(remote_revoked=False, json_output=json_output)
         return
