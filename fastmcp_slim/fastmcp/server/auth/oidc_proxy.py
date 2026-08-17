@@ -9,7 +9,10 @@ This implementation is based on:
     OAuth 2.0 Authorization Server Metadata - https://datatracker.ietf.org/doc/html/rfc8414
 """
 
+import threading
+import time
 from collections.abc import Sequence
+from copy import deepcopy
 from typing import Any, Literal
 
 import httpx2
@@ -31,6 +34,54 @@ logger = get_logger(__name__)
 #: unreachable issuer metadata endpoint. Pass ``timeout_seconds=None`` to fall
 #: back to the HTTP client's own default timeout instead.
 DEFAULT_OIDC_DISCOVERY_TIMEOUT_SECONDS = 10
+
+#: How long, in seconds, a discovery document is reused before the issuer's
+#: metadata endpoint is queried again. Discovery for the same issuer happens
+#: repeatedly in practice (several providers sharing an issuer, servers rebuilt
+#: at runtime, tests), and some issuers throttle it aggressively.
+OIDC_DISCOVERY_CACHE_TTL_SECONDS = 300
+
+#: Maximum number of discovery documents held in the process-local cache.
+OIDC_DISCOVERY_CACHE_MAX_SIZE = 128
+
+_discovery_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+_discovery_cache_lock = threading.Lock()
+
+
+def _get_cached_discovery_document(config_url: str) -> dict[str, Any] | None:
+    """Return a copy of the cached discovery document, if one is still valid."""
+    with _discovery_cache_lock:
+        entry = _discovery_cache.get(config_url)
+        if entry is None:
+            return None
+
+        expires_at, document = entry
+        if expires_at <= time.monotonic():
+            del _discovery_cache[config_url]
+            return None
+
+        return deepcopy(document)
+
+
+def _cache_discovery_document(config_url: str, document: dict[str, Any]) -> None:
+    """Cache a discovery document that was fetched and validated successfully."""
+    with _discovery_cache_lock:
+        if (
+            config_url not in _discovery_cache
+            and len(_discovery_cache) >= OIDC_DISCOVERY_CACHE_MAX_SIZE
+        ):
+            del _discovery_cache[next(iter(_discovery_cache))]
+
+        _discovery_cache[config_url] = (
+            time.monotonic() + OIDC_DISCOVERY_CACHE_TTL_SECONDS,
+            deepcopy(document),
+        )
+
+
+def clear_oidc_discovery_cache() -> None:
+    """Drop every cached OIDC discovery document."""
+    with _discovery_cache_lock:
+        _discovery_cache.clear()
 
 
 class OIDCConfiguration(BaseModel):
@@ -153,6 +204,12 @@ class OIDCConfiguration(BaseModel):
     ) -> Self:
         """Get the OIDC configuration for the specified config URL.
 
+        Discovery documents are cached per config URL for
+        `OIDC_DISCOVERY_CACHE_TTL_SECONDS` so that repeated calls for the same
+        issuer reuse a single request. The raw document is cached rather than the
+        validated model, so each caller gets its own configuration instance and
+        `strict` is applied per call.
+
         Args:
             config_url: The OIDC config URL
             strict: The strict flag for the configuration
@@ -162,20 +219,31 @@ class OIDCConfiguration(BaseModel):
         if timeout_seconds is not None:
             get_kwargs["timeout"] = timeout_seconds
 
-        try:
-            response = httpx2.get(str(config_url), **get_kwargs)
-            response.raise_for_status()
+        document = _get_cached_discovery_document(str(config_url))
+        was_cached = document is not None
 
-            config_data = response.json()
+        try:
+            if document is None:
+                response = httpx2.get(str(config_url), **get_kwargs)
+                response.raise_for_status()
+
+                document = response.json()
+
+            config_data = dict(document)
             if strict is not None:
                 config_data["strict"] = strict
 
-            return cls.model_validate(config_data)
+            config = cls.model_validate(config_data)
         except Exception:
             logger.exception(
                 f"Unable to get OIDC configuration for config url: {config_url}"
             )
             raise
+
+        if not was_cached:
+            _cache_discovery_document(str(config_url), document)
+
+        return config
 
 
 class OIDCProxy(OAuthProxy):

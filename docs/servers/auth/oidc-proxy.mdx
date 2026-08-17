@@ -220,6 +220,12 @@ auth = OIDCProxy(
 </ParamField>
 </Card>
 
+### Discovery Caching
+
+The proxy fetches your provider's discovery document when it is constructed. Successful responses are cached in-process per `config_url` for five minutes, so building several proxies for the same issuer — or rebuilding a server at runtime — issues a single request instead of one per provider. Providers such as Auth0 throttle their discovery endpoint, and this keeps a busy server well below those limits.
+
+Failed requests are never cached, so a provider that is briefly unreachable is retried on the next attempt. Once the entry expires the document is fetched again, which means metadata changes (a rotated `jwks_uri`, for instance) are picked up without restarting the process.
+
 ### Using Built-in Providers
 
 FastMCP includes pre-configured OIDC providers for common services:

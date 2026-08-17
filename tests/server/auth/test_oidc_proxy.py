@@ -3,10 +3,12 @@
 import json
 from unittest.mock import MagicMock, patch
 
+import httpx2
 import pytest
 from httpx2 import Response
 from pydantic import AnyHttpUrl
 
+from fastmcp.server.auth import oidc_proxy
 from fastmcp.server.auth.oidc_proxy import OIDCConfiguration, OIDCProxy
 from fastmcp.server.auth.providers.introspection import IntrospectionTokenVerifier
 from fastmcp.server.auth.providers.jwt import JWTVerifier
@@ -424,6 +426,153 @@ class TestGetOIDCConfiguration:
 
             call_args = mock_get.call_args
             assert str(call_args[0][0]) == str(TEST_CONFIG_URL)
+
+
+class TestOIDCDiscoveryCache:
+    """Tests for caching of OIDC discovery documents."""
+
+    def test_identical_configuration_is_fetched_once(
+        self, valid_oidc_configuration_dict
+    ):
+        """Test that repeated discovery for the same config URL reuses one request."""
+        with patch("httpx2.get") as mock_get:
+            mock_response = MagicMock(spec=Response)
+            mock_response.json.return_value = valid_oidc_configuration_dict
+            mock_get.return_value = mock_response
+
+            first = OIDCConfiguration.get_oidc_configuration(
+                config_url=TEST_CONFIG_URL, strict=True, timeout_seconds=10
+            )
+            second = OIDCConfiguration.get_oidc_configuration(
+                config_url=TEST_CONFIG_URL, strict=True, timeout_seconds=10
+            )
+
+            mock_get.assert_called_once()
+            assert first == second
+            assert first is not second
+
+    def test_different_config_urls_are_fetched_separately(
+        self, valid_oidc_configuration_dict
+    ):
+        """Test that each config URL gets its own cache entry."""
+        with patch("httpx2.get") as mock_get:
+            mock_response = MagicMock(spec=Response)
+            mock_response.json.return_value = valid_oidc_configuration_dict
+            mock_get.return_value = mock_response
+
+            OIDCConfiguration.get_oidc_configuration(
+                config_url=TEST_CONFIG_URL, strict=True, timeout_seconds=10
+            )
+            OIDCConfiguration.get_oidc_configuration(
+                config_url=AnyHttpUrl(
+                    "https://other.example.com/.well-known/openid-configuration"
+                ),
+                strict=True,
+                timeout_seconds=10,
+            )
+
+            assert mock_get.call_count == 2
+
+    def test_expired_entry_is_fetched_again(
+        self, valid_oidc_configuration_dict, monkeypatch
+    ):
+        """Test that discovery is repeated once a cached document has expired."""
+        monkeypatch.setattr(oidc_proxy, "OIDC_DISCOVERY_CACHE_TTL_SECONDS", 0)
+
+        with patch("httpx2.get") as mock_get:
+            mock_response = MagicMock(spec=Response)
+            mock_response.json.return_value = valid_oidc_configuration_dict
+            mock_get.return_value = mock_response
+
+            OIDCConfiguration.get_oidc_configuration(
+                config_url=TEST_CONFIG_URL, strict=True, timeout_seconds=10
+            )
+            OIDCConfiguration.get_oidc_configuration(
+                config_url=TEST_CONFIG_URL, strict=True, timeout_seconds=10
+            )
+
+            assert mock_get.call_count == 2
+
+    def test_failed_discovery_is_not_cached(self, valid_oidc_configuration_dict):
+        """Test that a failed request is retried rather than cached."""
+        with patch("httpx2.get") as mock_get:
+            mock_get.side_effect = httpx2.ConnectError("boom")
+
+            with pytest.raises(httpx2.ConnectError):
+                OIDCConfiguration.get_oidc_configuration(
+                    config_url=TEST_CONFIG_URL, strict=True, timeout_seconds=10
+                )
+
+            mock_response = MagicMock(spec=Response)
+            mock_response.json.return_value = valid_oidc_configuration_dict
+            mock_get.side_effect = None
+            mock_get.return_value = mock_response
+
+            config = OIDCConfiguration.get_oidc_configuration(
+                config_url=TEST_CONFIG_URL, strict=True, timeout_seconds=10
+            )
+
+            assert mock_get.call_count == 2
+            validate_config(config, valid_oidc_configuration_dict)
+
+    def test_strict_is_applied_per_call(self, invalid_oidc_configuration_dict):
+        """Test that the cached document carries no strict flag of its own."""
+        with patch("httpx2.get") as mock_get:
+            mock_response = MagicMock(spec=Response)
+            mock_response.json.return_value = invalid_oidc_configuration_dict
+            mock_get.return_value = mock_response
+
+            OIDCConfiguration.get_oidc_configuration(
+                config_url=TEST_CONFIG_URL, strict=False, timeout_seconds=10
+            )
+
+            with pytest.raises(
+                ValueError, match="Missing required configuration metadata"
+            ):
+                OIDCConfiguration.get_oidc_configuration(
+                    config_url=TEST_CONFIG_URL, strict=True, timeout_seconds=10
+                )
+
+            mock_get.assert_called_once()
+
+    def test_cached_configuration_is_not_shared_between_callers(
+        self, valid_oidc_configuration_dict
+    ):
+        """Test that mutating a returned configuration does not affect later callers."""
+        with patch("httpx2.get") as mock_get:
+            mock_response = MagicMock(spec=Response)
+            mock_response.json.return_value = valid_oidc_configuration_dict
+            mock_get.return_value = mock_response
+
+            first = OIDCConfiguration.get_oidc_configuration(
+                config_url=TEST_CONFIG_URL, strict=True, timeout_seconds=10
+            )
+            first.token_endpoint = "https://mutated.example.com/oauth/token"
+
+            second = OIDCConfiguration.get_oidc_configuration(
+                config_url=TEST_CONFIG_URL, strict=True, timeout_seconds=10
+            )
+
+            assert str(second.token_endpoint) == TEST_TOKEN_ENDPOINT
+
+    def test_proxies_share_a_single_discovery_request(
+        self, valid_oidc_configuration_dict
+    ):
+        """Test that two proxies for the same issuer only trigger one discovery."""
+        with patch("httpx2.get") as mock_get:
+            mock_response = MagicMock(spec=Response)
+            mock_response.json.return_value = valid_oidc_configuration_dict
+            mock_get.return_value = mock_response
+
+            for _ in range(2):
+                OIDCProxy(
+                    config_url=TEST_CONFIG_URL,
+                    client_id=TEST_CLIENT_ID,
+                    client_secret=TEST_CLIENT_SECRET,
+                    base_url=TEST_BASE_URL,
+                )
+
+            mock_get.assert_called_once()
 
 
 def validate_proxy(mock_get, proxy, oidc_config):
