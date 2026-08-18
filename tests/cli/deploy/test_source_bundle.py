@@ -136,6 +136,18 @@ async def test_inferred_entrypoint_ignores_unrelated_imports(
     assert source.entrypoint == "server.py:server"
 
 
+async def test_inferred_entrypoint_accepts_imported_server(
+    in_project: Path,
+) -> None:
+    (in_project / "server.py").write_text(
+        "from deployment_only_package import app as mcp\n"
+    )
+
+    source = await resolve_deploy_source("server.py")
+
+    assert source.entrypoint == "server.py:mcp"
+
+
 async def test_inferred_entrypoint_rejects_multiple_server_definitions(
     in_project: Path,
 ) -> None:
@@ -202,6 +214,26 @@ async def test_resolve_does_not_archive_deployment_environment(
     assert Path.cwd() == in_project
     assert "FASTMCP_DEPLOY_TEST_SECRET" not in os.environ
     assert "fastmcp.json" not in archive_names(bundle.archive_path)
+
+
+async def test_explicit_source_excludes_fastmcp_configs(
+    in_project: Path,
+    tmp_path: Path,
+) -> None:
+    write_server(in_project / "server.py")
+    config = {
+        "source": {"path": "server.py"},
+        "deployment": {"env": {"API_KEY": "secret"}},
+    }
+    (in_project / "fastmcp.json").write_text(json.dumps(config))
+    (in_project / "production.fastmcp.json").write_text(json.dumps(config))
+    source = await resolve_deploy_source("server.py")
+
+    bundle = create_source_bundle(source, tmp_path / "source.tar.gz")
+
+    names = archive_names(bundle.archive_path)
+    assert "fastmcp.json" not in names
+    assert "production.fastmcp.json" not in names
 
 
 async def test_inline_and_file_dependencies_create_generated_requirements(

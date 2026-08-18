@@ -100,7 +100,12 @@ def _resolve_entrypoint(source_path: Path, explicit_entrypoint: str | None) -> s
 def _server_binding_names(module: ast.Module) -> set[str]:
     candidates: set[str] = set()
     for statement in module.body:
-        if isinstance(statement, ast.Assign) and _is_server_constructor(
+        if isinstance(statement, ast.ImportFrom):
+            for alias in statement.names:
+                bound_name = alias.asname or alias.name
+                if bound_name in _COMMON_ENTRYPOINTS:
+                    candidates.add(bound_name)
+        elif isinstance(statement, ast.Assign) and _is_server_constructor(
             statement.value
         ):
             for target in statement.targets:

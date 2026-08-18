@@ -83,6 +83,7 @@ def is_fixed_exclusion(relative: Path) -> bool:
     return (
         name in _EXCLUDED_DIRECTORY_NAMES
         or name in _EXCLUDED_FILE_NAMES
+        or name.endswith("fastmcp.json")
         or name == ".env"
         or name.startswith(".env.")
         or relative.suffix in _EXCLUDED_FILE_SUFFIXES
