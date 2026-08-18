@@ -927,25 +927,27 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
         # Load from storage
         client = await self._client_store.get(key=client_id)
 
-        if client is not None and client.cimd_document is None:
+        if client is not None:
             if self._allowed_client_redirect_uris is not None:
                 client.allowed_redirect_uri_patterns = (
                     self._allowed_client_redirect_uris
                 )
-            return client
+            if client.cimd_document is None:
+                return client
 
-        # Older versions persisted URL-derived clients indefinitely. Remove
-        # those records lazily and resolve them through the bounded CIMD cache.
-        if client is not None:
-            await self._client_store.delete(key=client_id)
-
-        # Client not in storage — try CIMD lookup for URL-based client IDs
+        # Resolve URL-derived clients through the bounded CIMD cache. Older
+        # versions persisted them indefinitely, so remove those records only
+        # after a successful refresh and keep them as a fallback until then.
         if self._cimd_manager is not None and self._cimd_manager.is_cimd_client_id(
             client_id
         ):
             cimd_client = await self._cimd_manager.get_client(client_id)
             if cimd_client is not None:
+                if client is not None:
+                    await self._client_store.delete(key=client_id)
                 return cimd_client
+            if client is not None:
+                return client
 
         # Some MCP clients (e.g. claude.ai) skip Dynamic Client Registration and
         # send the upstream OAuth App's client_id directly in the /authorize request.
