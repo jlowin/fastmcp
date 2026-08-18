@@ -8,11 +8,10 @@ from pathlib import Path
 import pytest
 
 import fastmcp.cli.deploy.source_bundle as source_bundle_module
+from fastmcp.cli.deploy.source import SourceInvalidError, resolve_deploy_source
 from fastmcp.cli.deploy.source_bundle import (
     ArchiveTooLargeError,
-    SourceInvalidError,
     create_source_bundle,
-    resolve_deploy_source,
 )
 
 
