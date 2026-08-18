@@ -111,13 +111,14 @@ class GitHubTokenVerifier(TokenVerifier):
                     },
                 )
 
-                if response.status_code != 200:
+                if response.status_code == 401:
                     logger.debug(
                         "GitHub token verification failed: %d - %s",
                         response.status_code,
                         response.text[:200],
                     )
                     return None
+                response.raise_for_status()
 
                 user_data = response.json()
 
@@ -179,10 +180,7 @@ class GitHubTokenVerifier(TokenVerifier):
 
         except httpx2.RequestError as e:
             logger.debug("Failed to verify GitHub token: %s", e)
-            return None
-        except Exception as e:
-            logger.debug("GitHub token verification error: %s", e)
-            return None
+            raise
 
 
 class GitHubProvider(OAuthProxy):
