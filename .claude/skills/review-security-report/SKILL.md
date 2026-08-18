@@ -42,7 +42,8 @@ Classify where the disputed behavior lives:
 - **Upstream vulnerability:** The defect is in an implemented standard, dependency, identity
   provider, client, reverse proxy, or deployment platform rather than FastMCP.
 - **Insecure deployment:** The operator omitted required controls, exposed a development mode, or
-  explicitly disabled or delegated the relevant protection.
+  disabled or delegated the protection without supplying the replacement required by its
+  contract.
 - **Expected behavior:** The result follows the documented API contract or implemented protocol.
 - **Documentation gap:** The implementation follows its intended contract, but the guidance could
   reasonably lead operators to expect a protection that does not exist.
