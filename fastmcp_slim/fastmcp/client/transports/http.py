@@ -20,7 +20,7 @@ from fastmcp.client.auth.client_credentials import (
     PrivateKeyJWTOAuthProvider,
 )
 from fastmcp.client.auth.oauth import OAuth
-from fastmcp.client.dependencies import get_http_headers
+from fastmcp.client.dependencies import _get_forwardable_http_headers
 from fastmcp.client.transports.base import (
     ClientTransport,
     SessionKwargs,
@@ -161,12 +161,12 @@ class StreamableHttpTransport(ClientTransport):
     ) -> AsyncIterator[ClientSession]:
         options = transport_options or TransportOptions()
 
-        # When used in a proxy, forward the inbound request's authorization
-        # header to the upstream server. This is off by default so that a
-        # plain Client used inside a server tool handler doesn't accidentally
-        # leak the caller's credentials to an unrelated remote server.
+        # Proxies preserve eligible inbound headers while starting a distinct
+        # MCP connection with its own transport state.
+        # This is off by default so a plain Client used inside a server tool
+        # handler cannot leak caller headers to an unrelated remote server.
         if options.forward_incoming_headers:
-            headers = get_http_headers(include={"authorization"}) | self.headers
+            headers = _get_forwardable_http_headers() | self.headers
         else:
             headers = dict(self.headers)
 

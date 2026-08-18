@@ -49,10 +49,12 @@ class TransportOptions:
         session_class: The ClientSession class to instantiate. Proxies supply a
             session that skips output-schema validation, since they relay
             results rather than consume them.
-        forward_incoming_headers: Whether to forward the inbound request's
-            authorization header upstream. Only appropriate for proxies, where
-            the caller's credentials are meant to be propagated. Honored by the
-            HTTP and SSE transports; ignored by the others.
+        forward_incoming_headers: Whether to forward eligible inbound HTTP
+            headers upstream, including authorization. Hop-specific HTTP headers
+            and MCP transport, routing, and event-stream state are excluded
+            because each backend connection owns that state. Only appropriate
+            for proxies; honored by the HTTP and SSE transports and ignored by
+            the others.
         backend_mode: The connect `mode` to give backend clients that a wrapping
             transport builds on this client's behalf, so a chain of connections
             speaks one protocol era end to end. `None` leaves each backend

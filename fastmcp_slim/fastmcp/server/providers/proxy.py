@@ -96,8 +96,8 @@ class _ForwardingClientSession(ClientSession):
 
 
 # Settings every proxy-backend connection uses: relay results without policing
-# the backend's output schema, and forward the caller's authorization header
-# upstream (appropriate for a proxy, where credentials are meant to propagate).
+# the backend's output schema, and forward eligible caller headers upstream
+# without inheriting frontend-owned MCP transport state.
 PROXY_TRANSPORT_OPTIONS = TransportOptions(
     session_class=_ForwardingClientSession,
     forward_incoming_headers=True,
