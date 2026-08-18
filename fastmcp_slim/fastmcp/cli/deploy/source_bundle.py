@@ -78,6 +78,7 @@ def create_source_bundle(
         source_root,
         archive_path,
         required_paths=source.required_paths,
+        excluded_paths=source.excluded_paths,
     )
     if source.generated_requirements is not None:
         generated_path = source_root / GENERATED_REQUIREMENTS_PATH
@@ -131,18 +132,33 @@ def _archive_entries(
     archive_path: Path,
     *,
     required_paths: tuple[Path, ...],
+    excluded_paths: tuple[Path, ...],
 ) -> list[tuple[str, Path | bytes]]:
     required = _expand_required_paths(source_root, required_paths)
     required_directories = {path for path in required if path.is_dir()}
+    excluded = _expand_excluded_paths(excluded_paths)
+    if any(
+        path.absolute() in excluded or path.resolve(strict=False) in excluded
+        for path in required
+    ):
+        raise SourceInvalidError(
+            "The selected config file cannot be a required source path"
+        )
     entries: dict[str, Path] = {}
     rules_by_directory: dict[
         Path,
         tuple[tuple[Path, pathspec.GitIgnoreSpec], ...],
     ] = {source_root: ()}
 
+    def raise_walk_error(error: OSError) -> None:
+        raise SourceInvalidError(
+            f"The source directory could not be read: {error.filename or source_root}"
+        ) from error
+
     for current_root, directory_names, file_names in os.walk(
         source_root,
         topdown=True,
+        onerror=raise_walk_error,
         followlinks=False,
     ):
         current = Path(current_root)
@@ -175,7 +191,7 @@ def _archive_entries(
 
         for name in sorted(file_names):
             path = current / name
-            if path.absolute() == archive_path:
+            if path.absolute() == archive_path or path.absolute() in excluded:
                 continue
             relative = path.relative_to(source_root)
             if is_fixed_exclusion(relative):
@@ -197,6 +213,19 @@ def _archive_entries(
         entries[relative.as_posix()] = path
 
     return list(entries.items())
+
+
+def _expand_excluded_paths(excluded_paths: tuple[Path, ...]) -> set[Path]:
+    excluded: set[Path] = set()
+    for path in excluded_paths:
+        excluded.add(path.absolute())
+        try:
+            excluded.add(path.resolve(strict=True))
+        except (OSError, RuntimeError) as exc:
+            raise SourceInvalidError(
+                f"The excluded source path could not be resolved: {path}"
+            ) from exc
+    return excluded
 
 
 def _expand_required_paths(

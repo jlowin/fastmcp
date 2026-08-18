@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import tarfile
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -112,11 +113,12 @@ async def test_explicit_entrypoint_does_not_import_declared_dependencies(
     assert source.dependency_path == ".fastmcp-deploy-requirements.txt"
 
 
-async def test_inferred_entrypoint_does_not_import_declared_dependencies(
+async def test_inferred_entrypoint_ignores_unrelated_imports(
     in_project: Path,
 ) -> None:
     (in_project / "server.py").write_text(
         "import fastmcp_deployment_only_dependency\n"
+        "import mcp\n"
         "from fastmcp import FastMCP\n"
         'server = FastMCP("Test")\n'
     )
@@ -132,6 +134,19 @@ async def test_inferred_entrypoint_does_not_import_declared_dependencies(
     source = await resolve_deploy_source(None)
 
     assert source.entrypoint == "server.py:server"
+
+
+async def test_inferred_entrypoint_rejects_multiple_server_definitions(
+    in_project: Path,
+) -> None:
+    (in_project / "server.py").write_text(
+        "from fastmcp import FastMCP\n"
+        'mcp = FastMCP("First")\n'
+        'server = FastMCP("Second")\n'
+    )
+
+    with pytest.raises(SourceInvalidError, match="Multiple possible server objects"):
+        await resolve_deploy_source("server.py")
 
 
 async def test_inferred_entrypoint_ignores_function_local_names(
@@ -161,8 +176,9 @@ async def test_resolve_without_input_discovers_fastmcp_config(
     assert source.entrypoint == "server.py:mcp"
 
 
-async def test_resolve_does_not_apply_deployment_environment_or_cwd(
+async def test_resolve_does_not_archive_deployment_environment(
     in_project: Path,
+    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     write_server(in_project / "server.py")
@@ -180,10 +196,12 @@ async def test_resolve_does_not_apply_deployment_environment_or_cwd(
     )
     monkeypatch.delenv("FASTMCP_DEPLOY_TEST_SECRET", raising=False)
 
-    await resolve_deploy_source(None)
+    source = await resolve_deploy_source(None)
+    bundle = create_source_bundle(source, tmp_path / "source.tar.gz")
 
     assert Path.cwd() == in_project
     assert "FASTMCP_DEPLOY_TEST_SECRET" not in os.environ
+    assert "fastmcp.json" not in archive_names(bundle.archive_path)
 
 
 async def test_inline_and_file_dependencies_create_generated_requirements(
@@ -283,6 +301,48 @@ async def test_ignored_explicit_editable_directory_is_rejected(
 
     with pytest.raises(SourceInvalidError, match="source directory is ignored"):
         create_source_bundle(source, tmp_path / "source.tar.gz")
+
+
+async def test_project_with_inline_dependency_requires_pyproject(
+    in_project: Path,
+) -> None:
+    write_server(in_project / "server.py")
+    (in_project / "package").mkdir()
+    (in_project / "fastmcp.json").write_text(
+        json.dumps(
+            {
+                "source": {"path": "server.py"},
+                "environment": {
+                    "project": "package",
+                    "dependencies": ["httpx"],
+                },
+            }
+        )
+    )
+
+    with pytest.raises(SourceInvalidError, match="pyproject.toml does not exist"):
+        await resolve_deploy_source(None)
+
+
+async def test_generated_requirements_rejects_comment_in_include_path(
+    in_project: Path,
+) -> None:
+    write_server(in_project / "server.py")
+    (in_project / "requirements#prod.txt").write_text("fastmcp\n")
+    (in_project / "fastmcp.json").write_text(
+        json.dumps(
+            {
+                "source": {"path": "server.py"},
+                "environment": {
+                    "requirements": "requirements#prod.txt",
+                    "dependencies": ["httpx"],
+                },
+            }
+        )
+    )
+
+    with pytest.raises(SourceInvalidError, match="unsupported characters"):
+        await resolve_deploy_source(None)
 
 
 async def test_single_project_dependency_uses_project_file(
@@ -386,6 +446,29 @@ async def test_archive_applies_fixed_and_gitignore_exclusions(
     assert not any(name.startswith(".fastmcp/") for name in names)
     assert not any("__pycache__" in name for name in names)
     assert not any(name.startswith(".venv/") for name in names)
+
+
+async def test_unreadable_source_directory_is_rejected(
+    in_project: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    write_server(in_project / "server.py")
+    blocked = in_project / "blocked"
+    blocked.mkdir()
+    (blocked / "data.txt").write_text("data")
+    source = await resolve_deploy_source("server.py")
+    real_scandir = os.scandir
+
+    def fail_for_blocked(path: Path) -> Iterator[os.DirEntry[str]]:
+        if Path(path) == blocked:
+            raise PermissionError(13, "Permission denied", str(blocked))
+        return real_scandir(path)
+
+    monkeypatch.setattr(source_bundle_module.os, "scandir", fail_for_blocked)
+
+    with pytest.raises(SourceInvalidError, match="source directory could not be read"):
+        create_source_bundle(source, tmp_path / "source.tar.gz")
 
 
 async def test_archive_applies_nested_gitignore_rules(
