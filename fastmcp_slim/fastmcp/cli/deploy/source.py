@@ -7,6 +7,7 @@ import json
 import tokenize
 from dataclasses import dataclass, field
 from pathlib import Path
+from urllib.parse import quote
 
 from pydantic import ValidationError
 
@@ -217,13 +218,13 @@ def _resolve_dependencies(
             lines.append(f"-r {relative_path(source_root, requirements)}")
             required_paths.append(requirements)
         if project is not None:
-            lines.append(f"-e {relative_path(source_root, project)}")
+            lines.append(f"-e {_editable_requirement(source_root, project)}")
             required_paths.append(project)
             project_config = project / "pyproject.toml"
             if project_config.is_file():
                 required_paths.append(project_config)
         for path in sorted(editable, key=lambda item: relative_path(source_root, item)):
-            lines.append(f"-e {relative_path(source_root, path)}")
+            lines.append(f"-e {_editable_requirement(source_root, path)}")
             required_paths.append(path)
             editable_config = path / "pyproject.toml"
             if editable_config.is_file():
@@ -259,6 +260,11 @@ def _resolve_dependencies(
         )
 
     return _detect_dependency_input(source_root, source_path.parent)
+
+
+def _editable_requirement(source_root: Path, path: Path) -> str:
+    relative = relative_path(source_root, path)
+    return f"file:{quote(relative, safe='/')}"
 
 
 def _detect_dependency_input(source_root: Path, start: Path) -> _DependencyInput:

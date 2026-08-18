@@ -221,14 +221,14 @@ async def test_project_and_editable_dependencies_stay_inside_source_root(
     tmp_path: Path,
 ) -> None:
     write_server(in_project / "server.py")
-    package = in_project / "package"
+    package = in_project / "package dir"
     package.mkdir()
     (package / "pyproject.toml").write_text(
         '[project]\nname = "package"\nversion = "0.1.0"\n'
         '[build-system]\nrequires = ["hatchling"]\nbuild-backend = "hatchling.build"\n'
     )
     (package / "package.py").write_text("PACKAGE = True\n")
-    editable = in_project / "shared"
+    editable = in_project / "shared dir"
     editable.mkdir()
     (editable / "pyproject.toml").write_text(
         '[project]\nname = "shared"\nversion = "0.1.0"\n'
@@ -240,8 +240,8 @@ async def test_project_and_editable_dependencies_stay_inside_source_root(
             {
                 "source": {"path": "server.py"},
                 "environment": {
-                    "project": "package",
-                    "editable": ["shared"],
+                    "project": "package dir",
+                    "editable": ["shared dir"],
                 },
             }
         )
@@ -253,10 +253,12 @@ async def test_project_and_editable_dependencies_stay_inside_source_root(
     with tarfile.open(bundle.archive_path, "r:gz") as archive:
         generated = archive.extractfile(".fastmcp-deploy-requirements.txt")
         assert generated is not None
-        assert generated.read().decode() == "-e package\n-e shared\n"
+        assert generated.read().decode() == (
+            "-e file:package%20dir\n-e file:shared%20dir\n"
+        )
     names = archive_names(bundle.archive_path)
-    assert "package/package.py" in names
-    assert "shared/shared.py" in names
+    assert "package dir/package.py" in names
+    assert "shared dir/shared.py" in names
 
 
 async def test_ignored_explicit_editable_directory_is_rejected(
@@ -493,6 +495,30 @@ async def test_dependency_outside_source_root_is_rejected(
     )
 
     with pytest.raises(SourceInvalidError, match="leaves the source root"):
+        await resolve_deploy_source(None)
+
+
+@pytest.mark.skipif(
+    os.name == "nt", reason="Symlink creation needs extra access on Windows"
+)
+async def test_dependency_through_excluded_directory_link_is_rejected(
+    in_project: Path,
+) -> None:
+    write_server(in_project / "server.py")
+    virtual_environment = in_project / ".venv"
+    virtual_environment.mkdir()
+    (virtual_environment / "requirements.txt").write_text("secret-package\n")
+    (in_project / "deps").symlink_to(virtual_environment, target_is_directory=True)
+    (in_project / "fastmcp.json").write_text(
+        json.dumps(
+            {
+                "source": {"path": "server.py"},
+                "environment": {"requirements": "deps/requirements.txt"},
+            }
+        )
+    )
+
+    with pytest.raises(SourceInvalidError, match="excluded from deployment: .venv"):
         await resolve_deploy_source(None)
 
 

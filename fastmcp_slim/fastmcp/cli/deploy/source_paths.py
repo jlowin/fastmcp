@@ -57,9 +57,17 @@ def resolve_path(
 
 
 def require_included_path(source_root: Path, path: Path, *, label: str) -> None:
-    relative = path.relative_to(source_root)
-    if is_fixed_exclusion(relative):
-        raise SourceInvalidError(f"{label} is excluded from deployment: {relative}")
+    try:
+        resolved = path.resolve(strict=False)
+        relative_paths = (
+            path.relative_to(source_root),
+            resolved.relative_to(source_root),
+        )
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise SourceInvalidError(f"{label} leaves the source root: {path}") from exc
+    for relative in relative_paths:
+        if is_fixed_exclusion(relative):
+            raise SourceInvalidError(f"{label} is excluded from deployment: {relative}")
 
 
 def relative_path(source_root: Path, path: Path) -> str:
