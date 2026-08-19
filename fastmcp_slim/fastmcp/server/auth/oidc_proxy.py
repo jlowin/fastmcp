@@ -204,11 +204,10 @@ class OIDCConfiguration(BaseModel):
         cache_key = str(config_url)
         now = monotonic()
         config_data = cls._get_cached_discovery_document(cache_key, now)
-        cache_miss = config_data is None
         document_to_cache: dict[str, Any] | None = None
 
         try:
-            if cache_miss:
+            if config_data is None:
                 get_kwargs: dict[str, Any] = {}
                 if timeout_seconds is not None:
                     get_kwargs["timeout"] = timeout_seconds
