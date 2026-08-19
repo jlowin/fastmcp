@@ -9,8 +9,11 @@ This implementation is based on:
     OAuth 2.0 Authorization Server Metadata - https://datatracker.ietf.org/doc/html/rfc8414
 """
 
+from collections import OrderedDict
 from collections.abc import Sequence
-from typing import Any, Literal
+from copy import deepcopy
+from time import monotonic
+from typing import Any, ClassVar, Literal
 
 import httpx2
 from key_value.aio.protocols import AsyncKeyValue
@@ -31,6 +34,8 @@ logger = get_logger(__name__)
 #: unreachable issuer metadata endpoint. Pass ``timeout_seconds=None`` to fall
 #: back to the HTTP client's own default timeout instead.
 DEFAULT_OIDC_DISCOVERY_TIMEOUT_SECONDS = 10
+OIDC_DISCOVERY_CACHE_MAXSIZE = 128
+OIDC_DISCOVERY_CACHE_TTL_SECONDS = 300.0
 
 
 class OIDCConfiguration(BaseModel):
@@ -147,30 +152,82 @@ class OIDCConfiguration(BaseModel):
 
         return self
 
+    _discovery_cache: ClassVar[
+        OrderedDict[str, tuple[float, dict[str, Any]]]
+    ] = OrderedDict()
+
+    @classmethod
+    def _clear_discovery_cache(cls) -> None:
+        """Clear process-local OIDC discovery metadata cached by this class."""
+        cls._discovery_cache.clear()
+
+    @classmethod
+    def _get_cached_discovery_document(
+        cls, cache_key: str, now: float
+    ) -> dict[str, Any] | None:
+        cached = cls._discovery_cache.get(cache_key)
+        if cached is None:
+            return None
+
+        cached_at, document = cached
+        if now - cached_at >= OIDC_DISCOVERY_CACHE_TTL_SECONDS:
+            del cls._discovery_cache[cache_key]
+            return None
+
+        cls._discovery_cache.move_to_end(cache_key)
+        return deepcopy(document)
+
+    @classmethod
+    def _cache_discovery_document(
+        cls, cache_key: str, now: float, document: dict[str, Any]
+    ) -> None:
+        cls._discovery_cache[cache_key] = (now, deepcopy(document))
+        cls._discovery_cache.move_to_end(cache_key)
+        while len(cls._discovery_cache) > OIDC_DISCOVERY_CACHE_MAXSIZE:
+            cls._discovery_cache.popitem(last=False)
+
     @classmethod
     def get_oidc_configuration(
         cls, config_url: AnyHttpUrl, *, strict: bool | None, timeout_seconds: int | None
     ) -> Self:
         """Get the OIDC configuration for the specified config URL.
 
+        Successful discovery documents are cached briefly in-process. The raw
+        document, rather than a mutable ``OIDCConfiguration`` instance, is cached
+        so every caller receives an independently validated model.
+
         Args:
             config_url: The OIDC config URL
             strict: The strict flag for the configuration
             timeout_seconds: HTTP request timeout in seconds
         """
-        get_kwargs: dict[str, Any] = {}
-        if timeout_seconds is not None:
-            get_kwargs["timeout"] = timeout_seconds
+        cache_key = str(config_url)
+        now = monotonic()
+        config_data = cls._get_cached_discovery_document(cache_key, now)
+        cache_miss = config_data is None
+        document_to_cache: dict[str, Any] | None = None
 
         try:
-            response = httpx2.get(str(config_url), **get_kwargs)
-            response.raise_for_status()
+            if cache_miss:
+                get_kwargs: dict[str, Any] = {}
+                if timeout_seconds is not None:
+                    get_kwargs["timeout"] = timeout_seconds
 
-            config_data = response.json()
+                response = httpx2.get(cache_key, **get_kwargs)
+                response.raise_for_status()
+                raw_config_data = response.json()
+                if not isinstance(raw_config_data, dict):
+                    raise TypeError("OIDC discovery document must be a JSON object")
+                document_to_cache = deepcopy(raw_config_data)
+                config_data = deepcopy(raw_config_data)
+
             if strict is not None:
                 config_data["strict"] = strict
 
-            return cls.model_validate(config_data)
+            configuration = cls.model_validate(config_data)
+            if document_to_cache is not None:
+                cls._cache_discovery_document(cache_key, now, document_to_cache)
+            return configuration
         except Exception:
             logger.exception(
                 f"Unable to get OIDC configuration for config url: {config_url}"
