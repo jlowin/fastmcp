@@ -77,8 +77,13 @@ async def test_archive_applies_secret_and_ignore_exclusions(
     (project / ".env").write_text("TOKEN=secret\n")
     (project / ".env.production").write_text("TOKEN=secret\n")
     (project / ".envrc").write_text("export TOKEN=secret\n")
+    (project / ".netrc").write_text("machine example.com password secret\n")
+    (project / ".npmrc").write_text("//registry.example.com/:_authToken=secret\n")
+    (project / "pip.conf").write_text("[global]\nindex-url = https://secret\n")
     (project / ".git").mkdir()
     (project / ".git" / "config").write_text("secret")
+    (project / ".ssh").mkdir()
+    (project / ".ssh" / "id_ed25519").write_text("secret")
     (project / ".fastmcp").mkdir()
     (project / ".fastmcp" / "project.json").write_text("secret")
     (project / ".venv").mkdir()
@@ -95,8 +100,6 @@ async def test_archive_applies_secret_and_ignore_exclusions(
     names = archive_names(bundle.archive_path)
     assert {
         "server.py",
-        ".gitignore",
-        "app/.gitignore",
         "app/keep.txt",
         "app/env",
         "app/env/settings.py",
@@ -104,11 +107,41 @@ async def test_archive_applies_secret_and_ignore_exclusions(
     assert "keep.txt" not in names
     assert "ignored.txt" not in names
     assert not any(name.startswith(".env") for name in names)
-    assert not any(name.startswith(".git/") for name in names)
+    assert not any(name.startswith(".git") for name in names)
+    assert not any(name.startswith(".ssh/") for name in names)
     assert not any(name.startswith(".fastmcp/") for name in names)
+    assert {".netrc", ".npmrc", "pip.conf"}.isdisjoint(names)
     assert not any(name.startswith(".venv/") for name in names)
     assert not any("__pycache__" in name for name in names)
     assert "production.fastmcp.json" not in names
+
+
+async def test_gitignore_can_restore_default_build_exclusion(
+    project: Path,
+    tmp_path: Path,
+) -> None:
+    write_server(project / "server.py")
+    distribution = project / "dist"
+    distribution.mkdir()
+    (distribution / "model.bin").write_bytes(b"model")
+    (project / ".gitignore").write_text("!dist/\n!dist/model.bin\n")
+
+    bundle = await create_source_bundle("server.py", tmp_path / "source.tar.gz")
+
+    assert "dist/model.bin" in archive_names(bundle.archive_path)
+
+
+async def test_gitignore_cannot_restore_hard_exclusion(
+    project: Path,
+    tmp_path: Path,
+) -> None:
+    write_server(project / "server.py")
+    (project / ".env").write_text("TOKEN=secret\n")
+    (project / ".gitignore").write_text("!.env\n")
+
+    bundle = await create_source_bundle("server.py", tmp_path / "source.tar.gz")
+
+    assert ".env" not in archive_names(bundle.archive_path)
 
 
 async def test_archive_preserves_empty_directories(
@@ -178,7 +211,7 @@ async def test_server_below_internal_directory_symlink_is_archived(
         tmp_path / "source.tar.gz",
     )
 
-    assert bundle.entrypoint == "linked/server.py:mcp"
+    assert bundle.entrypoint == "linked/server.py"
     assert {"linked", "real", "real/server.py"} <= archive_names(bundle.archive_path)
 
 
@@ -201,7 +234,7 @@ async def test_marker_free_symlinked_server_uses_resolved_directory(
         tmp_path / "source.tar.gz",
     )
 
-    assert bundle.entrypoint == "server.py:mcp"
+    assert bundle.entrypoint == "server.py"
     assert archive_names(bundle.archive_path) == {"server.py"}
 
 
@@ -223,7 +256,7 @@ async def test_marker_free_file_symlink_uses_target_project(
         tmp_path / "source.tar.gz",
     )
 
-    assert bundle.entrypoint == "server.py:mcp"
+    assert bundle.entrypoint == "server.py"
     assert bundle.dependency_path == "requirements.txt"
     assert archive_names(bundle.archive_path) == {"requirements.txt", "server.py"}
 
@@ -313,6 +346,37 @@ async def test_competing_archive_file_is_preserved(
         await create_source_bundle("server.py", archive_path)
 
     assert archive_path.read_bytes() == b"competing"
+
+
+async def test_archive_member_limit_matches_horizon(
+    project: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    write_server(project / "server.py")
+    (project / "extra.txt").write_text("extra")
+    archive_path = tmp_path / "source.tar.gz"
+    monkeypatch.setattr(source_archive_module, "MAX_SOURCE_ARCHIVE_MEMBERS", 1)
+
+    with pytest.raises(ArchiveTooLargeError, match="25,000 member"):
+        await create_source_bundle("server.py", archive_path)
+
+    assert not archive_path.exists()
+
+
+async def test_archive_extracted_size_limit_matches_horizon(
+    project: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    write_server(project / "server.py")
+    archive_path = tmp_path / "source.tar.gz"
+    monkeypatch.setattr(source_archive_module, "MAX_SOURCE_EXTRACTED_BYTES", 1)
+
+    with pytest.raises(ArchiveTooLargeError, match="1 GB extracted"):
+        await create_source_bundle("server.py", archive_path)
+
+    assert not archive_path.exists()
 
 
 async def test_archive_size_limit_uses_compressed_size(

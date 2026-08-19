@@ -48,7 +48,7 @@ async def test_absolute_server_uses_nearest_project_root(
         tmp_path / "source.tar.gz",
     )
 
-    assert bundle.entrypoint == "src/server.py:mcp"
+    assert bundle.entrypoint == "src/server.py"
     assert "pyproject.toml" in archive_names(bundle.archive_path)
     assert "unrelated-secret.txt" not in archive_names(bundle.archive_path)
 
@@ -71,7 +71,7 @@ async def test_source_root_inherits_parent_gitignore_rules(
         tmp_path / "source.tar.gz",
     )
 
-    assert bundle.entrypoint == "server.py:mcp"
+    assert bundle.entrypoint == "server.py"
     assert "private.pem" not in archive_names(bundle.archive_path)
 
 
@@ -110,7 +110,7 @@ async def test_absolute_server_without_project_marker_uses_server_directory(
         tmp_path / "source.tar.gz",
     )
 
-    assert bundle.entrypoint == "server.py:mcp"
+    assert bundle.entrypoint == "server.py"
     assert archive_names(bundle.archive_path) == {"server.py"}
 
 
@@ -128,6 +128,27 @@ async def test_explicit_object_input_uses_selected_entrypoint(
     assert bundle.entrypoint == "server.py:application"
 
 
+@pytest.mark.parametrize(
+    ("file_name", "server_spec", "error"),
+    [
+        ("server.py", "server.py:not-valid", "Python identifier"),
+        ("server file.py", "server file.py", "Horizon-compatible path"),
+        ("server.txt", "server.txt", "Horizon-compatible path"),
+    ],
+)
+async def test_invalid_entrypoint_is_rejected(
+    project: Path,
+    tmp_path: Path,
+    file_name: str,
+    server_spec: str,
+    error: str,
+) -> None:
+    write_server(project / file_name)
+
+    with pytest.raises(SourceInvalidError, match=error):
+        await create_source_bundle(server_spec, tmp_path / "source.tar.gz")
+
+
 async def test_missing_input_discovers_fastmcp_config(
     project: Path,
     tmp_path: Path,
@@ -137,7 +158,7 @@ async def test_missing_input_discovers_fastmcp_config(
 
     bundle = await create_source_bundle(None, tmp_path / "source.tar.gz")
 
-    assert bundle.entrypoint == "server.py:mcp"
+    assert bundle.entrypoint == "server.py"
     assert "fastmcp.json" not in archive_names(bundle.archive_path)
 
 

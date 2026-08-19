@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from fastmcp.cli.deploy.source_bundle import SourceInvalidError, create_source_bundle
+from fastmcp.cli.deploy.source_dependencies import GENERATED_REQUIREMENTS_PATH
 
 
 def write_server(path: Path, name: str = "mcp") -> None:
@@ -46,7 +47,7 @@ async def test_explicit_server_resolves_entrypoint_and_dependency(
         tmp_path / "source.tar.gz",
     )
 
-    assert bundle.entrypoint == "src/server.py:mcp"
+    assert bundle.entrypoint == "src/server.py"
     assert bundle.dependency_path == "requirements.txt"
     assert bundle.size_bytes == bundle.archive_path.stat().st_size
     assert len(bundle.checksum_sha256) == 64
@@ -103,7 +104,7 @@ async def test_config_source_resolves_from_deployment_working_directory(
 
     bundle = await create_source_bundle(None, tmp_path / "source.tar.gz")
 
-    assert bundle.entrypoint == "src/server.py:mcp"
+    assert bundle.entrypoint == "src/server.py"
     assert bundle.dependency_path == "src/requirements.txt"
 
 
@@ -130,7 +131,7 @@ async def test_configured_dependency_is_not_imported_locally(
 
     bundle = await create_source_bundle(None, tmp_path / "source.tar.gz")
 
-    assert bundle.entrypoint == "server.py:mcp"
+    assert bundle.entrypoint == "server.py"
     assert bundle.dependency_path == ".fastmcp-deploy-requirements.txt"
     assert not side_effect.exists()
 
@@ -212,6 +213,19 @@ async def test_inline_local_dependency_is_rewritten_from_deployment_cwd(
         assert generated.read().decode() == "shared @ file:shared\n"
 
 
+async def test_detected_uv_project_uses_lock_file(
+    project: Path,
+    tmp_path: Path,
+) -> None:
+    write_server(project / "src" / "server.py")
+    (project / "pyproject.toml").write_text('[project]\nname = "project"\n')
+    (project / "uv.lock").write_text("version = 1\n")
+
+    bundle = await create_source_bundle("src/server.py", tmp_path / "source.tar.gz")
+
+    assert bundle.dependency_path == "uv.lock"
+
+
 async def test_project_dependency_uses_pyproject(
     project: Path,
     tmp_path: Path,
@@ -234,7 +248,7 @@ async def test_project_dependency_uses_pyproject(
     assert "uv.lock" in archive_names(bundle.archive_path)
 
 
-async def test_parent_ignored_generated_dependency_path_is_rejected(
+async def test_parent_ignore_does_not_remove_generated_dependency(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -253,13 +267,12 @@ async def test_parent_ignored_generated_dependency_path_is_rejected(
     )
     monkeypatch.chdir(project)
 
-    with pytest.raises(
-        SourceInvalidError, match="generated dependency path is ignored"
-    ):
-        await create_source_bundle(None, tmp_path / "source.tar.gz")
+    bundle = await create_source_bundle(None, tmp_path / "source.tar.gz")
+
+    assert GENERATED_REQUIREMENTS_PATH in archive_names(bundle.archive_path)
 
 
-async def test_ignored_generated_dependency_path_is_rejected(
+async def test_root_ignore_does_not_remove_generated_dependency(
     project: Path,
     tmp_path: Path,
 ) -> None:
@@ -274,10 +287,23 @@ async def test_ignored_generated_dependency_path_is_rejected(
         )
     )
 
-    with pytest.raises(
-        SourceInvalidError, match="generated dependency path is ignored"
-    ):
-        await create_source_bundle(None, tmp_path / "source.tar.gz")
+    bundle = await create_source_bundle(None, tmp_path / "source.tar.gz")
+
+    assert GENERATED_REQUIREMENTS_PATH in archive_names(bundle.archive_path)
+
+
+async def test_requirements_contents_are_validated_by_horizon(
+    project: Path,
+    tmp_path: Path,
+) -> None:
+    write_server(project / "server.py")
+    (project / "requirements.txt").write_text("-r ../outside.txt\n")
+    (tmp_path / "outside.txt").write_text("httpx\n")
+
+    bundle = await create_source_bundle("server.py", tmp_path / "source.tar.gz")
+
+    assert bundle.dependency_path == "requirements.txt"
+    assert "requirements.txt" in archive_names(bundle.archive_path)
 
 
 async def test_external_inline_dependency_path_is_rejected(

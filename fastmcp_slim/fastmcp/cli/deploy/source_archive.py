@@ -13,20 +13,72 @@ from pathlib import Path
 import pathspec
 
 MAX_SOURCE_UPLOAD_BYTES = 250 * 1024 * 1024
+MAX_SOURCE_EXTRACTED_BYTES = 1024 * 1024 * 1024
+MAX_SOURCE_ARCHIVE_MEMBERS = 25_000
 
-_EXCLUDED_DIRECTORY_NAMES = {
+_HARD_EXCLUDED_DIRECTORY_NAMES = {
+    ".aws",
+    ".azure",
+    ".bzr",
+    ".direnv",
     ".fastmcp",
     ".git",
-    ".mypy_cache",
-    ".nox",
-    ".pytest_cache",
-    ".ruff_cache",
-    ".tox",
-    "__pycache__",
+    ".hg",
+    ".kube",
+    ".ssh",
+    ".svn",
+    "CVS",
+}
+_HARD_EXCLUDED_FILE_NAMES = {
+    ".envrc",
+    ".gitmodules",
+    ".netrc",
+    ".npmrc",
+    ".pypirc",
+    "pip.conf",
+    "pip.ini",
 }
 _VIRTUAL_ENVIRONMENT_NAMES = {".venv", "env", "venv", "virtualenv"}
-_EXCLUDED_FILE_NAMES = {".DS_Store"}
-_EXCLUDED_FILE_SUFFIXES = {".pyc", ".pyo"}
+_DEFAULT_IGNORE_SPEC = pathspec.GitIgnoreSpec.from_lines(
+    (
+        ".cache/",
+        ".coverage",
+        ".coverage.*",
+        ".gitignore",
+        ".hypothesis/",
+        ".idea/",
+        ".ipynb_checkpoints/",
+        ".mypy_cache/",
+        ".next/",
+        ".nox/",
+        ".now/",
+        ".pnp*",
+        ".pytest_cache/",
+        ".pyre/",
+        ".pytype/",
+        ".ruff_cache/",
+        ".tox/",
+        ".vercel/",
+        ".vscode/",
+        ".yarn/cache/",
+        "*.egg-info/",
+        "*.pyc",
+        "*.pyo",
+        "*.swp",
+        "*.swo",
+        "*~",
+        ".DS_Store",
+        "Thumbs.db",
+        "__pycache__/",
+        "build/",
+        "dist/",
+        "htmlcov/",
+        "node_modules/",
+        "npm-debug.log*",
+        "yarn-debug.log*",
+        "yarn-error.log*",
+    )
+)
 
 
 class SourceInvalidError(ValueError):
@@ -68,7 +120,12 @@ def _collect_entries(
     rules_by_directory: dict[
         Path,
         tuple[tuple[Path, pathspec.GitIgnoreSpec], ...],
-    ] = {source_root: _parent_gitignore_rules(source_root)}
+    ] = {
+        source_root: (
+            (source_root, _DEFAULT_IGNORE_SPEC),
+            *_parent_gitignore_rules(source_root),
+        )
+    }
 
     def walk_error(error: OSError) -> None:
         raise SourceInvalidError(
@@ -174,24 +231,6 @@ def _expand_required_paths(
         resolved = _validate_symlink(source_root, path)
         if resolved != path:
             pending.append(resolved)
-        if not path.is_dir() or path.is_symlink():
-            continue
-        try:
-            children = sorted(
-                path.iterdir(), key=lambda child: child.name, reverse=True
-            )
-        except OSError as exc:
-            relative = path.relative_to(source_root)
-            raise SourceInvalidError(
-                f"Required source directory could not be read: {relative}"
-            ) from exc
-        for child in children:
-            relative = child.relative_to(source_root)
-            if _is_fixed_exclusion(relative) or _is_virtual_environment(
-                child, relative
-            ):
-                continue
-            pending.append(child.absolute())
     return required
 
 
@@ -202,7 +241,7 @@ def _exclusion_reason(
     *,
     directory: bool = False,
 ) -> str | None:
-    if _is_fixed_exclusion(relative) or _is_virtual_environment(path, relative):
+    if _is_hard_exclusion(relative) or _is_virtual_environment(path, relative):
         return "excluded from deployment"
     if _is_ignored(path, rules, directory=directory):
         return "ignored"
@@ -215,18 +254,15 @@ def _is_virtual_environment(path: Path, relative: Path) -> bool:
     )
 
 
-def _is_fixed_exclusion(relative: Path) -> bool:
-    if any(part in _EXCLUDED_DIRECTORY_NAMES for part in relative.parts):
+def _is_hard_exclusion(relative: Path) -> bool:
+    if any(part in _HARD_EXCLUDED_DIRECTORY_NAMES for part in relative.parts):
         return True
     name = relative.name
     return (
-        name in _EXCLUDED_FILE_NAMES
+        name in _HARD_EXCLUDED_FILE_NAMES
         or name == "fastmcp.json"
         or name.endswith(".fastmcp.json")
-        or name == ".env"
-        or name == ".envrc"
-        or name.startswith(".env.")
-        or relative.suffix in _EXCLUDED_FILE_SUFFIXES
+        or name.startswith(".env")
     )
 
 
@@ -315,6 +351,7 @@ def _write_archive(
     raw_file: io.BufferedWriter,
     source_root: Path,
 ) -> None:
+    _validate_archive_limits(entries)
     with (
         gzip.GzipFile(
             filename="",
@@ -330,6 +367,24 @@ def _write_archive(
     ):
         for name, entry_source in entries:
             _add_archive_entry(archive, name, entry_source, source_root)
+
+
+def _validate_archive_limits(entries: list[tuple[str, Path | bytes]]) -> None:
+    if len(entries) > MAX_SOURCE_ARCHIVE_MEMBERS:
+        raise ArchiveTooLargeError(
+            "The source archive exceeds the 25,000 member Horizon limit"
+        )
+
+    extracted_bytes = 0
+    for _, entry_source in entries:
+        if isinstance(entry_source, bytes):
+            extracted_bytes += len(entry_source)
+        elif not entry_source.is_symlink() and not entry_source.is_dir():
+            extracted_bytes += entry_source.stat().st_size
+        if extracted_bytes > MAX_SOURCE_EXTRACTED_BYTES:
+            raise ArchiveTooLargeError(
+                "The source archive exceeds the 1 GB extracted Horizon limit"
+            )
 
 
 def _add_archive_entry(

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import tarfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -14,9 +15,6 @@ from fastmcp.cli.deploy.source_archive import (
     ArchiveTooLargeError,
     SourceInvalidError,
     _collect_entries,
-    _is_ignored,
-    _parent_gitignore_rules,
-    _read_gitignore,
     _sha256,
     _write_archive,
 )
@@ -30,6 +28,8 @@ from fastmcp.utilities.mcp_server_config import MCPServerConfig
 from fastmcp.utilities.mcp_server_config.v1.sources.filesystem import FileSystemSource
 
 _PROJECT_ROOT_MARKERS = ("fastmcp.json", "pyproject.toml", "requirements.txt", ".git")
+_ENTRYPOINT_PATH_PATTERN = re.compile(r"^[A-Za-z0-9._/-]+$")
+_ENTRYPOINT_IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 @dataclass(frozen=True)
@@ -69,17 +69,11 @@ async def create_source_bundle(
         label="Server source",
         file=True,
     )
-    if config.source.entrypoint and ":" in config.source.entrypoint:
-        raise SourceInvalidError(
-            "Deployment entrypoints must use one object from the server source file"
-        )
-
-    resolved_source = config.source.model_copy(update={"path": str(source_path)})
-    try:
-        object_name = resolved_source.resolve_entrypoint()
-    except ValueError as exc:
-        raise SourceInvalidError(str(exc)) from exc
-    entrypoint = f"{_relative_path(source_root, source_path)}:{object_name}"
+    entrypoint = _resolve_entrypoint(
+        source_root,
+        source_path,
+        config.source.entrypoint,
+    )
 
     dependency_path, generated_requirements, required_paths = _resolve_dependencies(
         config,
@@ -101,14 +95,6 @@ async def create_source_bundle(
             if os.path.lexists(generated_path):
                 raise SourceInvalidError(
                     f"The generated dependency path is reserved: {GENERATED_REQUIREMENTS_PATH}"
-                )
-            generated_rules = _parent_gitignore_rules(source_root)
-            root_ignore = _read_gitignore(source_root, source_root)
-            if root_ignore is not None:
-                generated_rules = (*generated_rules, (source_root, root_ignore))
-            if _is_ignored(generated_path, generated_rules):
-                raise SourceInvalidError(
-                    f"The generated dependency path is ignored: {GENERATED_REQUIREMENTS_PATH}"
                 )
             entries.append(
                 (GENERATED_REQUIREMENTS_PATH, generated_requirements.encode())
@@ -166,6 +152,38 @@ def _load_config(
         absolute_source_path = absolute_source_path.resolve(strict=False)
     source = source.model_copy(update={"path": str(absolute_source_path)})
     return MCPServerConfig(source=source), source_root, None
+
+
+def _resolve_entrypoint(
+    source_root: Path,
+    source_path: Path,
+    object_name: str | None,
+) -> str:
+    relative_path = _relative_path(source_root, source_path)
+    if (
+        len(relative_path) > 128
+        or not _ENTRYPOINT_PATH_PATTERN.fullmatch(relative_path)
+        or not relative_path.endswith(".py")
+        or Path(relative_path).name == ".py"
+    ):
+        raise SourceInvalidError(
+            "The deployment entrypoint must be a Python file with a Horizon-compatible path"
+        )
+    if object_name is not None and not _ENTRYPOINT_IDENTIFIER_PATTERN.fullmatch(
+        object_name
+    ):
+        raise SourceInvalidError(
+            "The deployment entrypoint object must be a Python identifier"
+        )
+
+    entrypoint = (
+        f"{relative_path}:{object_name}" if object_name is not None else relative_path
+    )
+    if len(entrypoint) > 128:
+        raise SourceInvalidError(
+            "The deployment entrypoint is longer than 128 characters"
+        )
+    return entrypoint
 
 
 def _find_explicit_source_root(source_path: Path) -> Path:
