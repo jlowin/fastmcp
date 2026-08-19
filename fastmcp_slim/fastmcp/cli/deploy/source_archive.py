@@ -174,6 +174,24 @@ def _expand_required_paths(
         resolved = _validate_symlink(source_root, path)
         if resolved != path:
             pending.append(resolved)
+        if not path.is_dir() or path.is_symlink():
+            continue
+        try:
+            children = sorted(
+                path.iterdir(), key=lambda child: child.name, reverse=True
+            )
+        except OSError as exc:
+            relative = path.relative_to(source_root)
+            raise SourceInvalidError(
+                f"Required source directory could not be read: {relative}"
+            ) from exc
+        for child in children:
+            relative = child.relative_to(source_root)
+            if _is_fixed_exclusion(relative) or _is_virtual_environment(
+                child, relative
+            ):
+                continue
+            pending.append(child.absolute())
     return required
 
 
