@@ -214,7 +214,7 @@ def _resolve_local_url(
 
 def _requirements_path(source_root: Path, path: Path) -> str:
     relative = _relative_path(source_root, path)
-    if any(character in relative for character in {'"', "#", "\r", "\n"}):
+    if any(character in relative for character in {'"', "'", "\\", "#", "\r", "\n"}):
         raise SourceInvalidError(
             "The requirements file path contains unsupported characters"
         )

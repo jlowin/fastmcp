@@ -184,6 +184,36 @@ async def test_combined_dependencies_create_generated_requirements(
     } <= archive_names(bundle.archive_path)
 
 
+@pytest.mark.parametrize(
+    "requirements_name",
+    ["requirements'prod.txt", "requirements\\prod.txt"],
+)
+async def test_generated_requirements_rejects_unsafe_include_path(
+    project: Path,
+    tmp_path: Path,
+    requirements_name: str,
+) -> None:
+    if os.name == "nt" and "\\" in requirements_name:
+        pytest.skip("A backslash is a path separator on Windows")
+
+    write_server(project / "server.py")
+    (project / requirements_name).write_text("fastmcp>=4\n")
+    (project / "fastmcp.json").write_text(
+        json.dumps(
+            {
+                "source": {"path": "server.py"},
+                "environment": {
+                    "requirements": requirements_name,
+                    "dependencies": ["httpx>=0.27"],
+                },
+            }
+        )
+    )
+
+    with pytest.raises(SourceInvalidError, match="unsupported characters"):
+        await create_source_bundle(None, tmp_path / "source.tar.gz")
+
+
 async def test_inline_local_dependency_is_rewritten_from_deployment_cwd(
     project: Path,
     tmp_path: Path,
