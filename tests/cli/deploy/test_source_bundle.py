@@ -75,6 +75,49 @@ async def test_source_root_inherits_parent_gitignore_rules(
     assert "private.pem" not in archive_names(bundle.archive_path)
 
 
+async def test_source_root_inherits_repository_exclude(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = tmp_path / "repository"
+    service = repository / "service"
+    write_server(service / "server.py")
+    (service / "requirements.txt").write_text("fastmcp>=4\n")
+    (service / "private.txt").write_text("secret")
+    (repository / ".git" / "info").mkdir(parents=True)
+    (repository / ".git" / "info" / "exclude").write_text("service/private.txt\n")
+    monkeypatch.chdir(repository)
+
+    bundle = await create_source_bundle(
+        "service/server.py",
+        tmp_path / "source.tar.gz",
+    )
+
+    assert "private.txt" not in archive_names(bundle.archive_path)
+
+
+async def test_worktree_uses_common_repository_exclude(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project = tmp_path / "worktree"
+    write_server(project / "server.py")
+    (project / "private.txt").write_text("secret")
+
+    common_git = tmp_path / "repository.git"
+    worktree_git = common_git / "worktrees" / "service"
+    worktree_git.mkdir(parents=True)
+    (worktree_git / "commondir").write_text("../..\n")
+    (common_git / "info").mkdir()
+    (common_git / "info" / "exclude").write_text("private.txt\n")
+    (project / ".git").write_text(f"gitdir: {worktree_git}\n")
+    monkeypatch.chdir(project)
+
+    bundle = await create_source_bundle("server.py", tmp_path / "source.tar.gz")
+
+    assert "private.txt" not in archive_names(bundle.archive_path)
+
+
 async def test_nested_repository_does_not_inherit_parent_gitignore(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

@@ -96,9 +96,7 @@ class _BoundedWriter:
 
     def write(self, data: bytes) -> int:
         if self._file.tell() + len(data) > self._limit:
-            raise ArchiveTooLargeError(
-                "The compressed source archive exceeds the 250 MB Horizon limit"
-            )
+            raise ArchiveTooLargeError("Archive exceeds the 250 MB compressed limit")
         return self._file.write(data)
 
     def flush(self) -> None:
@@ -123,7 +121,7 @@ def _collect_entries(
     ] = {
         source_root: (
             (source_root, _DEFAULT_IGNORE_SPEC),
-            *_parent_gitignore_rules(source_root),
+            *_repository_ignore_rules(source_root),
         )
     }
 
@@ -272,32 +270,97 @@ def _contains_required(directory: Path, required_paths: set[Path]) -> bool:
     )
 
 
-def _parent_gitignore_rules(
+def _repository_ignore_rules(
     source_root: Path,
 ) -> tuple[tuple[Path, pathspec.GitIgnoreSpec], ...]:
-    if os.path.lexists(source_root / ".git"):
-        return ()
     git_root = next(
-        (parent for parent in source_root.parents if os.path.lexists(parent / ".git")),
+        (
+            directory
+            for directory in (source_root, *source_root.parents)
+            if os.path.lexists(directory / ".git")
+        ),
         None,
     )
     if git_root is None:
         return ()
 
-    directories: list[Path] = []
-    current = source_root.parent
-    while True:
-        directories.append(current)
-        if current == git_root:
-            break
-        current = current.parent
-
     rules: list[tuple[Path, pathspec.GitIgnoreSpec]] = []
-    for directory in reversed(directories):
-        spec = _read_gitignore(git_root, directory)
-        if spec is not None:
-            rules.append((directory, spec))
+    exclude_spec = _read_repository_exclude(git_root)
+    if exclude_spec is not None:
+        rules.append((git_root, exclude_spec))
+
+    if source_root != git_root:
+        directories: list[Path] = []
+        current = source_root.parent
+        while True:
+            directories.append(current)
+            if current == git_root:
+                break
+            current = current.parent
+        for directory in reversed(directories):
+            spec = _read_gitignore(git_root, directory)
+            if spec is not None:
+                rules.append((directory, spec))
     return tuple(rules)
+
+
+def _read_repository_exclude(
+    git_root: Path,
+) -> pathspec.GitIgnoreSpec | None:
+    git_directory = _resolve_git_directory(git_root)
+    common_directory_file = git_directory / "commondir"
+    if common_directory_file.is_file():
+        try:
+            common_value = common_directory_file.read_text(encoding="utf-8").strip()
+        except (OSError, UnicodeError) as exc:
+            raise SourceInvalidError("Could not read Git common directory") from exc
+        if not common_value:
+            raise SourceInvalidError("The Git common directory is invalid")
+        common_directory = Path(common_value)
+        if not common_directory.is_absolute():
+            common_directory = git_directory / common_directory
+        try:
+            git_directory = common_directory.resolve(strict=True)
+        except (OSError, RuntimeError) as exc:
+            raise SourceInvalidError("The Git common directory is invalid") from exc
+        if not git_directory.is_dir():
+            raise SourceInvalidError("The Git common directory is invalid")
+
+    exclude_file = git_directory / "info" / "exclude"
+    if not exclude_file.exists():
+        return None
+    if not exclude_file.is_file():
+        raise SourceInvalidError("The Git exclude path is not a file")
+    try:
+        lines = exclude_file.read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeError) as exc:
+        raise SourceInvalidError("The Git exclude file could not be read") from exc
+    return pathspec.GitIgnoreSpec.from_lines(lines)
+
+
+def _resolve_git_directory(git_root: Path) -> Path:
+    marker = git_root / ".git"
+    if marker.is_dir():
+        return marker.resolve()
+    if not marker.is_file():
+        raise SourceInvalidError("The Git directory marker is invalid")
+    try:
+        marker_value = marker.read_text(encoding="utf-8").strip()
+    except (OSError, UnicodeError) as exc:
+        raise SourceInvalidError("The Git directory marker could not be read") from exc
+    prefix = "gitdir:"
+    if not marker_value.lower().startswith(prefix):
+        raise SourceInvalidError("The Git directory marker is invalid")
+    git_directory = Path(marker_value[len(prefix) :].strip())
+    if not git_directory.is_absolute():
+        git_directory = git_root / git_directory
+    try:
+        resolved = git_directory.resolve(strict=True)
+    except (OSError, RuntimeError) as exc:
+        raise SourceInvalidError("The Git directory marker is invalid") from exc
+    if not resolved.is_dir():
+        raise SourceInvalidError("The Git directory marker is invalid")
+    return resolved
 
 
 def _read_gitignore(
@@ -371,9 +434,7 @@ def _write_archive(
 
 def _validate_archive_limits(entries: list[tuple[str, Path | bytes]]) -> None:
     if len(entries) > MAX_SOURCE_ARCHIVE_MEMBERS:
-        raise ArchiveTooLargeError(
-            "The source archive exceeds the 25,000 member Horizon limit"
-        )
+        raise ArchiveTooLargeError("Archive exceeds the 25,000 member limit")
 
     extracted_bytes = 0
     for _, entry_source in entries:
@@ -382,9 +443,7 @@ def _validate_archive_limits(entries: list[tuple[str, Path | bytes]]) -> None:
         elif not entry_source.is_symlink() and not entry_source.is_dir():
             extracted_bytes += entry_source.stat().st_size
         if extracted_bytes > MAX_SOURCE_EXTRACTED_BYTES:
-            raise ArchiveTooLargeError(
-                "The source archive exceeds the 1 GB extracted Horizon limit"
-            )
+            raise ArchiveTooLargeError("Archive exceeds the 1 GB extracted limit")
 
 
 def _add_archive_entry(
