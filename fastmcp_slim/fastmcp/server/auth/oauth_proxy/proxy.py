@@ -702,6 +702,7 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
                 enable_cimd=True,
                 default_scope=self._default_scope_str,
                 allowed_redirect_uri_patterns=self._allowed_client_redirect_uris,
+                cache_storage=self._client_storage,
             )
 
         # Identity assertion (SEP-990 ID-JAG): per RFC 7523 §3 the `aud` must
