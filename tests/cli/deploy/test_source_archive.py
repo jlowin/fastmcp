@@ -60,7 +60,7 @@ async def test_archive_is_deterministic(project: Path, tmp_path: Path) -> None:
         assert script.mode == (0o644 if os.name == "nt" else 0o755)
 
 
-async def test_archive_applies_secret_and_ignore_exclusions(
+async def test_archive_applies_security_and_git_exclusions(
     project: Path,
     tmp_path: Path,
 ) -> None:
@@ -86,11 +86,6 @@ async def test_archive_applies_secret_and_ignore_exclusions(
     (project / ".ssh" / "id_ed25519").write_text("secret")
     (project / ".fastmcp").mkdir()
     (project / ".fastmcp" / "project.json").write_text("secret")
-    (project / ".venv").mkdir()
-    (project / ".venv" / "pyvenv.cfg").write_text("home = /usr/bin\n")
-    (project / ".venv" / "secret.txt").write_text("secret")
-    (project / "__pycache__").mkdir()
-    (project / "__pycache__" / "server.pyc").write_bytes(b"cache")
     (project / "production.fastmcp.json").write_text(
         json.dumps({"deployment": {"env": {"TOKEN": "secret"}}})
     )
@@ -99,6 +94,8 @@ async def test_archive_applies_secret_and_ignore_exclusions(
 
     names = archive_names(bundle.archive_path)
     assert {
+        ".gitignore",
+        "app/.gitignore",
         "server.py",
         "app/keep.txt",
         "app/env",
@@ -107,28 +104,53 @@ async def test_archive_applies_secret_and_ignore_exclusions(
     assert "keep.txt" not in names
     assert "ignored.txt" not in names
     assert not any(name.startswith(".env") for name in names)
-    assert not any(name.startswith(".git") for name in names)
+    assert not any(name.startswith(".git/") for name in names)
     assert not any(name.startswith(".ssh/") for name in names)
     assert not any(name.startswith(".fastmcp/") for name in names)
     assert {".netrc", ".npmrc", "pip.conf"}.isdisjoint(names)
-    assert not any(name.startswith(".venv/") for name in names)
-    assert not any("__pycache__" in name for name in names)
     assert "production.fastmcp.json" not in names
 
 
-async def test_gitignore_can_restore_default_build_exclusion(
+async def test_archive_keeps_files_without_a_security_or_git_exclusion(
+    project: Path,
+    tmp_path: Path,
+) -> None:
+    write_server(project / "server.py")
+    (project / ".venv").mkdir()
+    (project / ".venv" / "pyvenv.cfg").write_text("home = /usr/bin\n")
+    (project / "__pycache__").mkdir()
+    (project / "__pycache__" / "server.pyc").write_bytes(b"cache")
+    (project / "dist").mkdir()
+    (project / "dist" / "model.bin").write_bytes(b"model")
+    (project / "node_modules").mkdir()
+    (project / "node_modules" / "package.js").write_text("export {}\n")
+
+    bundle = await create_source_bundle("server.py", tmp_path / "source.tar.gz")
+
+    assert {
+        ".venv/pyvenv.cfg",
+        "__pycache__/server.pyc",
+        "dist/model.bin",
+        "node_modules/package.js",
+    } <= archive_names(bundle.archive_path)
+
+
+async def test_gitignore_negation_restores_an_ignored_file(
     project: Path,
     tmp_path: Path,
 ) -> None:
     write_server(project / "server.py")
     distribution = project / "dist"
     distribution.mkdir()
+    (distribution / "ignored.bin").write_bytes(b"ignored")
     (distribution / "model.bin").write_bytes(b"model")
-    (project / ".gitignore").write_text("!dist/\n!dist/model.bin\n")
+    (project / ".gitignore").write_text("dist/*\n!dist/model.bin\n")
 
     bundle = await create_source_bundle("server.py", tmp_path / "source.tar.gz")
 
-    assert "dist/model.bin" in archive_names(bundle.archive_path)
+    names = archive_names(bundle.archive_path)
+    assert "dist/model.bin" in names
+    assert "dist/ignored.bin" not in names
 
 
 async def test_gitignore_cannot_restore_hard_exclusion(

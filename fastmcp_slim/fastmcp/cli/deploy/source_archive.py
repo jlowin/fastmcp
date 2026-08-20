@@ -38,47 +38,6 @@ _HARD_EXCLUDED_FILE_NAMES = {
     "pip.conf",
     "pip.ini",
 }
-_VIRTUAL_ENVIRONMENT_NAMES = {".venv", "env", "venv", "virtualenv"}
-_DEFAULT_IGNORE_SPEC = pathspec.GitIgnoreSpec.from_lines(
-    (
-        ".cache/",
-        ".coverage",
-        ".coverage.*",
-        ".gitignore",
-        ".hypothesis/",
-        ".idea/",
-        ".ipynb_checkpoints/",
-        ".mypy_cache/",
-        ".next/",
-        ".nox/",
-        ".now/",
-        ".pnp*",
-        ".pytest_cache/",
-        ".pyre/",
-        ".pytype/",
-        ".ruff_cache/",
-        ".tox/",
-        ".vercel/",
-        ".vscode/",
-        ".yarn/cache/",
-        "*.egg-info/",
-        "*.pyc",
-        "*.pyo",
-        "*.swp",
-        "*.swo",
-        "*~",
-        ".DS_Store",
-        "Thumbs.db",
-        "__pycache__/",
-        "build/",
-        "dist/",
-        "htmlcov/",
-        "node_modules/",
-        "npm-debug.log*",
-        "yarn-debug.log*",
-        "yarn-error.log*",
-    )
-)
 
 
 class SourceInvalidError(ValueError):
@@ -118,12 +77,7 @@ def _collect_entries(
     rules_by_directory: dict[
         Path,
         tuple[tuple[Path, pathspec.GitIgnoreSpec], ...],
-    ] = {
-        source_root: (
-            (source_root, _DEFAULT_IGNORE_SPEC),
-            *_repository_ignore_rules(source_root),
-        )
-    }
+    ] = {source_root: _repository_ignore_rules(source_root)}
 
     def walk_error(error: OSError) -> None:
         raise SourceInvalidError(
@@ -239,17 +193,11 @@ def _exclusion_reason(
     *,
     directory: bool = False,
 ) -> str | None:
-    if _is_hard_exclusion(relative) or _is_virtual_environment(path, relative):
+    if _is_hard_exclusion(relative):
         return "excluded from deployment"
     if _is_ignored(path, rules, directory=directory):
         return "ignored"
     return None
-
-
-def _is_virtual_environment(path: Path, relative: Path) -> bool:
-    return relative.name in _VIRTUAL_ENVIRONMENT_NAMES and (
-        (path / "pyvenv.cfg").is_file() or (path / "conda-meta").is_dir()
-    )
 
 
 def _is_hard_exclusion(relative: Path) -> bool:

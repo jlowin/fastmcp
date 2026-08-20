@@ -8,7 +8,9 @@ import re
 import tarfile
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import SplitResult, urlsplit
 
+from packaging.requirements import InvalidRequirement, Requirement
 from pydantic import ValidationError
 
 from fastmcp.cli.deploy.source_archive import (
@@ -18,16 +20,11 @@ from fastmcp.cli.deploy.source_archive import (
     _sha256,
     _write_archive,
 )
-from fastmcp.cli.deploy.source_dependencies import (
-    GENERATED_REQUIREMENTS_PATH,
-    _relative_path,
-    _resolve_dependencies,
-    _resolve_path,
-)
 from fastmcp.utilities.mcp_server_config import MCPServerConfig
 from fastmcp.utilities.mcp_server_config.v1.sources.filesystem import FileSystemSource
 
 _PROJECT_ROOT_MARKERS = ("fastmcp.json", "pyproject.toml", "requirements.txt", ".git")
+_ARCHIVED_CONFIG_PATH = "fastmcp.json"
 _ENTRYPOINT_PATH_PATTERN = re.compile(r"^[A-Za-z0-9._/-]+$")
 _ENTRYPOINT_IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
@@ -75,29 +72,27 @@ async def create_source_bundle(
         config.source.entrypoint,
     )
 
-    dependency_path, generated_requirements, required_paths = _resolve_dependencies(
-        config,
-        source_root,
-        source_path,
-        source_base,
-    )
-    required_paths = (source_path, *required_paths)
-    archive_created = False
+    dependency_path: str | None = None
+    dependency_files: tuple[Path, ...] = ()
+    if config_path is None:
+        dependency_path, dependency_files = _detect_dependency(
+            source_root,
+            source_path.parent,
+        )
 
+    archive_created = False
     try:
         entries = _collect_entries(
             source_root,
-            required_paths=required_paths,
+            required_paths=(source_path, *dependency_files),
             excluded_paths=(config_path,) if config_path is not None else (),
         )
-        if generated_requirements is not None:
-            generated_path = source_root / GENERATED_REQUIREMENTS_PATH
-            if os.path.lexists(generated_path):
-                raise SourceInvalidError(
-                    f"The generated dependency path is reserved: {GENERATED_REQUIREMENTS_PATH}"
-                )
+        if config_path is not None:
             entries.append(
-                (GENERATED_REQUIREMENTS_PATH, generated_requirements.encode())
+                (
+                    _ARCHIVED_CONFIG_PATH,
+                    _sanitized_config(config, source_root, source_base),
+                )
             )
         entries.sort(key=lambda entry: entry[0])
 
@@ -129,6 +124,117 @@ async def create_source_bundle(
         entrypoint=entrypoint,
         dependency_path=dependency_path,
     )
+
+
+def _sanitized_config(
+    config: MCPServerConfig,
+    source_root: Path,
+    dependency_base: Path,
+) -> bytes:
+    environment = config.environment
+    archived_environment: dict[str, object] = {"type": environment.type}
+    if environment.python is not None:
+        archived_environment["python"] = environment.python
+    if environment.dependencies is not None:
+        archived_environment["dependencies"] = [
+            _sanitized_dependency(dependency) for dependency in environment.dependencies
+        ]
+    if environment.requirements is not None:
+        archived_environment["requirements"] = _sanitized_path(
+            source_root,
+            dependency_base,
+            environment.requirements,
+            label="Requirements file",
+        )
+    if environment.project is not None:
+        archived_environment["project"] = _sanitized_path(
+            source_root,
+            dependency_base,
+            environment.project,
+            label="Environment project",
+        )
+    if environment.editable is not None:
+        archived_environment["editable"] = [
+            _sanitized_path(
+                source_root,
+                dependency_base,
+                path,
+                label="Editable dependency",
+            )
+            for path in environment.editable
+        ]
+
+    archived: dict[str, object] = {"environment": archived_environment}
+    if config.deployment.cwd is not None:
+        archived["deployment"] = {"cwd": _relative_path(source_root, dependency_base)}
+    return (json.dumps(archived, sort_keys=True, separators=(",", ":")) + "\n").encode()
+
+
+def _sanitized_dependency(dependency: str) -> str:
+    bare_url = urlsplit(dependency.strip())
+    if bare_url.scheme:
+        _validate_dependency_url(bare_url, label="URL")
+
+    try:
+        requirement = Requirement(dependency)
+    except InvalidRequirement:
+        return dependency
+    if requirement.url is None:
+        return dependency
+
+    _validate_dependency_url(urlsplit(requirement.url), label=requirement.name)
+    return dependency
+
+
+def _validate_dependency_url(url: SplitResult, *, label: str) -> None:
+    if url.username is not None or url.password is not None:
+        raise SourceInvalidError(
+            f"The dependency must not contain credentials: {label}"
+        )
+    if url.query:
+        raise SourceInvalidError(
+            f"The dependency must not contain URL query parameters: {label}"
+        )
+
+
+def _sanitized_path(
+    source_root: Path,
+    dependency_base: Path,
+    value: str | Path,
+    *,
+    label: str,
+) -> str:
+    requested = _path_from_base(dependency_base, value)
+    candidate = Path(os.path.abspath(requested))
+    try:
+        candidate.relative_to(source_root)
+        candidate.resolve(strict=False).relative_to(source_root)
+    except ValueError as exc:
+        raise SourceInvalidError(f"{label} leaves the source root: {value}") from exc
+    except (OSError, RuntimeError) as exc:
+        raise SourceInvalidError(f"{label} could not be resolved: {value}") from exc
+    return Path(os.path.relpath(candidate, dependency_base)).as_posix()
+
+
+def _detect_dependency(
+    source_root: Path,
+    start: Path,
+) -> tuple[str | None, tuple[Path, ...]]:
+    current = start
+    while True:
+        requirements = current / "requirements.txt"
+        if requirements.is_file():
+            return _relative_path(source_root, requirements), (requirements,)
+
+        pyproject = current / "pyproject.toml"
+        uv_lock = current / "uv.lock"
+        if uv_lock.is_file() and pyproject.is_file():
+            return _relative_path(source_root, uv_lock), (uv_lock, pyproject)
+        if pyproject.is_file():
+            return _relative_path(source_root, pyproject), (pyproject,)
+        if current == source_root:
+            return None, ()
+        current = current.parent
 
 
 def _load_config(
@@ -224,6 +330,48 @@ def _load_config_file(config_path: Path) -> tuple[MCPServerConfig, Path, Path]:
             f"The FastMCP configuration is invalid: {config_path}"
         ) from exc
     return config, resolved_path.parent, resolved_path
+
+
+def _resolve_path(
+    source_root: Path,
+    value: str | Path,
+    *,
+    label: str,
+    file: bool = False,
+    directory: bool = False,
+) -> Path:
+    requested = Path(value).expanduser()
+    candidate = Path(
+        os.path.abspath(
+            requested if requested.is_absolute() else source_root / requested
+        )
+    )
+    try:
+        candidate.relative_to(source_root)
+    except ValueError as exc:
+        raise SourceInvalidError(f"{label} leaves the source root: {value}") from exc
+    try:
+        resolved = candidate.resolve(strict=True)
+    except (OSError, RuntimeError) as exc:
+        raise SourceInvalidError(f"{label} does not exist: {value}") from exc
+    try:
+        resolved.relative_to(source_root)
+    except ValueError as exc:
+        raise SourceInvalidError(f"{label} leaves the source root: {value}") from exc
+    if file and not candidate.is_file():
+        raise SourceInvalidError(f"{label} is not a file: {value}")
+    if directory and not candidate.is_dir():
+        raise SourceInvalidError(f"{label} is not a directory: {value}")
+    return candidate
+
+
+def _path_from_base(base: Path, value: str | Path) -> Path:
+    path = Path(value).expanduser()
+    return path if path.is_absolute() else base / path
+
+
+def _relative_path(source_root: Path, path: Path) -> str:
+    return path.relative_to(source_root).as_posix() or "."
 
 
 def _resolve_archive_path(source_root: Path, archive_path: Path) -> Path:
