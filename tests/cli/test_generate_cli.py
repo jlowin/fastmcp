@@ -82,6 +82,13 @@ class TestSchemaToPythonType:
         assert py_type == "str | None"
         assert needs_json is False
 
+    def test_any_of_simple_types(self):
+        py_type, needs_json = _schema_to_python_type(
+            {"anyOf": [{"type": "string"}, {"type": "null"}]}
+        )
+        assert py_type == "str | None"
+        assert needs_json is False
+
 
 # ---------------------------------------------------------------------------
 # _to_python_identifier
@@ -147,6 +154,20 @@ class TestSerializeTransport:
 
 
 class TestToolFunctionSource:
+    def test_optional_string_param_is_not_json_parsed(self):
+        tool = mcp_types.Tool(
+            name="greet",
+            input_schema={
+                "properties": {
+                    "greeting": {"anyOf": [{"type": "string"}, {"type": "null"}]}
+                }
+            },
+        )
+        source = _tool_function_source(tool)
+        assert "greeting: Annotated[str | None" in source
+        assert "json.loads(greeting)" not in source
+        assert "'greeting': greeting" in source
+
     def test_required_param(self):
         tool = mcp_types.Tool(
             name="greet",

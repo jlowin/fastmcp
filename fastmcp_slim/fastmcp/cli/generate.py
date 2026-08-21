@@ -32,6 +32,9 @@ _SIMPLE_TYPES = {"string", "integer", "number", "boolean", "null"}
 def _is_simple_type(schema: dict[str, Any]) -> bool:
     """Check if a schema represents a simple (non-complex) type."""
     schema_type = schema.get("type")
+    union = schema.get("anyOf") or schema.get("oneOf")
+    if isinstance(union, list):
+        return all(_is_simple_type(option) for option in union)
     if isinstance(schema_type, list):
         # Union of types - simple only if all are simple
         return all(t in _SIMPLE_TYPES for t in schema_type)
@@ -78,6 +81,19 @@ def _schema_to_python_type(schema: dict[str, Any]) -> tuple[str, bool]:
 
     # Check for simple type
     if _is_simple_type(schema):
+        union = schema.get("anyOf") or schema.get("oneOf")
+        if isinstance(union, list):
+            type_map = {
+                "string": "str",
+                "integer": "int",
+                "number": "float",
+                "boolean": "bool",
+                "null": "None",
+            }
+            parts = [
+                type_map.get(option.get("type", "string"), "str") for option in union
+            ]
+            return " | ".join(parts), False
         schema_type = schema.get("type", "string")
         if isinstance(schema_type, list):
             # Union of simple types
