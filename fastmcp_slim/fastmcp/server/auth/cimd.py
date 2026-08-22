@@ -17,6 +17,7 @@ This module provides:
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import time
 from collections.abc import Mapping
@@ -185,10 +186,11 @@ class _CIMDCacheEntry(BaseModel):
     must_revalidate: bool
 
 
-class _CIMDCacheSnapshot(BaseModel):
-    """Bounded shared snapshot of cached CIMD documents."""
+class _CIMDCacheSlot(BaseModel):
+    """One entry in the fixed-size shared CIMD cache."""
 
-    entries: dict[str, _CIMDCacheEntry] = Field(default_factory=dict)
+    client_id_url: str
+    entry: _CIMDCacheEntry
 
 
 @dataclass
@@ -214,12 +216,12 @@ class CIMDFetcher:
 
     # Maximum response size (bytes)
     MAX_RESPONSE_SIZE = 5120  # 5KB
-    # Maximum number of distinct client documents retained in any cache snapshot
+    # Maximum number of distinct client documents retained in either cache layer
     MAX_CACHE_SIZE = 100
     # Default cache TTL (seconds)
     DEFAULT_CACHE_TTL_SECONDS = 3600
     SHARED_CACHE_COLLECTION = "mcp-cimd-cache"
-    SHARED_CACHE_KEY = "snapshot"
+    SHARED_CACHE_KEY_PREFIX = "slot-"
 
     def __init__(
         self,
@@ -230,15 +232,15 @@ class CIMDFetcher:
 
         Args:
             timeout: HTTP request timeout in seconds (default 10.0)
-            cache_storage: Optional shared storage for the bounded cache snapshot
+            cache_storage: Optional shared storage for fixed cache slots
         """
         self.timeout = timeout
         self._cache: dict[str, _CIMDCacheEntry] = {}
-        self._shared_cache: PydanticAdapter[_CIMDCacheSnapshot] | None = None
+        self._shared_cache: PydanticAdapter[_CIMDCacheSlot] | None = None
         if cache_storage is not None:
-            self._shared_cache = PydanticAdapter[_CIMDCacheSnapshot](
+            self._shared_cache = PydanticAdapter[_CIMDCacheSlot](
                 key_value=cache_storage,
-                pydantic_model=_CIMDCacheSnapshot,
+                pydantic_model=_CIMDCacheSlot,
                 default_collection=self.SHARED_CACHE_COLLECTION,
                 raise_on_validation_error=True,
             )
@@ -263,29 +265,34 @@ class CIMDFetcher:
             oldest_url = next(iter(entries))
             del entries[oldest_url]
 
-    async def _load_shared_cache(self) -> dict[str, _CIMDCacheEntry]:
-        """Load the bounded shared snapshot, treating storage errors as misses."""
-        if self._shared_cache is None:
-            return {}
-        try:
-            snapshot = await self._shared_cache.get(key=self.SHARED_CACHE_KEY)
-        except BaseKeyValueError as e:
-            logger.debug("Unable to load shared CIMD cache: %s", e)
-            return {}
-        return dict(snapshot.entries) if snapshot is not None else {}
+    def _shared_cache_key(self, client_id_url: str) -> str:
+        """Map a client URL to one of the fixed shared-cache slots."""
+        digest = hashlib.sha256(client_id_url.encode()).digest()
+        slot = int.from_bytes(digest[:8], "big") % self.MAX_CACHE_SIZE
+        return f"{self.SHARED_CACHE_KEY_PREFIX}{slot}"
 
     async def _get_cache_entry(
         self,
         client_id_url: str,
     ) -> _CIMDCacheEntry | None:
-        """Read through the local cache to the shared bounded snapshot."""
+        """Read through the local cache to the shared bounded slots."""
         if cached := self._cache.get(client_id_url):
             return cached
+        if self._shared_cache is None:
+            return None
 
-        cached = (await self._load_shared_cache()).get(client_id_url)
-        if cached is not None:
-            self._store_local_cache_entry(client_id_url, cached)
-        return cached
+        try:
+            slot = await self._shared_cache.get(
+                key=self._shared_cache_key(client_id_url)
+            )
+        except BaseKeyValueError as e:
+            logger.debug("Unable to load shared CIMD cache entry: %s", e)
+            return None
+        if slot is None or slot.client_id_url != client_id_url:
+            return None
+
+        self._store_local_cache_entry(client_id_url, slot.entry)
+        return slot.entry
 
     async def _store_cache_entry(
         self,
@@ -297,15 +304,16 @@ class CIMDFetcher:
         if self._shared_cache is None:
             return
 
-        entries = await self._load_shared_cache()
-        self._store_bounded_entry(entries, client_id_url, entry)
         try:
             await self._shared_cache.put(
-                key=self.SHARED_CACHE_KEY,
-                value=_CIMDCacheSnapshot(entries=entries),
+                key=self._shared_cache_key(client_id_url),
+                value=_CIMDCacheSlot(
+                    client_id_url=client_id_url,
+                    entry=entry,
+                ),
             )
         except BaseKeyValueError as e:
-            logger.debug("Unable to store shared CIMD cache: %s", e)
+            logger.debug("Unable to store shared CIMD cache entry: %s", e)
 
     async def _remove_cache_entry(self, client_id_url: str) -> None:
         """Remove a document from both local and shared caches."""
@@ -313,17 +321,8 @@ class CIMDFetcher:
         if self._shared_cache is None:
             return
 
-        entries = await self._load_shared_cache()
-        if entries.pop(client_id_url, None) is None:
-            return
         try:
-            if entries:
-                await self._shared_cache.put(
-                    key=self.SHARED_CACHE_KEY,
-                    value=_CIMDCacheSnapshot(entries=entries),
-                )
-            else:
-                await self._shared_cache.delete(key=self.SHARED_CACHE_KEY)
+            await self._shared_cache.delete(key=self._shared_cache_key(client_id_url))
         except BaseKeyValueError as e:
             logger.debug("Unable to remove shared CIMD cache entry: %s", e)
 

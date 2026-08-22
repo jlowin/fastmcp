@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from key_value.aio.errors import StoreConnectionError
 from key_value.aio.stores.memory import MemoryStore
 from pydantic import AnyHttpUrl, ValidationError
 
@@ -314,11 +316,11 @@ class TestCIMDFetcherHTTP:
         assert first == second
         fetch.assert_awaited_once()
 
-    async def test_shared_fetch_cache_evicts_oldest_document(self):
-        """The shared snapshot retains at most the configured number of URLs."""
+    async def test_shared_fetch_cache_uses_fixed_number_of_slots(self):
+        """The shared cache creates no more than the configured number of keys."""
         storage = MemoryStore()
-        first_fetcher = CIMDFetcher(cache_storage=storage)
-        first_fetcher.MAX_CACHE_SIZE = 2
+        fetcher = CIMDFetcher(cache_storage=storage)
+        fetcher.MAX_CACHE_SIZE = 2
 
         async def fake_fetch(url: str, **kwargs) -> SSRFFetchResponse:
             return SSRFFetchResponse(
@@ -333,21 +335,142 @@ class TestCIMDFetcherHTTP:
             )
 
         fetch = AsyncMock(side_effect=fake_fetch)
-        urls = [f"https://example.com/client-{index}.json" for index in range(3)]
+        urls = [f"https://example.com/client-{index}.json" for index in range(10)]
         with patch(
             "fastmcp.server.auth.cimd.ssrf_safe_fetch_response",
             new=fetch,
         ):
             for url in urls:
-                await first_fetcher.fetch(url)
+                await fetcher.fetch(url)
 
-            second_fetcher = CIMDFetcher(cache_storage=storage)
-            second_fetcher.MAX_CACHE_SIZE = 2
-            await second_fetcher.fetch(urls[1])
-            await second_fetcher.fetch(urls[2])
-            await second_fetcher.fetch(urls[0])
+        keys = await storage.keys(collection=fetcher.SHARED_CACHE_COLLECTION)
+        assert len(keys) == 2
 
-        assert fetch.await_count == 4
+    async def test_concurrent_shared_cache_updates_preserve_both_documents(self):
+        """Concurrent workers cannot overwrite unrelated cached documents."""
+        storage = MemoryStore()
+        first_fetcher = CIMDFetcher(cache_storage=storage)
+        second_fetcher = CIMDFetcher(cache_storage=storage)
+        urls = [
+            "https://example.com/concurrent-a.json",
+            "https://example.com/concurrent-b.json",
+        ]
+        fetches_started = 0
+        both_fetches_started = asyncio.Event()
+
+        async def fake_fetch(url: str, **kwargs) -> SSRFFetchResponse:
+            nonlocal fetches_started
+            fetches_started += 1
+            if fetches_started == 2:
+                both_fetches_started.set()
+            if fetches_started <= 2:
+                await both_fetches_started.wait()
+            return SSRFFetchResponse(
+                content=json.dumps(
+                    {
+                        "client_id": url,
+                        "redirect_uris": ["http://localhost:3000/callback"],
+                    }
+                ).encode(),
+                status_code=200,
+                headers={"cache-control": "max-age=3600"},
+            )
+
+        original_get = storage.get
+        cache_reads = 0
+        both_cache_reads_loaded = asyncio.Event()
+
+        async def coordinated_get(
+            key: str, *, collection: str | None = None
+        ) -> dict | None:
+            nonlocal cache_reads
+            result = await original_get(key=key, collection=collection)
+            cache_reads += 1
+            if cache_reads == 4:
+                both_cache_reads_loaded.set()
+            if cache_reads in (3, 4):
+                await both_cache_reads_loaded.wait()
+            return result
+
+        fetch = AsyncMock(side_effect=fake_fetch)
+        with (
+            patch.object(
+                storage,
+                "get",
+                new=AsyncMock(side_effect=coordinated_get),
+            ),
+            patch(
+                "fastmcp.server.auth.cimd.ssrf_safe_fetch_response",
+                new=fetch,
+            ),
+        ):
+            await asyncio.gather(
+                first_fetcher.fetch(urls[0]),
+                second_fetcher.fetch(urls[1]),
+            )
+
+            reader = CIMDFetcher(cache_storage=storage)
+            await asyncio.gather(
+                reader.fetch(urls[0]),
+                reader.fetch(urls[1]),
+            )
+
+        assert fetch.await_count == 2
+
+    async def test_shared_cache_read_error_cannot_replace_other_entries(self):
+        """A recovered write cannot discard unrelated shared cache entries."""
+        storage = MemoryStore()
+        fetcher = CIMDFetcher(cache_storage=storage)
+        stored_urls = [
+            "https://example.com/stored-a.json",
+            "https://example.com/stored-b.json",
+        ]
+        error_url = "https://example.com/read-error.json"
+
+        async def fake_fetch(url: str, **kwargs) -> SSRFFetchResponse:
+            return SSRFFetchResponse(
+                content=json.dumps(
+                    {
+                        "client_id": url,
+                        "redirect_uris": ["http://localhost:3000/callback"],
+                    }
+                ).encode(),
+                status_code=200,
+                headers={"cache-control": "max-age=3600"},
+            )
+
+        fetch = AsyncMock(side_effect=fake_fetch)
+        with patch(
+            "fastmcp.server.auth.cimd.ssrf_safe_fetch_response",
+            new=fetch,
+        ):
+            for url in stored_urls:
+                await fetcher.fetch(url)
+
+            original_get = storage.get
+            reads = 0
+
+            async def fail_second_read(
+                key: str, *, collection: str | None = None
+            ) -> dict | None:
+                nonlocal reads
+                reads += 1
+                if reads == 2:
+                    raise StoreConnectionError("temporary read failure")
+                return await original_get(key=key, collection=collection)
+
+            with patch.object(
+                storage,
+                "get",
+                new=AsyncMock(side_effect=fail_second_read),
+            ):
+                await fetcher.fetch(error_url)
+
+            reader = CIMDFetcher(cache_storage=storage)
+            for url in stored_urls:
+                await reader.fetch(url)
+
+        assert fetch.await_count == 3
 
     async def test_no_store_document_is_not_shared_across_instances(self):
         """Cache-Control no-store prevents persistence in shared storage."""
