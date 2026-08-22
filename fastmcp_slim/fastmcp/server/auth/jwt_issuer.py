@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import base64
 import time
-from typing import Any, overload
+from typing import Any, Literal, overload
 
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
@@ -24,6 +24,14 @@ logger = get_logger(__name__)
 
 KDF_ITERATIONS = 1_000_000
 KDF_ITERATIONS_TEST = 10
+
+JWTSigningAlgorithm = Literal["HS256", "RS256", "ES256"]
+
+__all__ = [
+    "JWTIssuer",
+    "JWTSigningAlgorithm",
+    "derive_jwt_key",
+]
 
 
 @overload
@@ -77,30 +85,94 @@ def derive_jwt_key(
 
 
 class JWTIssuer:
-    """Issues and validates FastMCP-signed JWT tokens using HS256.
+    """Issues and validates FastMCP-signed JWT tokens.
 
     This issuer creates JWT tokens for MCP clients with proper audience claims,
-    maintaining OAuth 2.0 token boundaries. Tokens are signed with HS256 using
-    a key derived from the upstream client secret.
+    maintaining OAuth 2.0 token boundaries. Supports HS256 (symmetric) for
+    single-process deployments and RS256 / ES256 (asymmetric) for split-process
+    deployments where resource servers verify tokens via JWKS without holding
+    the minting key.
     """
 
     def __init__(
         self,
         issuer: str,
         audience: str,
-        signing_key: bytes,
-    ):
+        signing_key: bytes | str,
+        algorithm: JWTSigningAlgorithm = "HS256",
+        kid: str | None = None,
+    ) -> None:
         """Initialize JWT issuer.
 
         Args:
             issuer: Token issuer (FastMCP server base URL)
             audience: Token audience (typically {base_url}/mcp)
-            signing_key: HS256 signing key (32 bytes)
+            signing_key: For HS256, a symmetric key (32 bytes). For RS256 or
+                ES256, a PEM-encoded private key (bytes or string).
+            algorithm: Signing algorithm ("HS256", "RS256", or "ES256").
+            kid: Optional explicit key ID. When omitted, asymmetric keys use
+                their JWK thumbprint (RFC 7638) as the key ID. HS256 does not
+                require a key ID because tokens are verified in-process with
+                the same shared secret.
         """
         self.issuer = issuer
         self.audience = audience
-        self._signing_key = signing_key
-        self._jwt_key = jwk.import_key(signing_key, "oct")
+        self._signing_key = (
+            signing_key.encode() if isinstance(signing_key, str) else signing_key
+        )
+        self._algorithm: JWTSigningAlgorithm = algorithm
+
+        if algorithm == "HS256":
+            self._jwt_key = jwk.import_key(self._signing_key, "oct")
+        elif algorithm == "RS256":
+            self._jwt_key = jwk.import_key(self._signing_key, "RSA")
+        elif algorithm == "ES256":
+            self._jwt_key = jwk.import_key(self._signing_key, "EC")
+        else:
+            raise ValueError(f"Unsupported signing algorithm: {algorithm}")
+
+        if kid is not None:
+            self._kid: str | None = kid
+        elif algorithm != "HS256":
+            self._jwt_key.ensure_kid()
+            self._kid = self._jwt_key.kid
+        else:
+            self._kid = None
+
+    @property
+    def algorithm(self) -> JWTSigningAlgorithm:
+        """The signing algorithm used by this issuer."""
+        return self._algorithm
+
+    @property
+    def kid(self) -> str | None:
+        """The key ID included in JWT headers (None for HS256)."""
+        return self._kid
+
+    @property
+    def is_asymmetric(self) -> bool:
+        """Whether this issuer uses asymmetric signing."""
+        return self._algorithm in ("RS256", "ES256")
+
+    def public_jwks(self) -> dict[str, Any]:
+        """Return the public JSON Web Key Set for this issuer.
+
+        Only meaningful for asymmetric algorithms (RS256 / ES256). The returned
+        set contains public key material only — never the private signing key.
+
+        Returns:
+            A dict with a ``keys`` list of JWK objects suitable for serializing
+            as the body of a ``GET /.well-known/jwks.json`` response.
+
+        Raises:
+            ValueError: If called on an HS256 issuer (no JWKS exists).
+        """
+        if not self.is_asymmetric:
+            raise ValueError(
+                "public_jwks() is only available for asymmetric algorithms "
+                "(RS256 or ES256). HS256 uses a shared secret and has no JWKS."
+            )
+        return {"keys": [self._jwt_key.as_dict(private=False)]}
 
     def issue_access_token(
         self,
@@ -136,7 +208,7 @@ class JWTIssuer:
         """
         now = int(time.time())
 
-        header = {"alg": "HS256", "typ": "JWT"}
+        header = self._build_header()
         payload: dict[str, Any] = {
             "iss": self.issuer,
             "aud": self.audience,
@@ -160,7 +232,7 @@ class JWTIssuer:
             header,
             payload,
             self._jwt_key,
-            algorithms=["HS256"],
+            algorithms=[self._algorithm],
         )
 
         logger.debug(
@@ -198,7 +270,7 @@ class JWTIssuer:
         """
         now = int(time.time())
 
-        header = {"alg": "HS256", "typ": "JWT"}
+        header = self._build_header()
         payload: dict[str, Any] = {
             "iss": self.issuer,
             "aud": self.audience,
@@ -217,7 +289,7 @@ class JWTIssuer:
             header,
             payload,
             self._jwt_key,
-            algorithms=["HS256"],
+            algorithms=[self._algorithm],
         )
 
         logger.debug(
@@ -254,7 +326,7 @@ class JWTIssuer:
             payload = jwt.decode(
                 token,
                 self._jwt_key,
-                algorithms=["HS256"],
+                algorithms=[self._algorithm],
             ).claims
 
             # Validate token type
@@ -294,3 +366,10 @@ class JWTIssuer:
         except JoseError as e:
             logger.debug("Token validation failed: %s", e)
             raise
+
+    def _build_header(self) -> dict[str, Any]:
+        """Build the JWT header for this issuer's algorithm."""
+        header: dict[str, Any] = {"alg": self._algorithm, "typ": "JWT"}
+        if self._kid is not None:
+            header["kid"] = self._kid
+        return header

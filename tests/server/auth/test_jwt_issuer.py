@@ -1,12 +1,15 @@
 """Unit tests for JWT issuer and token encryption."""
 
 import base64
+import json
 
 import pytest
+from joserfc import jwk
 from joserfc.errors import JoseError
 
 from fastmcp.server.auth.jwt_issuer import (
     JWTIssuer,
+    JWTSigningAlgorithm,
     derive_jwt_key,
 )
 
@@ -309,3 +312,115 @@ class TestJWTIssuer:
 
         with pytest.raises(JoseError, match="Token type mismatch"):
             issuer.verify_token(token, expected_token_use="refresh")
+
+
+class TestAsymmetricJWTIssuer:
+    """Tests for RS256 and ES256 asymmetric token issuance."""
+
+    @pytest.fixture
+    def rsa_pem(self) -> bytes:
+        key = jwk.RSAKey.generate_key()
+        return key.as_pem(private=True)
+
+    @pytest.fixture
+    def ec_pem(self) -> bytes:
+        key = jwk.ECKey.generate_key("P-256")
+        return key.as_pem(private=True)
+
+    def test_rs256_issue_and_verify(self, rsa_pem):
+        issuer = JWTIssuer(
+            issuer="https://as.example.com",
+            audience="https://rs.example.com/mcp",
+            signing_key=rsa_pem,
+            algorithm="RS256",
+        )
+        assert issuer.algorithm == "RS256"
+        assert issuer.is_asymmetric
+
+        token = issuer.issue_access_token(
+            client_id="client-1", scopes=["read"], jti="jti-rs"
+        )
+        payload = issuer.verify_token(token)
+        assert payload["client_id"] == "client-1"
+
+    def test_es256_issue_and_verify(self, ec_pem):
+        issuer = JWTIssuer(
+            issuer="https://as.example.com",
+            audience="https://rs.example.com/mcp",
+            signing_key=ec_pem,
+            algorithm="ES256",
+        )
+        assert issuer.algorithm == "ES256"
+        assert issuer.is_asymmetric
+
+        token = issuer.issue_access_token(
+            client_id="client-2", scopes=["write"], jti="jti-es"
+        )
+        payload = issuer.verify_token(token)
+        assert payload["client_id"] == "client-2"
+
+    def test_asymmetric_tokens_carry_kid(self, rsa_pem):
+        issuer = JWTIssuer(
+            issuer="https://as.example.com",
+            audience="https://rs.example.com/mcp",
+            signing_key=rsa_pem,
+            algorithm="RS256",
+        )
+        assert issuer.kid is not None
+
+        token = issuer.issue_access_token(
+            client_id="client", scopes=["read"], jti="jti-kid"
+        )
+        header_b64 = token.split(".")[0]
+        header_b64 += "=" * (4 - len(header_b64) % 4)
+        header = json.loads(base64.urlsafe_b64decode(header_b64))
+        assert header["alg"] == "RS256"
+        assert header["kid"] == issuer.kid
+
+    def test_explicit_kid(self, rsa_pem):
+        issuer = JWTIssuer(
+            issuer="https://as.example.com",
+            audience="https://rs.example.com/mcp",
+            signing_key=rsa_pem,
+            algorithm="RS256",
+            kid="my-key-v1",
+        )
+        assert issuer.kid == "my-key-v1"
+
+    def test_public_jwks_contains_only_public_material(self, rsa_pem):
+        issuer = JWTIssuer(
+            issuer="https://as.example.com",
+            audience="https://rs.example.com/mcp",
+            signing_key=rsa_pem,
+            algorithm="RS256",
+        )
+        jwks = issuer.public_jwks()
+        assert len(jwks["keys"]) == 1
+        key_dict = jwks["keys"][0]
+        assert key_dict["kty"] == "RSA"
+        assert "n" in key_dict  # public modulus
+        assert "e" in key_dict  # public exponent
+        assert "d" not in key_dict  # private exponent must NOT be present
+        assert "p" not in key_dict  # RSA prime factor must NOT be present
+        assert "q" not in key_dict  # RSA prime factor must NOT be present
+
+    def test_hs256_rejects_public_jwks(self):
+        signing_key = derive_jwt_key(
+            low_entropy_material="test-secret", salt="test-salt"
+        )
+        issuer = JWTIssuer(
+            issuer="https://as.example.com",
+            audience="https://rs.example.com/mcp",
+            signing_key=signing_key,
+        )
+        with pytest.raises(ValueError, match="HS256"):
+            issuer.public_jwks()
+
+    def test_unsupported_algorithm(self, rsa_pem):
+        with pytest.raises(ValueError, match="Unsupported signing algorithm"):
+            JWTIssuer(
+                issuer="https://as.example.com",
+                audience="https://rs.example.com/mcp",
+                signing_key=rsa_pem,
+                algorithm="HS512",  # type: ignore[arg-type]
+            )

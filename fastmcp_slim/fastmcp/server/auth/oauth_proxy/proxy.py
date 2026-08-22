@@ -19,6 +19,7 @@ production use with enterprise identity providers.
 from __future__ import annotations
 
 import hashlib
+import json
 import secrets
 import time
 from base64 import urlsafe_b64encode
@@ -63,6 +64,7 @@ from mcp.server.auth.settings import (
 from mcp.shared.auth import (
     OAuthClientInformationFull,
     OAuthClientMetadata,
+    OAuthMetadata,
     OAuthToken,
 )
 from pydantic import AnyHttpUrl, AnyUrl, SecretStr, ValidationError
@@ -90,6 +92,7 @@ from fastmcp.server.auth.identity_assertion import (
 )
 from fastmcp.server.auth.jwt_issuer import (
     JWTIssuer,
+    JWTSigningAlgorithm,
     derive_jwt_key,
 )
 from fastmcp.server.auth.oauth_proxy.consent import ConsentMixin
@@ -133,6 +136,18 @@ _REFRESH_LOCK_CACHE_SIZE = 10_000
 _pending_application_type: ContextVar[Literal["web", "native"] | None] = ContextVar(
     "_pending_application_type", default=None
 )
+
+
+class _ProxyOAuthMetadata(OAuthMetadata):
+    """OAuthMetadata with ``jwks_uri`` for asymmetric token signing.
+
+    RFC 8414 §2 defines ``jwks_uri`` as a standard authorization server
+    metadata parameter, but the SDK's model does not yet include it. This
+    subclass fills the gap so split-process deployments can discover the
+    proxy's public key set via standard metadata discovery.
+    """
+
+    jwks_uri: AnyHttpUrl | None = None
 
 
 class _ApplicationTypeRegistrationHandler:
@@ -331,6 +346,8 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
         client_storage: AsyncKeyValue | None = None,
         # JWT signing key
         jwt_signing_key: str | bytes | None = None,
+        # JWT signing algorithm
+        jwt_signing_algorithm: JWTSigningAlgorithm = "HS256",
         # Consent screen configuration
         require_authorization_consent: bool | Literal["remember", "external"] = True,
         consent_csp_policy: str | None = None,
@@ -389,6 +406,12 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
                 If bytes are provided, they will be used as-is.
                 If a string is provided, it will be derived into a 32-byte key using PBKDF2 (1,000,000 iterations).
                 If not provided, it will be derived from the upstream client secret using HKDF.
+            jwt_signing_algorithm: Algorithm for signing FastMCP-issued JWTs.
+                "HS256" (default) uses the symmetric key for in-process verification.
+                "RS256" or "ES256" requires ``jwt_signing_key`` to be a PEM-encoded
+                private key and publishes public JWKS at ``/.well-known/jwks.json``
+                so separate resource servers can verify tokens without holding
+                the minting key. HS256 does not publish JWKS (no public half).
             require_authorization_consent: Consent screen behavior (default True).
                 - True: always show the consent screen before redirecting to the
                   upstream IdP. Strongest protection against AS-in-the-middle
@@ -554,7 +577,20 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
         )
         self._token_expiry_threshold_seconds: int = token_expiry_threshold_seconds
 
-        if jwt_signing_key is None:
+        if jwt_signing_algorithm in ("RS256", "ES256"):
+            # Asymmetric signing requires a PEM-encoded private key; do not
+            # derive it from a passphrase or client secret.
+            if jwt_signing_key is None:
+                raise ValueError(
+                    f"jwt_signing_key must be a PEM-encoded private key when "
+                    f"jwt_signing_algorithm is {jwt_signing_algorithm}."
+                )
+            jwt_signing_key = (
+                jwt_signing_key.encode()
+                if isinstance(jwt_signing_key, str)
+                else jwt_signing_key
+            )
+        elif jwt_signing_key is None:
             if upstream_client_secret is None:
                 raise ValueError(
                     "jwt_signing_key is required when upstream_client_secret is not provided. "
@@ -578,6 +614,7 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
 
         # Store JWT signing key for deferred JWTIssuer creation in set_mcp_path()
         self._jwt_signing_key: bytes = jwt_signing_key
+        self._jwt_signing_algorithm: JWTSigningAlgorithm = jwt_signing_algorithm
         # JWTIssuer will be created in set_mcp_path() with correct audience
         self._jwt_issuer: JWTIssuer | None = None
 
@@ -784,6 +821,7 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
             issuer=str(self.issuer_url),
             audience=str(self._resource_url),
             signing_key=self._jwt_signing_key,
+            algorithm=self._jwt_signing_algorithm,
         )
 
         logger.debug("Configured OAuth proxy for resource URL: %s", self._resource_url)
@@ -2520,6 +2558,11 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
                     revocation_options,
                     supports_identity_assertion=self._identity_assertion is not None,
                 )
+                # Upgrade the SDK metadata model so ``jwks_uri`` is available
+                # for asymmetric signing (RFC 8414 §2).
+                metadata = _ProxyOAuthMetadata.model_validate(
+                    metadata.model_dump(mode="json", exclude_none=True)
+                )
                 # `build_metadata` derives both the `issuer` field and every
                 # endpoint URL from a single argument. Endpoints must stay on
                 # `base_url` (that is where the routes are actually mounted),
@@ -2533,6 +2576,14 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
                 # always be overridden to advertise support — not just when
                 # CIMD or identity assertion is also enabled.
                 metadata.authorization_response_iss_parameter_supported = True
+                if (
+                    self._jwt_signing_algorithm in ("RS256", "ES256")
+                    and self._jwt_issuer is not None
+                    and self._jwt_issuer.is_asymmetric
+                ):
+                    metadata.jwks_uri = AnyHttpUrl(
+                        f"{str(self.base_url).rstrip('/')}/.well-known/jwks.json"
+                    )
                 # Every client the proxy authenticates at the token endpoint is
                 # public: DCR-registered and synthesized clients are stored with
                 # `token_endpoint_auth_method="none"`, and CIMD clients use
@@ -2578,7 +2629,27 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
             )
         )
 
+        # Add JWKS endpoint for asymmetric signing algorithms
+        if self._jwt_signing_algorithm in ("RS256", "ES256"):
+            custom_routes.append(
+                Route(
+                    path="/.well-known/jwks.json",
+                    endpoint=self._handle_jwks,
+                    methods=["GET"],
+                )
+            )
+
         return custom_routes
+
+    async def _handle_jwks(self, request: Request) -> Response:
+        """Serve the public JSON Web Key Set for asymmetric token verification."""
+        issuer = self.jwt_issuer
+        jwks = issuer.public_jwks()
+        return Response(
+            content=json.dumps(jwks),
+            media_type="application/json",
+            headers={"Cache-Control": "public, max-age=3600"},
+        )
 
     # -------------------------------------------------------------------------
     # IdP Callback Forwarding
