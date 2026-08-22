@@ -1,7 +1,6 @@
 """Tests for OAuth proxy client registration (DCR)."""
 
-import json
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import httpx2
 import pytest
@@ -11,12 +10,10 @@ from pydantic import AnyUrl
 from starlette.applications import Starlette
 
 from fastmcp.server.auth.cimd import CIMDDocument
-from fastmcp.server.auth.oauth_proxy import OAuthProxy
 from fastmcp.server.auth.oauth_proxy.models import (
     InvalidRedirectUriError,
     ProxyDCRClient,
 )
-from fastmcp.server.auth.ssrf import SSRFFetchResponse
 
 
 class TestOAuthProxyClientRegistration:
@@ -129,45 +126,6 @@ class TestOAuthProxyClientRegistration:
         resolved = await oauth_proxy.get_client(client_id)
 
         assert resolved == cimd_client
-        assert await oauth_proxy._client_store.get(key=client_id) is None
-
-    async def test_cimd_cache_uses_shared_client_storage(self, oauth_proxy):
-        """Proxy instances reuse CIMD metadata from their shared storage."""
-        second_proxy = OAuthProxy(
-            upstream_authorization_endpoint="https://github.com/login/oauth/authorize",
-            upstream_token_endpoint="https://github.com/login/oauth/access_token",
-            upstream_client_id="test-client-id",
-            upstream_client_secret="test-client-secret",
-            token_verifier=oauth_proxy._token_validator,
-            base_url="https://myserver.com",
-            redirect_path="/auth/callback",
-            jwt_signing_key="test-secret",
-            client_storage=oauth_proxy._client_storage,
-        )
-        client_id = "https://example.com/shared-client.json"
-        response = SSRFFetchResponse(
-            content=json.dumps(
-                {
-                    "client_id": client_id,
-                    "redirect_uris": ["http://localhost:3000/callback"],
-                }
-            ).encode(),
-            status_code=200,
-            headers={"cache-control": "max-age=3600"},
-        )
-        fetch = AsyncMock(return_value=response)
-
-        with patch(
-            "fastmcp.server.auth.cimd.ssrf_safe_fetch_response",
-            new=fetch,
-        ):
-            first = await oauth_proxy.get_client(client_id)
-            second = await second_proxy.get_client(client_id)
-
-        assert isinstance(first, ProxyDCRClient)
-        assert isinstance(second, ProxyDCRClient)
-        assert first.cimd_document == second.cimd_document
-        fetch.assert_awaited_once()
         assert await oauth_proxy._client_store.get(key=client_id) is None
 
     async def test_legacy_persisted_cimd_client_is_removed(self, oauth_proxy):

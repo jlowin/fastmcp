@@ -17,7 +17,6 @@ This module provides:
 from __future__ import annotations
 
 import base64
-import hashlib
 import json
 import time
 from collections.abc import Mapping
@@ -29,9 +28,6 @@ from urllib.parse import urlparse
 
 from joserfc import jwk
 from joserfc.errors import JoseError
-from key_value.aio.adapters.pydantic import PydanticAdapter
-from key_value.aio.errors import BaseKeyValueError
-from key_value.aio.protocols import AsyncKeyValue
 from pydantic import AnyHttpUrl, BaseModel, Field, field_validator
 
 from fastmcp.server.auth.redirect_validation import matches_allowed_pattern
@@ -175,7 +171,8 @@ class CIMDFetchError(Exception):
     """Raised when CIMD document fetching fails."""
 
 
-class _CIMDCacheEntry(BaseModel):
+@dataclass
+class _CIMDCacheEntry:
     """Cached CIMD document and associated HTTP cache metadata."""
 
     doc: CIMDDocument
@@ -184,14 +181,6 @@ class _CIMDCacheEntry(BaseModel):
     expires_at: float
     freshness_lifetime: float
     must_revalidate: bool
-
-
-class _CIMDCacheSlot(BaseModel):
-    """One entry in the fixed-size shared CIMD cache."""
-
-    client_id_url: str
-    entry: _CIMDCacheEntry
-    stored_at: float = 0
 
 
 @dataclass
@@ -217,173 +206,36 @@ class CIMDFetcher:
 
     # Maximum response size (bytes)
     MAX_RESPONSE_SIZE = 5120  # 5KB
-    # Maximum number of distinct client documents retained in either cache layer
+    # Maximum number of distinct client documents retained in the process cache
     MAX_CACHE_SIZE = 100
     # Default cache TTL (seconds)
     DEFAULT_CACHE_TTL_SECONDS = 3600
-    SHARED_CACHE_COLLECTION = "mcp-cimd-cache"
-    SHARED_CACHE_KEY_PREFIX = "slot-"
 
     def __init__(
         self,
         timeout: float = 10.0,
-        cache_storage: AsyncKeyValue | None = None,
     ):
         """Initialize the CIMD fetcher.
 
         Args:
             timeout: HTTP request timeout in seconds (default 10.0)
-            cache_storage: Optional shared storage for fixed cache slots
         """
         self.timeout = timeout
         self._cache: dict[str, _CIMDCacheEntry] = {}
-        self._shared_cache: PydanticAdapter[_CIMDCacheSlot] | None = None
-        if cache_storage is not None:
-            self._shared_cache = PydanticAdapter[_CIMDCacheSlot](
-                key_value=cache_storage,
-                pydantic_model=_CIMDCacheSlot,
-                default_collection=self.SHARED_CACHE_COLLECTION,
-                raise_on_validation_error=True,
-            )
 
-    def _store_local_cache_entry(
+    def _store_cache_entry(
         self,
         client_id_url: str,
         entry: _CIMDCacheEntry,
     ) -> None:
         """Store a document in the bounded process-local cache."""
-        self._store_bounded_entry(self._cache, client_id_url, entry)
+        self._cache[client_id_url] = entry
+        while len(self._cache) > self.MAX_CACHE_SIZE:
+            del self._cache[next(iter(self._cache))]
 
-    def _store_bounded_entry(
-        self,
-        entries: dict[str, _CIMDCacheEntry],
-        client_id_url: str,
-        entry: _CIMDCacheEntry,
-    ) -> None:
-        """Store an entry with FIFO eviction at the configured capacity."""
-        entries[client_id_url] = entry
-        while len(entries) > self.MAX_CACHE_SIZE:
-            oldest_url = next(iter(entries))
-            del entries[oldest_url]
-
-    def _shared_cache_slot(self, client_id_url: str) -> int:
-        """Map a client URL to its first shared-cache slot number."""
-        digest = hashlib.sha256(client_id_url.encode()).digest()
-        return int.from_bytes(digest[:8], "big") % self.MAX_CACHE_SIZE
-
-    def _shared_cache_key(self, client_id_url: str) -> str:
-        """Map a client URL to its first shared-cache slot key."""
-        return f"{self.SHARED_CACHE_KEY_PREFIX}{self._shared_cache_slot(client_id_url)}"
-
-    def _shared_cache_keys(self, client_id_url: str) -> list[str]:
-        """Return every shared-cache slot, starting with the URL's home slot."""
-        first_slot = self._shared_cache_slot(client_id_url)
-        return [
-            f"{self.SHARED_CACHE_KEY_PREFIX}{(first_slot + offset) % self.MAX_CACHE_SIZE}"
-            for offset in range(self.MAX_CACHE_SIZE)
-        ]
-
-    async def _load_shared_cache_slots(
-        self,
-        client_id_url: str,
-    ) -> list[tuple[str, _CIMDCacheSlot | None]] | None:
-        """Load the fixed shared table in URL probe order."""
-        if self._shared_cache is None:
-            return None
-
-        keys = self._shared_cache_keys(client_id_url)
-        try:
-            slots = await self._shared_cache.get_many(keys=keys)
-        except BaseKeyValueError as e:
-            logger.debug("Unable to load shared CIMD cache entries: %s", e)
-            return None
-        return list(zip(keys, slots, strict=True))
-
-    async def _get_cache_entry(
-        self,
-        client_id_url: str,
-    ) -> _CIMDCacheEntry | None:
-        """Read through the local cache to the shared bounded slots."""
-        if cached := self._cache.get(client_id_url):
-            return cached
-        if self._shared_cache is None:
-            return None
-
-        slots = await self._load_shared_cache_slots(client_id_url)
-        if slots is None:
-            return None
-
-        for _, slot in slots:
-            if slot is not None and slot.client_id_url == client_id_url:
-                self._store_local_cache_entry(client_id_url, slot.entry)
-                return slot.entry
-        return None
-
-    async def _store_cache_entry(
-        self,
-        client_id_url: str,
-        entry: _CIMDCacheEntry,
-    ) -> None:
-        """Store a document in both bounded local and shared caches."""
-        self._store_local_cache_entry(client_id_url, entry)
-        if self._shared_cache is None:
-            return
-
-        slots = await self._load_shared_cache_slots(client_id_url)
-        if slots is None:
-            return
-
-        target_key: str | None = None
-        stored_at = time.time()
-        for key, slot in slots:
-            if slot is not None and slot.client_id_url == client_id_url:
-                target_key = key
-                stored_at = slot.stored_at
-                break
-
-        if target_key is None:
-            target_key = next((key for key, slot in slots if slot is None), None)
-
-        if target_key is None:
-            target_key = min(
-                ((key, slot) for key, slot in slots if slot is not None),
-                key=lambda item: item[1].stored_at,
-            )[0]
-
-        try:
-            await self._shared_cache.put(
-                key=target_key,
-                value=_CIMDCacheSlot(
-                    client_id_url=client_id_url,
-                    entry=entry,
-                    stored_at=stored_at,
-                ),
-            )
-        except BaseKeyValueError as e:
-            logger.debug("Unable to store shared CIMD cache entry: %s", e)
-
-    async def _remove_cache_entry(self, client_id_url: str) -> None:
-        """Remove a document from both local and shared caches."""
+    def _remove_cache_entry(self, client_id_url: str) -> None:
+        """Remove a document from the process-local cache."""
         self._cache.pop(client_id_url, None)
-        if self._shared_cache is None:
-            return
-
-        slots = await self._load_shared_cache_slots(client_id_url)
-        if slots is None:
-            return
-
-        matching_keys = [
-            key
-            for key, slot in slots
-            if slot is not None and slot.client_id_url == client_id_url
-        ]
-        if not matching_keys:
-            return
-
-        try:
-            await self._shared_cache.delete_many(keys=matching_keys)
-        except BaseKeyValueError as e:
-            logger.debug("Unable to remove shared CIMD cache entry: %s", e)
 
     def _parse_cache_policy(
         self, headers: Mapping[str, str], now: float
@@ -480,7 +332,7 @@ class CIMDFetcher:
             CIMDValidationError: If document is invalid or URL blocked
             CIMDFetchError: If document cannot be fetched
         """
-        cached = await self._get_cache_entry(client_id_url)
+        cached = self._cache.get(client_id_url)
         now = time.time()
         request_headers: dict[str, str] | None = None
         allowed_status_codes = {200}
@@ -534,7 +386,7 @@ class CIMDFetcher:
                 )
 
             if not policy.no_store:
-                await self._store_cache_entry(
+                self._store_cache_entry(
                     client_id_url,
                     _CIMDCacheEntry(
                         doc=cached.doc,
@@ -546,7 +398,7 @@ class CIMDFetcher:
                     ),
                 )
             else:
-                await self._remove_cache_entry(client_id_url)
+                self._remove_cache_entry(client_id_url)
             return cached.doc
 
         now = time.time()
@@ -585,7 +437,7 @@ class CIMDFetcher:
         )
 
         if not policy.no_store:
-            await self._store_cache_entry(
+            self._store_cache_entry(
                 client_id_url,
                 _CIMDCacheEntry(
                     doc=doc,
@@ -597,7 +449,7 @@ class CIMDFetcher:
                 ),
             )
         else:
-            await self._remove_cache_entry(client_id_url)
+            self._remove_cache_entry(client_id_url)
 
         return doc
 
@@ -866,7 +718,6 @@ class CIMDClientManager:
         enable_cimd: bool = True,
         default_scope: str = "",
         allowed_redirect_uri_patterns: list[str] | None = None,
-        cache_storage: AsyncKeyValue | None = None,
     ):
         """Initialize CIMD client manager.
 
@@ -874,13 +725,12 @@ class CIMDClientManager:
             enable_cimd: Whether CIMD support is enabled
             default_scope: Default scope for CIMD clients if not specified in document
             allowed_redirect_uri_patterns: Allowed redirect URI patterns (proxy's config)
-            cache_storage: Optional shared storage for CIMD cache metadata
         """
         self.enabled = enable_cimd
         self.default_scope = default_scope
         self.allowed_redirect_uri_patterns = allowed_redirect_uri_patterns
 
-        self._fetcher = CIMDFetcher(cache_storage=cache_storage)
+        self._fetcher = CIMDFetcher()
         self._assertion_validator = CIMDAssertionValidator()
         self.logger = get_logger(__name__)
 
