@@ -18,11 +18,7 @@ from fastmcp.utilities.authorization import (
 )
 
 if TYPE_CHECKING:
-    from .identity_assertion import (
-        IdentityAssertion as IdentityAssertion,
-        InMemoryJTIReplayStore as InMemoryJTIReplayStore,
-        JTIReplayStore as JTIReplayStore,
-    )
+    from .identity_assertion import IdentityAssertion as IdentityAssertion
     from .oauth_proxy import OAuthProxy as OAuthProxy
     from .oidc_proxy import OIDCProxy as OIDCProxy
     from .providers.debug import DebugTokenVerifier as DebugTokenVerifier
@@ -54,14 +50,6 @@ def __getattr__(name: str) -> object:
         from .identity_assertion import IdentityAssertion
 
         return IdentityAssertion
-    if name == "InMemoryJTIReplayStore":
-        from .identity_assertion import InMemoryJTIReplayStore
-
-        return InMemoryJTIReplayStore
-    if name == "JTIReplayStore":
-        from .identity_assertion import JTIReplayStore
-
-        return JTIReplayStore
     if name == "OAuthProxy":
         from .oauth_proxy import OAuthProxy
 
@@ -80,8 +68,6 @@ __all__ = [
     "AuthProvider",
     "DebugTokenVerifier",
     "IdentityAssertion",
-    "InMemoryJTIReplayStore",
-    "JTIReplayStore",
     "JWTVerifier",
     "MultiAuth",
     "OAuthProvider",

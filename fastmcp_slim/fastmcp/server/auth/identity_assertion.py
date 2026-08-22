@@ -27,12 +27,18 @@ This module provides:
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import time
-from threading import Lock
-from typing import TYPE_CHECKING, Annotated, Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Annotated, Any
 from urllib.parse import urlparse, urlunparse
 
 import httpx2
+from key_value.aio.protocols import AsyncKeyValue
+from key_value.aio.protocols.key_value import (
+    AsyncEnumerateKeysProtocol,
+    AsyncKeyValueProtocol,
+)
+from key_value.aio.stores.memory import MemoryStore
 from pydantic import BaseModel, Field, PlainValidator, field_validator
 
 from fastmcp.utilities.auth import decode_jwt_header
@@ -57,79 +63,21 @@ SUPPORTED_ASSERTION_ALGORITHMS = frozenset(
     {"RS256", "RS384", "RS512", "PS256", "PS384", "PS512", "ES256", "ES384", "ES512"}
 )
 
+#: Collection namespace for consumed identity-assertion JTIs.
+JTI_STORE_COLLECTION = "fastmcp_identity_assertion_jti"
 
-@runtime_checkable
-class JTIReplayStore(Protocol):
-    """Atomic storage contract for consumed identity-assertion JTIs.
-
-    Implementations shared by multiple workers or replicas must perform the
-    existence check and insertion as one atomic backend operation. A separate
-    ``get`` followed by ``put`` is not sufficient: two validators could both
-    observe a missing JTI and accept the same assertion.
-    """
-
-    async def check_and_store(self, jti: str, expires_at: float) -> bool:
-        """Atomically reserve ``jti`` until ``expires_at``.
-
-        Args:
-            jti: The assertion's JWT ID.
-            expires_at: Unix timestamp after which the reservation may be removed.
-
-        Returns:
-            ``True`` when this call reserved the JTI, or ``False`` when an
-            unexpired reservation already exists.
-        """
-        ...
+#: Maximum live entries retained by the default in-process store.
+DEFAULT_JTI_STORE_MAX_SIZE = 10000
 
 
-class InMemoryJTIReplayStore:
-    """Bounded, process-local identity-assertion replay store.
-
-    This is the default store. Pass a distributed :class:`JTIReplayStore` to
-    :class:`IdentityAssertion` when replay protection must span replicas.
-    """
-
-    def __init__(self, *, max_size: int = 10000) -> None:
-        if max_size <= 0:
-            raise ValueError("max_size must be greater than zero")
-        self._entries: dict[str, float] = {}
-        self._max_size = max_size
-        self._lock = Lock()
-
-    async def check_and_store(self, jti: str, expires_at: float) -> bool:
-        with self._lock:
-            now = time.time()
-            existing_expiry = self._entries.get(jti)
-            if existing_expiry is not None and existing_expiry > now:
-                return False
-
-            if existing_expiry is not None:
-                del self._entries[jti]
-
-            if len(self._entries) >= self._max_size:
-                self._entries = {
-                    stored_jti: stored_expiry
-                    for stored_jti, stored_expiry in self._entries.items()
-                    if stored_expiry > now
-                }
-                if len(self._entries) >= self._max_size:
-                    logger.warning(
-                        "ID-JAG jti replay store at capacity, possible attack"
-                    )
-                    raise RuntimeError("JTI replay store is at capacity")
-
-            self._entries[jti] = expires_at
-            return True
-
-
-def _validate_jti_store(value: object) -> JTIReplayStore | None:
-    if value is not None and not isinstance(value, JTIReplayStore):
-        raise ValueError("jti_store must implement check_and_store(jti, expires_at)")
+def _validate_jti_store(value: object) -> AsyncKeyValue | None:
+    if value is not None and not isinstance(value, AsyncKeyValueProtocol):
+        raise ValueError("jti_store must implement AsyncKeyValue")
     return value
 
 
-_JTIReplayStoreField = Annotated[
-    JTIReplayStore | None,
+_JTIStoreField = Annotated[
+    AsyncKeyValue | None,
     PlainValidator(_validate_jti_store, json_schema_input_type=Any),
 ]
 
@@ -215,13 +163,13 @@ class IdentityAssertion(BaseModel):
             "this is intentionally short and no refresh token is issued."
         ),
     )
-    jti_store: _JTIReplayStoreField = Field(
+    jti_store: _JTIStoreField = Field(
         default=None,
         exclude=True,
         repr=False,
         description=(
-            "Optional atomic replay store shared by all server replicas. The "
-            "default is a bounded per-process InMemoryJTIReplayStore."
+            "Optional AsyncKeyValue store for replay state shared by all server "
+            "replicas. The default is a bounded per-process MemoryStore."
         ),
     )
 
@@ -283,9 +231,13 @@ class IdentityAssertionValidator:
     ``sub``, and ``jti`` replay rejection.
 
     Seen ``jti`` values are retained until the assertion would expire. The
-    default :class:`InMemoryJTIReplayStore` is bounded and process-local; a
-    distributed store can be supplied for atomic replay protection across
-    horizontally-scaled workers or replicas.
+    default :class:`~key_value.aio.stores.memory.MemoryStore` is bounded and
+    process-local; any :class:`~key_value.aio.protocols.AsyncKeyValue` store can
+    be supplied to share replay state across workers or replicas.
+
+    ``AsyncKeyValue`` does not provide a conditional write, so the shared-store
+    check and write are not atomic across processes. Calls through one validator
+    are serialized, but simultaneous exchanges on different replicas can race.
     """
 
     #: RFC 7523 recommends short-lived assertions; reject anything longer.
@@ -312,11 +264,18 @@ class IdentityAssertionValidator:
             base = audience.rstrip("/")
             self.audience = [base, base + "/"]
 
-        self._jti_store = (
-            config.jti_store
-            if config.jti_store is not None
-            else InMemoryJTIReplayStore()
-        )
+        self._default_jti_store_size = 0
+        if config.jti_store is None:
+            self._jti_store: AsyncKeyValue = MemoryStore(
+                max_entries_per_collection=DEFAULT_JTI_STORE_MAX_SIZE
+            )
+            self._using_default_jti_store = True
+        else:
+            self._jti_store = config.jti_store
+            self._using_default_jti_store = False
+        # This closes the get/put race within a single validator. A shared store
+        # still needs conditional-write support to close it across processes.
+        self._jti_lock = asyncio.Lock()
         # One JWTVerifier per issuer, created lazily once the JWKS URI is known.
         self._verifiers: dict[str, JWTVerifier] = {}
         # OIDC discovery hardening: discovery runs before signature verification,
@@ -326,6 +285,54 @@ class IdentityAssertionValidator:
         self._discovery_locks: dict[str, asyncio.Lock] = {}
         self._discovery_failures: dict[str, float] = {}
         self._discovery_failure_cooldown = 30.0
+
+    @staticmethod
+    def _jti_store_key(*, issuer: str, jti: str) -> str:
+        """Build a backend-safe key scoped to the assertion issuer."""
+        value = f"{len(issuer)}:{issuer}{len(jti)}:{jti}"
+        return hashlib.sha256(value.encode()).hexdigest()
+
+    async def _ensure_default_jti_store_capacity(self) -> None:
+        """Fail closed instead of evicting an unexpired replay marker."""
+        if not self._using_default_jti_store:
+            return
+        if self._default_jti_store_size < DEFAULT_JTI_STORE_MAX_SIZE:
+            return
+
+        store = self._jti_store
+        if not isinstance(store, AsyncEnumerateKeysProtocol):
+            raise RuntimeError("Default JTI store cannot enumerate replay markers")
+        keys = await store.keys(
+            collection=JTI_STORE_COLLECTION,
+            limit=DEFAULT_JTI_STORE_MAX_SIZE,
+        )
+        self._default_jti_store_size = len(keys)
+        if self._default_jti_store_size >= DEFAULT_JTI_STORE_MAX_SIZE:
+            raise RuntimeError("JTI replay store is full")
+
+    async def _check_and_store_jti(
+        self, *, issuer: str, jti: str, expires_at: float
+    ) -> bool:
+        """Return false for a consumed JTI, otherwise retain it until expiry."""
+        key = self._jti_store_key(issuer=issuer, jti=jti)
+        async with self._jti_lock:
+            existing = await self._jti_store.get(
+                key,
+                collection=JTI_STORE_COLLECTION,
+            )
+            if existing is not None:
+                return False
+
+            await self._ensure_default_jti_store_capacity()
+            await self._jti_store.put(
+                key,
+                {"consumed": True},
+                collection=JTI_STORE_COLLECTION,
+                ttl=max(expires_at - time.time(), 1),
+            )
+            if self._using_default_jti_store:
+                self._default_jti_store_size += 1
+            return True
 
     async def _discover_jwks_uri(self, issuer: str) -> str:
         """Discover an issuer's JWKS URI via OIDC discovery.
@@ -439,7 +446,7 @@ class IdentityAssertionValidator:
         if not isinstance(unverified_claims, dict):
             raise IdentityAssertionError("Assertion payload is not a JSON object")
         iss = unverified_claims.get("iss")
-        if not iss or iss not in self.config.trusted_issuers:
+        if not isinstance(iss, str) or iss not in self.config.trusted_issuers:
             raise IdentityAssertionError(f"Untrusted assertion issuer: {iss!r}")
 
         # 3. Verify signature, iss, aud, and exp via JWTVerifier.
@@ -521,7 +528,11 @@ class IdentityAssertionValidator:
         if not jti or not isinstance(jti, str):
             raise IdentityAssertionError("Assertion must include a string jti claim")
         try:
-            stored = await self._jti_store.check_and_store(jti, exp)
+            stored = await self._check_and_store_jti(
+                issuer=iss,
+                jti=jti,
+                expires_at=exp,
+            )
         except Exception as e:
             # A replay-store outage must fail closed. Store implementations may
             # surface backend-specific errors, so normalize them at this boundary.

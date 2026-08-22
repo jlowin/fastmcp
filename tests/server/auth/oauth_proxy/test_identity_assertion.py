@@ -9,6 +9,7 @@ import asyncio
 import subprocess
 import sys
 import time
+from typing import Any
 
 import httpx2
 import pytest
@@ -17,8 +18,9 @@ from key_value.aio.stores.memory import MemoryStore
 from mcp.shared.auth import OAuthClientInformationFull
 from pydantic import AnyUrl
 
+import fastmcp.server.auth.identity_assertion as identity_assertion_module
 from fastmcp import FastMCP
-from fastmcp.server.auth import IdentityAssertion, InMemoryJTIReplayStore
+from fastmcp.server.auth import IdentityAssertion
 from fastmcp.server.auth.identity_assertion import (
     ID_JAG_GRANT_PROFILE,
     ID_JAG_TYP,
@@ -36,24 +38,10 @@ JWKS_URI = "https://login.acme-corp.com/jwks"
 RESOURCE = f"{BASE_URL}/mcp"
 
 
-class SharedJTIStore:
-    """Minimal atomic replay store shared by independent proxy instances."""
-
-    def __init__(self) -> None:
-        self._expires_at: dict[str, float] = {}
-        self._lock = asyncio.Lock()
-
-    async def check_and_store(self, jti: str, expires_at: float) -> bool:
-        async with self._lock:
-            now = time.time()
-            if self._expires_at.get(jti, 0) > now:
-                return False
-            self._expires_at[jti] = expires_at
-            return True
-
-
-class FailingJTIStore:
-    async def check_and_store(self, jti: str, expires_at: float) -> bool:
+class FailingJTIStore(MemoryStore):
+    async def get(
+        self, key: str, *, collection: str | None = None
+    ) -> dict[str, Any] | None:
         raise ConnectionError("store unavailable")
 
 
@@ -203,8 +191,17 @@ class TestIdentityAssertionConfig:
         with pytest.raises(ValueError):
             IdentityAssertion(trusted_issuers=["  "])
 
+    def test_accepts_async_key_value_jti_store(self):
+        store = MemoryStore()
+        config = IdentityAssertion(
+            trusted_issuers=[ISSUER],
+            jti_store=store,
+        )
+
+        assert config.jti_store is store
+
     def test_rejects_invalid_jti_store(self):
-        with pytest.raises(ValueError, match="must implement check_and_store"):
+        with pytest.raises(ValueError, match="must implement AsyncKeyValue"):
             IdentityAssertion(
                 trusted_issuers=[ISSUER],
                 jti_store=object(),
@@ -253,25 +250,6 @@ class TestIdentityAssertionConfig:
         )
         assert result.returncode == 0, result.stderr
         assert "OK" in result.stdout
-
-
-class TestInMemoryJTIReplayStore:
-    async def test_check_and_store_is_atomic(self):
-        store = InMemoryJTIReplayStore()
-        expires_at = time.time() + 120
-
-        results = await asyncio.gather(
-            *(store.check_and_store("same-jti", expires_at) for _ in range(20))
-        )
-
-        assert results.count(True) == 1
-        assert results.count(False) == 19
-
-    async def test_expired_jti_can_be_stored_again(self):
-        store = InMemoryJTIReplayStore()
-
-        assert await store.check_and_store("expired-jti", time.time() - 1)
-        assert await store.check_and_store("expired-jti", time.time() + 120)
 
 
 class TestMetadataAdvertisement:
@@ -552,10 +530,24 @@ class TestValidationMatrix:
         assert second.status_code == 401
         assert second.json()["error"] == "invalid_grant"
 
+    async def test_concurrent_replay_rejected_within_one_proxy(
+        self, idp_key: RSAKeyPair, config: IdentityAssertion
+    ):
+        proxy = _make_proxy(config)
+        assertion = _mint_id_jag(idp_key, jti="concurrent-replay")
+        await _register_client(proxy)
+
+        responses = await asyncio.gather(
+            *(_post_token(proxy, assertion, register=False) for _ in range(10))
+        )
+
+        assert [response.status_code for response in responses].count(200) == 1
+        assert [response.status_code for response in responses].count(401) == 9
+
     async def test_replayed_jti_rejected_across_proxy_instances(
         self, idp_key: RSAKeyPair, httpx_mock: HTTPXMock
     ):
-        shared_store = SharedJTIStore()
+        shared_store = MemoryStore()
         config = IdentityAssertion(
             trusted_issuers=[ISSUER],
             jwks_uris={ISSUER: JWKS_URI},
@@ -840,20 +832,27 @@ class TestValidationMatrix:
 
         assert resp.status_code == 200
 
-    async def test_jti_cache_does_not_grow_past_capacity(self, idp_key: RSAKeyPair):
+    async def test_jti_cache_does_not_grow_past_capacity(
+        self, idp_key: RSAKeyPair, monkeypatch: pytest.MonkeyPatch
+    ):
         # Once the default store is full of still-valid entries, further fresh
         # assertions fail closed without growing the store.
-        store = InMemoryJTIReplayStore(max_size=2)
+        monkeypatch.setattr(
+            identity_assertion_module,
+            "DEFAULT_JTI_STORE_MAX_SIZE",
+            2,
+        )
         proxy = _make_proxy(
             IdentityAssertion(
                 trusted_issuers=[ISSUER],
                 jwks_uris={ISSUER: JWKS_URI},
-                jti_store=store,
             )
         )
-        future = time.time() + 120
-        assert await store.check_and_store("filler-a", future)
-        assert await store.check_and_store("filler-b", future)
+
+        for i in range(2):
+            assertion = _mint_id_jag(idp_key, jti=f"accepted-{i}")
+            resp = await _post_token(proxy, assertion)
+            assert resp.status_code == 200
 
         for i in range(3):
             assertion = _mint_id_jag(idp_key, jti=f"fresh-{i}")

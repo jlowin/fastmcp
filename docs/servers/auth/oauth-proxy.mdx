@@ -758,51 +758,32 @@ identity_assertion=IdentityAssertion(
 
 The subject asserted in the ID-JAG flows into the normal FastMCP auth context. Tools read it through `get_access_token()` exactly as they would for any other token, because the proxy issues the access token through its own token factory.
 
-By default, replay protection uses a bounded `InMemoryJTIReplayStore`, so each
-server process tracks its own consumed assertions. A horizontally-scaled
-deployment should pass a shared implementation of `JTIReplayStore` as
-`IdentityAssertion(jti_store=...)`. Its `check_and_store(jti, expires_at)` method
-must atomically reserve a previously unseen JTI until the supplied Unix
-timestamp and return `False` if an unexpired reservation already exists. Redis
-`SET ... NX` and database unique-insert operations are examples of suitable
-backend primitives. A generic key-value `get` followed by `put` is not atomic
-and does not provide replay protection under concurrent requests.
+By default, replay protection uses a bounded `MemoryStore`, so each server
+process tracks its own consumed assertions. A horizontally-scaled deployment
+should pass a shared `AsyncKeyValue` implementation as
+`IdentityAssertion(jti_store=...)`.
 
-For example, with `py-key-value-aio[redis]` installed, a Redis-backed store can
-use one atomic `SET` with the `NX` and `PX` options:
+For example, with `py-key-value-aio[redis]` installed, use its Redis store:
 
 ```python
-import math
-import time
+from key_value.aio.stores.redis import RedisStore
 
-from redis.asyncio import Redis
-
-from fastmcp.server.auth import IdentityAssertion, JTIReplayStore
-
-
-class RedisJTIReplayStore:
-    def __init__(self, redis: Redis) -> None:
-        self.redis = redis
-
-    async def check_and_store(self, jti: str, expires_at: float) -> bool:
-        ttl_ms = max(1, math.ceil((expires_at - time.time()) * 1000))
-        stored = await self.redis.set(
-            f"fastmcp:id-jag:{jti}",
-            "consumed",
-            nx=True,
-            px=ttl_ms,
-        )
-        return bool(stored)
-
-
-redis = Redis.from_url("redis://localhost:6379")
-jti_store: JTIReplayStore = RedisJTIReplayStore(redis)
+from fastmcp.server.auth import IdentityAssertion
 
 identity_assertion = IdentityAssertion(
     trusted_issuers=["https://login.acme-corp.com"],
-    jti_store=jti_store,
+    jti_store=RedisStore(url="redis://localhost:6379"),
 )
 ```
+
+<Warning>
+`AsyncKeyValue` currently exposes `get` and `put`, but no conditional insert.
+FastMCP serializes exchanges within one server process, while replicas sharing a
+store perform a non-atomic `get` followed by `put`. Simultaneous exchanges of
+the same assertion on different replicas can therefore race and both succeed.
+Keep assertions short-lived; the shared store still rejects ordinary sequential
+replay and closes the much larger process-local replay window.
+</Warning>
 
 <Warning>
 The same distributed-store option does not apply to revocation of already-issued
