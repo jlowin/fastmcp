@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import json
 import time
+from collections.abc import Sequence
+from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -346,6 +348,83 @@ class TestCIMDFetcherHTTP:
         keys = await storage.keys(collection=fetcher.SHARED_CACHE_COLLECTION)
         assert len(keys) == 2
 
+    async def test_shared_cache_preserves_documents_with_colliding_home_slots(self):
+        """Hash collisions use another bounded slot instead of evicting a document."""
+        storage = MemoryStore()
+        writer = CIMDFetcher(cache_storage=storage)
+        urls = [
+            "https://example.com/client-2.json",
+            "https://example.com/client-8.json",
+        ]
+
+        assert writer._shared_cache_key(urls[0]) == writer._shared_cache_key(urls[1])
+
+        async def fake_fetch(url: str, **kwargs) -> SSRFFetchResponse:
+            return SSRFFetchResponse(
+                content=json.dumps(
+                    {
+                        "client_id": url,
+                        "redirect_uris": ["http://localhost:3000/callback"],
+                    }
+                ).encode(),
+                status_code=200,
+                headers={"cache-control": "max-age=3600"},
+            )
+
+        fetch = AsyncMock(side_effect=fake_fetch)
+        with patch(
+            "fastmcp.server.auth.cimd.ssrf_safe_fetch_response",
+            new=fetch,
+        ):
+            for url in urls:
+                await writer.fetch(url)
+
+            reader = CIMDFetcher(cache_storage=storage)
+            for url in urls:
+                await reader.fetch(url)
+
+        assert fetch.await_count == 2
+
+    async def test_no_store_removes_only_matching_colliding_document(self):
+        """A no-store response does not remove another URL's shared entry."""
+        storage = MemoryStore()
+        writer = CIMDFetcher(cache_storage=storage)
+        urls = [
+            "https://example.com/client-2.json",
+            "https://example.com/client-8.json",
+        ]
+        responses = {
+            urls[0]: ["max-age=0", "no-store"],
+            urls[1]: ["max-age=3600"],
+        }
+
+        async def fake_fetch(url: str, **kwargs) -> SSRFFetchResponse:
+            cache_control = responses[url].pop(0)
+            return SSRFFetchResponse(
+                content=json.dumps(
+                    {
+                        "client_id": url,
+                        "redirect_uris": ["http://localhost:3000/callback"],
+                    }
+                ).encode(),
+                status_code=200,
+                headers={"cache-control": cache_control},
+            )
+
+        fetch = AsyncMock(side_effect=fake_fetch)
+        with patch(
+            "fastmcp.server.auth.cimd.ssrf_safe_fetch_response",
+            new=fetch,
+        ):
+            for url in urls:
+                await writer.fetch(url)
+            await writer.fetch(urls[0])
+
+            reader = CIMDFetcher(cache_storage=storage)
+            await reader.fetch(urls[1])
+
+        assert fetch.await_count == 3
+
     async def test_concurrent_shared_cache_updates_preserve_both_documents(self):
         """Concurrent workers cannot overwrite unrelated cached documents."""
         storage = MemoryStore()
@@ -376,15 +455,15 @@ class TestCIMDFetcherHTTP:
                 headers={"cache-control": "max-age=3600"},
             )
 
-        original_get = storage.get
+        original_get_many = storage.get_many
         cache_reads = 0
         both_cache_reads_loaded = asyncio.Event()
 
-        async def coordinated_get(
-            key: str, *, collection: str | None = None
-        ) -> dict | None:
+        async def coordinated_get_many(
+            keys: Sequence[str], *, collection: str | None = None
+        ) -> list[dict[str, Any] | None]:
             nonlocal cache_reads
-            result = await original_get(key=key, collection=collection)
+            result = await original_get_many(keys=keys, collection=collection)
             cache_reads += 1
             if cache_reads == 4:
                 both_cache_reads_loaded.set()
@@ -396,8 +475,8 @@ class TestCIMDFetcherHTTP:
         with (
             patch.object(
                 storage,
-                "get",
-                new=AsyncMock(side_effect=coordinated_get),
+                "get_many",
+                new=AsyncMock(side_effect=coordinated_get_many),
             ),
             patch(
                 "fastmcp.server.auth.cimd.ssrf_safe_fetch_response",
@@ -447,22 +526,22 @@ class TestCIMDFetcherHTTP:
             for url in stored_urls:
                 await fetcher.fetch(url)
 
-            original_get = storage.get
+            original_get_many = storage.get_many
             reads = 0
 
-            async def fail_second_read(
-                key: str, *, collection: str | None = None
-            ) -> dict | None:
+            async def fail_second_read_batch(
+                keys: Sequence[str], *, collection: str | None = None
+            ) -> list[dict[str, Any] | None]:
                 nonlocal reads
                 reads += 1
                 if reads == 2:
                     raise StoreConnectionError("temporary read failure")
-                return await original_get(key=key, collection=collection)
+                return await original_get_many(keys=keys, collection=collection)
 
             with patch.object(
                 storage,
-                "get",
-                new=AsyncMock(side_effect=fail_second_read),
+                "get_many",
+                new=AsyncMock(side_effect=fail_second_read_batch),
             ):
                 await fetcher.fetch(error_url)
 

@@ -191,6 +191,7 @@ class _CIMDCacheSlot(BaseModel):
 
     client_id_url: str
     entry: _CIMDCacheEntry
+    stored_at: float = 0
 
 
 @dataclass
@@ -265,11 +266,38 @@ class CIMDFetcher:
             oldest_url = next(iter(entries))
             del entries[oldest_url]
 
-    def _shared_cache_key(self, client_id_url: str) -> str:
-        """Map a client URL to one of the fixed shared-cache slots."""
+    def _shared_cache_slot(self, client_id_url: str) -> int:
+        """Map a client URL to its first shared-cache slot number."""
         digest = hashlib.sha256(client_id_url.encode()).digest()
-        slot = int.from_bytes(digest[:8], "big") % self.MAX_CACHE_SIZE
-        return f"{self.SHARED_CACHE_KEY_PREFIX}{slot}"
+        return int.from_bytes(digest[:8], "big") % self.MAX_CACHE_SIZE
+
+    def _shared_cache_key(self, client_id_url: str) -> str:
+        """Map a client URL to its first shared-cache slot key."""
+        return f"{self.SHARED_CACHE_KEY_PREFIX}{self._shared_cache_slot(client_id_url)}"
+
+    def _shared_cache_keys(self, client_id_url: str) -> list[str]:
+        """Return every shared-cache slot, starting with the URL's home slot."""
+        first_slot = self._shared_cache_slot(client_id_url)
+        return [
+            f"{self.SHARED_CACHE_KEY_PREFIX}{(first_slot + offset) % self.MAX_CACHE_SIZE}"
+            for offset in range(self.MAX_CACHE_SIZE)
+        ]
+
+    async def _load_shared_cache_slots(
+        self,
+        client_id_url: str,
+    ) -> list[tuple[str, _CIMDCacheSlot | None]] | None:
+        """Load the fixed shared table in URL probe order."""
+        if self._shared_cache is None:
+            return None
+
+        keys = self._shared_cache_keys(client_id_url)
+        try:
+            slots = await self._shared_cache.get_many(keys=keys)
+        except BaseKeyValueError as e:
+            logger.debug("Unable to load shared CIMD cache entries: %s", e)
+            return None
+        return list(zip(keys, slots, strict=True))
 
     async def _get_cache_entry(
         self,
@@ -281,18 +309,15 @@ class CIMDFetcher:
         if self._shared_cache is None:
             return None
 
-        try:
-            slot = await self._shared_cache.get(
-                key=self._shared_cache_key(client_id_url)
-            )
-        except BaseKeyValueError as e:
-            logger.debug("Unable to load shared CIMD cache entry: %s", e)
-            return None
-        if slot is None or slot.client_id_url != client_id_url:
+        slots = await self._load_shared_cache_slots(client_id_url)
+        if slots is None:
             return None
 
-        self._store_local_cache_entry(client_id_url, slot.entry)
-        return slot.entry
+        for _, slot in slots:
+            if slot is not None and slot.client_id_url == client_id_url:
+                self._store_local_cache_entry(client_id_url, slot.entry)
+                return slot.entry
+        return None
 
     async def _store_cache_entry(
         self,
@@ -304,12 +329,34 @@ class CIMDFetcher:
         if self._shared_cache is None:
             return
 
+        slots = await self._load_shared_cache_slots(client_id_url)
+        if slots is None:
+            return
+
+        target_key: str | None = None
+        stored_at = time.time()
+        for key, slot in slots:
+            if slot is not None and slot.client_id_url == client_id_url:
+                target_key = key
+                stored_at = slot.stored_at
+                break
+
+        if target_key is None:
+            target_key = next((key for key, slot in slots if slot is None), None)
+
+        if target_key is None:
+            target_key = min(
+                ((key, slot) for key, slot in slots if slot is not None),
+                key=lambda item: item[1].stored_at,
+            )[0]
+
         try:
             await self._shared_cache.put(
-                key=self._shared_cache_key(client_id_url),
+                key=target_key,
                 value=_CIMDCacheSlot(
                     client_id_url=client_id_url,
                     entry=entry,
+                    stored_at=stored_at,
                 ),
             )
         except BaseKeyValueError as e:
@@ -321,8 +368,20 @@ class CIMDFetcher:
         if self._shared_cache is None:
             return
 
+        slots = await self._load_shared_cache_slots(client_id_url)
+        if slots is None:
+            return
+
+        matching_keys = [
+            key
+            for key, slot in slots
+            if slot is not None and slot.client_id_url == client_id_url
+        ]
+        if not matching_keys:
+            return
+
         try:
-            await self._shared_cache.delete(key=self._shared_cache_key(client_id_url))
+            await self._shared_cache.delete_many(keys=matching_keys)
         except BaseKeyValueError as e:
             logger.debug("Unable to remove shared CIMD cache entry: %s", e)
 
