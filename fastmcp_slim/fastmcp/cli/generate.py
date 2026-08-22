@@ -38,6 +38,23 @@ def _is_simple_type(schema: dict[str, Any]) -> bool:
     return schema_type in _SIMPLE_TYPES
 
 
+def _scalar_enum_type(schema: dict[str, Any]) -> str | None:
+    """Map an enum-valued schema to the scalar type of its values.
+
+    Returns ``None`` when the schema has no enum, or when the enum mixes
+    value kinds (or contains non-scalar values), in which case the caller
+    falls back to JSON parsing.
+    """
+    values = schema.get("enum")
+    if not isinstance(values, list) or not values:
+        return None
+    kinds = {type(value).__name__ for value in values}
+    kind_map = {"str": "str", "int": "int", "float": "float", "bool": "bool"}
+    if len(kinds) == 1 and (py_type := kind_map.get(kinds.pop())):
+        return py_type
+    return None
+
+
 def _is_simple_array(schema: dict[str, Any]) -> tuple[bool, str | None]:
     """Check if schema is an array of simple types.
 
@@ -76,6 +93,11 @@ def _schema_to_python_type(schema: dict[str, Any]) -> tuple[str, bool]:
     if is_simple_arr:
         return f"list[{item_type}]", False
 
+    # Enum of scalar values - pass through like its scalar type
+    enum_type = _scalar_enum_type(schema)
+    if enum_type is not None:
+        return enum_type, False
+
     # Check for simple type
     if _is_simple_type(schema):
         schema_type = schema.get("type", "string")
@@ -99,6 +121,23 @@ def _schema_to_python_type(schema: dict[str, Any]) -> tuple[str, bool]:
             "null": "None",
         }
         return type_map.get(schema_type, "str"), False
+
+    # Combinator schemas (anyOf/oneOf): pydantic emits these for unions and
+    # Optional[T] parameters. When every branch resolves without JSON
+    # parsing, the value can be passed through as-is.
+    parts: list[str] = []
+    for combinator in ("anyOf", "oneOf"):
+        branches = schema.get(combinator)
+        if not isinstance(branches, list) or not branches:
+            continue
+        for branch in branches:
+            branch_type, needs_json = _schema_to_python_type(branch)
+            if needs_json:
+                return "str", True
+            for token in branch_type.split(" | "):
+                if token not in parts:
+                    parts.append(token)
+        return " | ".join(parts), False
 
     # Complex type - needs JSON parsing
     return "str", True
@@ -220,12 +259,19 @@ def _tool_function_source(tool: mcp_types.Tool) -> str:
                     annotation = f'Annotated[{py_type}, cyclopts.Parameter(help="{help_escaped}")]'
                     param_lines.append(f"    {safe_name}: {annotation} = {default!r},")
             else:
-                # For list types, default to empty list; others default to None
-                if py_type.startswith("list["):
+                # For plain list types, default to an empty list; anything
+                # else defaults to None (without appending "| None" again
+                # when the resolved type already includes it).
+                if py_type.startswith("list[") and "|" not in py_type:
                     annotation = f'Annotated[{py_type}, cyclopts.Parameter(help="{help_escaped}")]'
                     param_lines.append(f"    {safe_name}: {annotation} = [],")
                 else:
-                    annotation = f'Annotated[{py_type} | None, cyclopts.Parameter(help="{help_escaped}")]'
+                    base_type = (
+                        py_type
+                        if "None" in py_type.split(" | ")
+                        else f"{py_type} | None"
+                    )
+                    annotation = f'Annotated[{base_type}, cyclopts.Parameter(help="{help_escaped}")]'
                     param_lines.append(f"    {safe_name}: {annotation} = None,")
 
         call_args.append(f"{prop_name!r}: {safe_name}")

@@ -82,6 +82,77 @@ class TestSchemaToPythonType:
         assert py_type == "str | None"
         assert needs_json is False
 
+    def test_anyof_optional_string(self):
+        # pydantic emits anyOf for Optional[T] parameters
+        py_type, needs_json = _schema_to_python_type(
+            {"anyOf": [{"type": "string"}, {"type": "null"}]}
+        )
+        assert py_type == "str | None"
+        assert needs_json is False
+
+    def test_anyof_optional_integer(self):
+        py_type, needs_json = _schema_to_python_type(
+            {"anyOf": [{"type": "integer"}, {"type": "null"}]}
+        )
+        assert py_type == "int | None"
+        assert needs_json is False
+
+    def test_anyof_optional_simple_array(self):
+        py_type, needs_json = _schema_to_python_type(
+            {
+                "anyOf": [
+                    {"type": "array", "items": {"type": "string"}},
+                    {"type": "null"},
+                ]
+            }
+        )
+        assert py_type == "list[str] | None"
+        assert needs_json is False
+
+    def test_anyof_union_of_simple_types(self):
+        py_type, needs_json = _schema_to_python_type(
+            {"anyOf": [{"type": "string"}, {"type": "integer"}]}
+        )
+        assert py_type == "str | int"
+        assert needs_json is False
+
+    def test_oneof_optional_boolean(self):
+        py_type, needs_json = _schema_to_python_type(
+            {"oneOf": [{"type": "boolean"}, {"type": "null"}]}
+        )
+        assert py_type == "bool | None"
+        assert needs_json is False
+
+    def test_scalar_enum(self):
+        py_type, needs_json = _schema_to_python_type({"enum": ["fast", "slow"]})
+        assert py_type == "str"
+        assert needs_json is False
+
+    def test_anyof_enum_with_null(self):
+        py_type, needs_json = _schema_to_python_type(
+            {"anyOf": [{"enum": ["fast", "slow"]}, {"type": "null"}]}
+        )
+        assert py_type == "str | None"
+        assert needs_json is False
+
+    def test_mixed_enum_kinds_falls_back(self):
+        _, needs_json = _schema_to_python_type({"enum": ["fast", 1]})
+        assert needs_json is True
+
+    def test_anyof_with_complex_branch_needs_json(self):
+        py_type, needs_json = _schema_to_python_type(
+            {"anyOf": [{"type": "object"}, {"type": "null"}]}
+        )
+        assert py_type == "str"
+        assert needs_json is True
+
+    def test_anyof_with_ref_needs_json(self):
+        py_type, needs_json = _schema_to_python_type(
+            {"anyOf": [{"$ref": "#/$defs/Widget"}]}
+        )
+        assert py_type == "str"
+        assert needs_json is True
+
 
 # ---------------------------------------------------------------------------
 # _to_python_identifier
@@ -176,6 +247,101 @@ class TestToolFunctionSource:
         assert "query: Annotated[str" in source
         assert "limit: Annotated[int | None" in source
         assert "= None" in source
+
+    def test_optional_string_via_anyof_passes_through(self):
+        # pydantic emits anyOf for Optional[T]; the generated CLI must pass
+        # plain values through instead of JSON-parsing them (#4866).
+        tool = mcp_types.Tool(
+            name="greet",
+            input_schema={
+                "properties": {
+                    "name": {"type": "string", "description": "Who"},
+                    "greeting": {
+                        "anyOf": [{"type": "string"}, {"type": "null"}],
+                        "default": None,
+                        "description": "Optional greeting word.",
+                    },
+                },
+                "required": ["name"],
+            },
+        )
+        source = _tool_function_source(tool)
+        assert "greeting: Annotated[str | None" in source
+        assert "= None" in source
+        assert "greeting_parsed" not in source
+        assert "json.loads" not in source
+        assert "JSON Schema:" not in source
+        assert "'greeting': greeting" in source
+        compile(source, "<test>", "exec")
+
+    def test_optional_integer_via_anyof_no_double_none(self):
+        tool = mcp_types.Tool(
+            name="scale",
+            input_schema={
+                "properties": {
+                    "n": {
+                        "anyOf": [{"type": "integer"}, {"type": "null"}],
+                        "default": None,
+                    },
+                },
+            },
+        )
+        source = _tool_function_source(tool)
+        assert "n: Annotated[int | None" in source
+        assert "| None | None" not in source
+        compile(source, "<test>", "exec")
+
+    def test_optional_list_via_anyof_defaults_to_none(self):
+        tool = mcp_types.Tool(
+            name="pick",
+            input_schema={
+                "properties": {
+                    "items": {
+                        "anyOf": [
+                            {"type": "array", "items": {"type": "string"}},
+                            {"type": "null"},
+                        ],
+                        "default": None,
+                    },
+                },
+            },
+        )
+        source = _tool_function_source(tool)
+        assert "items: Annotated[list[str] | None" in source
+        assert "= None," in source
+
+    def test_required_union_via_anyof_passes_through(self):
+        tool = mcp_types.Tool(
+            name="echo",
+            input_schema={
+                "properties": {
+                    "value": {"anyOf": [{"type": "string"}, {"type": "integer"}]},
+                },
+                "required": ["value"],
+            },
+        )
+        source = _tool_function_source(tool)
+        assert "value: Annotated[str | int" in source
+        assert "json.loads" not in source
+        compile(source, "<test>", "exec")
+
+    def test_optional_object_via_anyof_keeps_json_parsing(self):
+        tool = mcp_types.Tool(
+            name="configure",
+            input_schema={
+                "properties": {
+                    "config": {
+                        "anyOf": [{"type": "object"}, {"type": "null"}],
+                        "default": None,
+                    },
+                },
+            },
+        )
+        source = _tool_function_source(tool)
+        assert "config_parsed = json.loads(config) if isinstance(config, str)" in source
+        assert "'config': config_parsed" in source
+        assert "JSON Schema:" in source
+        compile(source, "<test>", "exec")
 
     def test_param_with_default(self):
         tool = mcp_types.Tool(
@@ -791,6 +957,25 @@ class TestGenerateSkillContent:
         assert "`--name`" in content
         assert "| string |" in content
         assert "| yes |" in content
+
+    def test_optional_string_via_anyof_not_marked_json(self):
+        tools = [
+            mcp_types.Tool(
+                name="greet",
+                input_schema={
+                    "properties": {
+                        "greeting": {
+                            "anyOf": [{"type": "string"}, {"type": "null"}],
+                            "default": None,
+                        },
+                    },
+                },
+            ),
+        ]
+        content = generate_skill_content("test", "cli.py", tools)
+        assert "(JSON string)" not in content
+        assert "| string |" in content
+        assert "| no |" in content
 
     def test_frontmatter_with_tools_starts_at_column_zero(self):
         tools = [
