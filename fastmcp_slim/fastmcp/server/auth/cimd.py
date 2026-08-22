@@ -207,7 +207,7 @@ class CIMDFetcher:
     # Maximum response size (bytes)
     MAX_RESPONSE_SIZE = 5120  # 5KB
     # Maximum number of distinct client documents retained in the process cache
-    MAX_CACHE_SIZE = 100
+    MAX_CACHE_SIZE = 1_000
     # Default cache TTL (seconds)
     DEFAULT_CACHE_TTL_SECONDS = 3600
 
