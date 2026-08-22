@@ -489,6 +489,7 @@ async def format_mcp_info(mcp: FastMCP[Any] | SDKServer) -> bytes:
                 "mcp": importlib.metadata.version("mcp"),  # MCP protocol version
             },
             "serverInfo": server_info,
+            "instructions": client.initialize_result.instructions,
             "capabilities": {},  # MCP format doesn't include capabilities at top level
             "tools": tools_result.tools,
             "prompts": prompts_result.prompts,
