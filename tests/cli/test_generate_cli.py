@@ -82,6 +82,31 @@ class TestSchemaToPythonType:
         assert py_type == "str | None"
         assert needs_json is False
 
+    def test_anyof_optional_string(self):
+        # pydantic emits ``anyOf`` for ``str | None`` parameters
+        py_type, needs_json = _schema_to_python_type(
+            {"anyOf": [{"type": "string"}, {"type": "null"}]}
+        )
+        assert py_type == "str | None"
+        assert needs_json is False
+
+    def test_anyof_optional_integer_with_default(self):
+        py_type, needs_json = _schema_to_python_type(
+            {
+                "anyOf": [{"type": "integer"}, {"type": "null"}],
+                "default": None,
+            }
+        )
+        assert py_type == "int | None"
+        assert needs_json is False
+
+    def test_anyof_union_of_simple_types(self):
+        py_type, needs_json = _schema_to_python_type(
+            {"anyOf": [{"type": "string"}, {"type": "integer"}]}
+        )
+        assert py_type == "str | int"
+        assert needs_json is False
+
 
 # ---------------------------------------------------------------------------
 # _to_python_identifier
@@ -176,6 +201,27 @@ class TestToolFunctionSource:
         assert "query: Annotated[str" in source
         assert "limit: Annotated[int | None" in source
         assert "= None" in source
+
+    def test_optional_param_with_anyof_schema(self):
+        # pydantic represents ``str | None = None`` as anyOf, not type-list
+        tool = mcp_types.Tool(
+            name="greet",
+            input_schema={
+                "properties": {
+                    "name": {"type": "string", "description": "Who to greet"},
+                    "greeting": {
+                        "anyOf": [{"type": "string"}, {"type": "null"}],
+                        "default": None,
+                        "description": "Optional greeting word",
+                    },
+                },
+                "required": ["name"],
+            },
+        )
+        source = _tool_function_source(tool)
+        assert "greeting: Annotated[str | None" in source
+        assert "json.loads(greeting)" not in source
+        assert "'greeting': greeting" in source
 
     def test_param_with_default(self):
         tool = mcp_types.Tool(

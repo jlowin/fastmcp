@@ -76,6 +76,15 @@ def _schema_to_python_type(schema: dict[str, Any]) -> tuple[str, bool]:
     if is_simple_arr:
         return f"list[{item_type}]", False
 
+    # anyOf of simple types - how pydantic represents unions like ``str | None``
+    if "anyOf" in schema:
+        subschemas = schema["anyOf"]
+        if subschemas and all(_is_simple_type(s) for s in subschemas):
+            parts = list(
+                dict.fromkeys(_schema_to_python_type(s)[0] for s in subschemas)
+            )
+            return " | ".join(parts), False
+
     # Check for simple type
     if _is_simple_type(schema):
         schema_type = schema.get("type", "string")
