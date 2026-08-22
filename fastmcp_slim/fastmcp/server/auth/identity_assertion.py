@@ -28,11 +28,12 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import TYPE_CHECKING
+from threading import Lock
+from typing import TYPE_CHECKING, Annotated, Any, Protocol, runtime_checkable
 from urllib.parse import urlparse, urlunparse
 
 import httpx2
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, PlainValidator, field_validator
 
 from fastmcp.utilities.auth import decode_jwt_header
 from fastmcp.utilities.logging import get_logger
@@ -55,6 +56,82 @@ ID_JAG_TYP = "oauth-id-jag+jwt"
 SUPPORTED_ASSERTION_ALGORITHMS = frozenset(
     {"RS256", "RS384", "RS512", "PS256", "PS384", "PS512", "ES256", "ES384", "ES512"}
 )
+
+
+@runtime_checkable
+class JTIReplayStore(Protocol):
+    """Atomic storage contract for consumed identity-assertion JTIs.
+
+    Implementations shared by multiple workers or replicas must perform the
+    existence check and insertion as one atomic backend operation. A separate
+    ``get`` followed by ``put`` is not sufficient: two validators could both
+    observe a missing JTI and accept the same assertion.
+    """
+
+    async def check_and_store(self, jti: str, expires_at: float) -> bool:
+        """Atomically reserve ``jti`` until ``expires_at``.
+
+        Args:
+            jti: The assertion's JWT ID.
+            expires_at: Unix timestamp after which the reservation may be removed.
+
+        Returns:
+            ``True`` when this call reserved the JTI, or ``False`` when an
+            unexpired reservation already exists.
+        """
+        ...
+
+
+class InMemoryJTIReplayStore:
+    """Bounded, process-local identity-assertion replay store.
+
+    This is the default store. Pass a distributed :class:`JTIReplayStore` to
+    :class:`IdentityAssertion` when replay protection must span replicas.
+    """
+
+    def __init__(self, *, max_size: int = 10000) -> None:
+        if max_size <= 0:
+            raise ValueError("max_size must be greater than zero")
+        self._entries: dict[str, float] = {}
+        self._max_size = max_size
+        self._lock = Lock()
+
+    async def check_and_store(self, jti: str, expires_at: float) -> bool:
+        with self._lock:
+            now = time.time()
+            existing_expiry = self._entries.get(jti)
+            if existing_expiry is not None and existing_expiry > now:
+                return False
+
+            if existing_expiry is not None:
+                del self._entries[jti]
+
+            if len(self._entries) >= self._max_size:
+                self._entries = {
+                    stored_jti: stored_expiry
+                    for stored_jti, stored_expiry in self._entries.items()
+                    if stored_expiry > now
+                }
+                if len(self._entries) >= self._max_size:
+                    logger.warning(
+                        "ID-JAG jti replay store at capacity, possible attack"
+                    )
+                    raise RuntimeError("JTI replay store is at capacity")
+
+            self._entries[jti] = expires_at
+            return True
+
+
+def _validate_jti_store(value: object) -> JTIReplayStore | None:
+    if value is not None and not isinstance(value, JTIReplayStore):
+        raise ValueError("jti_store must implement check_and_store(jti, expires_at)")
+    return value
+
+
+_JTIReplayStoreField = Annotated[
+    JTIReplayStore | None,
+    PlainValidator(_validate_jti_store, json_schema_input_type=Any),
+]
 
 
 class IdentityAssertion(BaseModel):
@@ -138,6 +215,15 @@ class IdentityAssertion(BaseModel):
             "this is intentionally short and no refresh token is issued."
         ),
     )
+    jti_store: _JTIReplayStoreField = Field(
+        default=None,
+        exclude=True,
+        repr=False,
+        description=(
+            "Optional atomic replay store shared by all server replicas. The "
+            "default is a bounded per-process InMemoryJTIReplayStore."
+        ),
+    )
 
     @field_validator("trusted_issuers")
     @classmethod
@@ -196,11 +282,10 @@ class IdentityAssertionValidator:
     that the generic verifier does not cover: the ``typ`` JOSE header, a mandatory
     ``sub``, and ``jti`` replay rejection.
 
-    JTI replay protection mirrors :class:`CIMDAssertionValidator`: seen ``jti``
-    values are cached until the assertion would expire anyway, with periodic
-    cleanup and an emergency size cap. Like CIMD, the cache is per-process, so
-    replay protection is not shared across horizontally-scaled workers or
-    replicas; see the identity-assertion docs for the deployment caveat.
+    Seen ``jti`` values are retained until the assertion would expire. The
+    default :class:`InMemoryJTIReplayStore` is bounded and process-local; a
+    distributed store can be supplied for atomic replay protection across
+    horizontally-scaled workers or replicas.
     """
 
     #: RFC 7523 recommends short-lived assertions; reject anything longer.
@@ -227,10 +312,11 @@ class IdentityAssertionValidator:
             base = audience.rstrip("/")
             self.audience = [base, base + "/"]
 
-        self._jti_cache: dict[str, float] = {}
-        self._jti_cache_max_size = 10000
-        self._last_cleanup = time.monotonic()
-        self._cleanup_interval = 60
+        self._jti_store = (
+            config.jti_store
+            if config.jti_store is not None
+            else InMemoryJTIReplayStore()
+        )
         # One JWTVerifier per issuer, created lazily once the JWKS URI is known.
         self._verifiers: dict[str, JWTVerifier] = {}
         # OIDC discovery hardening: discovery runs before signature verification,
@@ -240,20 +326,6 @@ class IdentityAssertionValidator:
         self._discovery_locks: dict[str, asyncio.Lock] = {}
         self._discovery_failures: dict[str, float] = {}
         self._discovery_failure_cooldown = 30.0
-
-    def _cleanup_expired_jtis(self) -> None:
-        now = time.time()
-        expired = [jti for jti, exp in self._jti_cache.items() if exp < now]
-        for jti in expired:
-            del self._jti_cache[jti]
-        if expired:
-            logger.debug("Cleaned up %d expired ID-JAG jtis from cache", len(expired))
-
-    def _maybe_cleanup(self) -> None:
-        now = time.monotonic()
-        if now - self._last_cleanup > self._cleanup_interval:
-            self._cleanup_expired_jtis()
-            self._last_cleanup = now
 
     async def _discover_jwks_uri(self, issuer: str) -> str:
         """Discover an issuer's JWKS URI via OIDC discovery.
@@ -345,8 +417,6 @@ class IdentityAssertionValidator:
         Raises:
             IdentityAssertionError: If the assertion is invalid for any reason.
         """
-        self._maybe_cleanup()
-
         # 1. typ header MUST be oauth-id-jag+jwt (SEP-990 §5.1).
         try:
             header = decode_jwt_header(assertion)
@@ -450,22 +520,15 @@ class IdentityAssertionValidator:
         jti = claims.get("jti")
         if not jti or not isinstance(jti, str):
             raise IdentityAssertionError("Assertion must include a string jti claim")
-        cached_exp = self._jti_cache.get(jti)
-        if cached_exp is not None and cached_exp > now:
+        try:
+            stored = await self._jti_store.check_and_store(jti, exp)
+        except Exception as e:
+            # A replay-store outage must fail closed. Store implementations may
+            # surface backend-specific errors, so normalize them at this boundary.
+            logger.warning("ID-JAG jti replay store failed: %s", e)
+            raise IdentityAssertionError("JTI replay store unavailable") from e
+        if not stored:
             raise IdentityAssertionError(f"Assertion replay detected: jti {jti} reused")
-
-        # Enforce the cap BEFORE inserting so a rejected assertion never grows the
-        # cache. A fresh jti that would exceed capacity is rejected outright (after
-        # a cleanup pass to reclaim any expired entries first).
-        if (
-            jti not in self._jti_cache
-            and len(self._jti_cache) >= self._jti_cache_max_size
-        ):
-            self._cleanup_expired_jtis()
-            if len(self._jti_cache) >= self._jti_cache_max_size:
-                logger.warning("ID-JAG jti cache at capacity, possible attack")
-                raise IdentityAssertionError("Server overloaded, please retry")
-        self._jti_cache[jti] = exp
 
         logger.debug("ID-JAG validated for subject=%s issuer=%s", sub, iss)
         return claims

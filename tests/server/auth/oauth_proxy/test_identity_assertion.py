@@ -5,6 +5,7 @@ fake IdP JWT (a keypair is generated per test). The proxy's JWKS lookup is
 served via httpx_mock, so no real network calls are made.
 """
 
+import asyncio
 import subprocess
 import sys
 import time
@@ -17,7 +18,7 @@ from mcp.shared.auth import OAuthClientInformationFull
 from pydantic import AnyUrl
 
 from fastmcp import FastMCP
-from fastmcp.server.auth import IdentityAssertion
+from fastmcp.server.auth import IdentityAssertion, InMemoryJTIReplayStore
 from fastmcp.server.auth.identity_assertion import (
     ID_JAG_GRANT_PROFILE,
     ID_JAG_TYP,
@@ -33,6 +34,27 @@ BASE_URL = "https://myserver.com"
 ISSUER = "https://login.acme-corp.com"
 JWKS_URI = "https://login.acme-corp.com/jwks"
 RESOURCE = f"{BASE_URL}/mcp"
+
+
+class SharedJTIStore:
+    """Minimal atomic replay store shared by independent proxy instances."""
+
+    def __init__(self) -> None:
+        self._expires_at: dict[str, float] = {}
+        self._lock = asyncio.Lock()
+
+    async def check_and_store(self, jti: str, expires_at: float) -> bool:
+        async with self._lock:
+            now = time.time()
+            if self._expires_at.get(jti, 0) > now:
+                return False
+            self._expires_at[jti] = expires_at
+            return True
+
+
+class FailingJTIStore:
+    async def check_and_store(self, jti: str, expires_at: float) -> bool:
+        raise ConnectionError("store unavailable")
 
 
 def _b64url_json(value: object) -> str:
@@ -181,6 +203,13 @@ class TestIdentityAssertionConfig:
         with pytest.raises(ValueError):
             IdentityAssertion(trusted_issuers=["  "])
 
+    def test_rejects_invalid_jti_store(self):
+        with pytest.raises(ValueError, match="must implement check_and_store"):
+            IdentityAssertion(
+                trusted_issuers=[ISSUER],
+                jti_store=object(),
+            )
+
     @pytest.mark.parametrize("algorithm", ["ES256", "PS256", "RS384"])
     def test_accepts_asymmetric_algorithm(self, algorithm: str):
         IdentityAssertion(trusted_issuers=[ISSUER], algorithm=algorithm)
@@ -224,6 +253,25 @@ class TestIdentityAssertionConfig:
         )
         assert result.returncode == 0, result.stderr
         assert "OK" in result.stdout
+
+
+class TestInMemoryJTIReplayStore:
+    async def test_check_and_store_is_atomic(self):
+        store = InMemoryJTIReplayStore()
+        expires_at = time.time() + 120
+
+        results = await asyncio.gather(
+            *(store.check_and_store("same-jti", expires_at) for _ in range(20))
+        )
+
+        assert results.count(True) == 1
+        assert results.count(False) == 19
+
+    async def test_expired_jti_can_be_stored_again(self):
+        store = InMemoryJTIReplayStore()
+
+        assert await store.check_and_store("expired-jti", time.time() - 1)
+        assert await store.check_and_store("expired-jti", time.time() + 120)
 
 
 class TestMetadataAdvertisement:
@@ -504,6 +552,39 @@ class TestValidationMatrix:
         assert second.status_code == 401
         assert second.json()["error"] == "invalid_grant"
 
+    async def test_replayed_jti_rejected_across_proxy_instances(
+        self, idp_key: RSAKeyPair, httpx_mock: HTTPXMock
+    ):
+        shared_store = SharedJTIStore()
+        config = IdentityAssertion(
+            trusted_issuers=[ISSUER],
+            jwks_uris={ISSUER: JWKS_URI},
+            jti_store=shared_store,
+        )
+        first_proxy = _make_proxy(config)
+        second_proxy = _make_proxy(config)
+        assertion = _mint_id_jag(idp_key, jti="cross-instance-replay")
+        httpx_mock.add_response(url=JWKS_URI, json=_idp_jwks(idp_key), is_optional=True)
+
+        first = await _post_token(first_proxy, assertion)
+        second = await _post_token(second_proxy, assertion)
+
+        assert first.status_code == 200
+        assert second.status_code == 401
+        assert second.json()["error"] == "invalid_grant"
+
+    async def test_replay_store_error_fails_closed(self, idp_key: RSAKeyPair):
+        config = IdentityAssertion(
+            trusted_issuers=[ISSUER],
+            jwks_uris={ISSUER: JWKS_URI},
+            jti_store=FailingJTIStore(),
+        )
+
+        response = await _post_token(_make_proxy(config), _mint_id_jag(idp_key))
+
+        assert response.status_code == 401
+        assert response.json()["error"] == "invalid_grant"
+
     async def test_wrong_signature_rejected(
         self, config: IdentityAssertion, rsa_key_pair_2: RSAKeyPair
     ):
@@ -759,26 +840,26 @@ class TestValidationMatrix:
 
         assert resp.status_code == 200
 
-    async def test_jti_cache_does_not_grow_past_capacity(
-        self, idp_key: RSAKeyPair, config: IdentityAssertion
-    ):
-        # Once the JTI cache is full of still-valid entries, further fresh
-        # assertions are rejected as overloaded WITHOUT being inserted, so the
-        # cache never grows beyond its cap.
-        proxy = _make_proxy(config)
-        validator = proxy._identity_assertion_validator
-        assert validator is not None
-        validator._jti_cache_max_size = 2
+    async def test_jti_cache_does_not_grow_past_capacity(self, idp_key: RSAKeyPair):
+        # Once the default store is full of still-valid entries, further fresh
+        # assertions fail closed without growing the store.
+        store = InMemoryJTIReplayStore(max_size=2)
+        proxy = _make_proxy(
+            IdentityAssertion(
+                trusted_issuers=[ISSUER],
+                jwks_uris={ISSUER: JWKS_URI},
+                jti_store=store,
+            )
+        )
         future = time.time() + 120
-        validator._jti_cache = {"filler-a": future, "filler-b": future}
+        assert await store.check_and_store("filler-a", future)
+        assert await store.check_and_store("filler-b", future)
 
         for i in range(3):
             assertion = _mint_id_jag(idp_key, jti=f"fresh-{i}")
             resp = await _post_token(proxy, assertion)
             assert resp.status_code == 401
             assert resp.json()["error"] == "invalid_grant"
-
-        assert len(validator._jti_cache) == 2
 
 
 class TestAlgorithmConfig:
