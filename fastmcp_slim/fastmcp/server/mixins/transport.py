@@ -8,7 +8,6 @@ from functools import partial
 from typing import TYPE_CHECKING, Any, Literal
 
 import anyio
-import uvicorn
 from mcp.server.lowlevel.server import NotificationOptions
 from mcp.server.stdio import stdio_server
 from mcp.server.streamable_http import EventStore
@@ -296,6 +295,10 @@ class TransportMixin:
                 cross-origin responses.
             sockets: Pre-bound sockets to pass to Uvicorn
         """
+        # Deferred so importing FastMCP does not require uvicorn: http_app()
+        # can be served by any ASGI server, and only this method runs uvicorn.
+        import uvicorn
+
         # Allow stateless as alias for stateless_http
         if stateless is not None and stateless_http is None:
             stateless_http = stateless
