@@ -1528,3 +1528,146 @@ class TestCookieParameters:
         assert "version=3" in cookie
         # Booleans use OpenAPI convention (true/false, not True/False)
         assert "debug=true" in cookie
+
+
+class TestHeaderParameterSerialization:
+    """Non-string header values must be stringified for httpx (OpenAPI simple style)."""
+
+    @pytest.fixture
+    def director(self):
+        spec = SchemaPath.from_dict(
+            {
+                "openapi": "3.0.0",
+                "info": {"title": "t", "version": "1"},
+                "paths": {},
+            }
+        )
+        return RequestDirector(spec)
+
+    def _header_route(self, name: str, schema: dict):
+        return HTTPRoute(
+            path="/items",
+            method="GET",
+            operation_id="get_items",
+            parameters=[
+                ParameterInfo(
+                    name=name,
+                    location="header",
+                    required=True,
+                    schema=schema,
+                ),
+            ],
+            parameter_map={
+                name: {"location": "header", "openapi_name": name},
+            },
+        )
+
+    def test_boolean_header_does_not_raise_and_sends_true(self, director):
+        """Boolean headers must be sent as true/false, not raise TypeError."""
+        route = self._header_route("X-Dry-Run", {"type": "boolean"})
+        request = director.build(route, {"X-Dry-Run": True})
+        assert request.headers["x-dry-run"] == "true"
+
+    def test_boolean_header_false_sends_false(self, director):
+        route = self._header_route("X-Dry-Run", {"type": "boolean"})
+        request = director.build(route, {"X-Dry-Run": False})
+        assert request.headers["x-dry-run"] == "false"
+
+    def test_integer_header_does_not_raise_and_sends_string(self, director):
+        """Integer headers must be stringified, not raise TypeError."""
+        route = self._header_route("X-Count", {"type": "integer"})
+        request = director.build(route, {"X-Count": 42})
+        assert request.headers["x-count"] == "42"
+
+    def test_array_header_serialized_simple_style(self, director):
+        """Array headers use OpenAPI simple style (a,b), not a Python list."""
+        route = self._header_route(
+            "X-Tags",
+            {"type": "array", "items": {"type": "string"}},
+        )
+        request = director.build(route, {"X-Tags": ["a", "b"]})
+        assert request.headers["x-tags"] == "a,b"
+
+
+class TestPathParameterSerialization:
+    """Path parameters use OpenAPI simple style, not Python repr."""
+
+    @pytest.fixture
+    def director(self):
+        spec = SchemaPath.from_dict(
+            {
+                "openapi": "3.0.0",
+                "info": {"title": "t", "version": "1"},
+                "paths": {},
+            }
+        )
+        return RequestDirector(spec)
+
+    def test_array_path_param_simple_style_not_python_repr(self, director):
+        """Array path params are comma-separated, not str([1, 2, 3])."""
+        route = HTTPRoute(
+            path="/items/{ids}",
+            method="GET",
+            operation_id="get_items",
+            parameters=[
+                ParameterInfo(
+                    name="ids",
+                    location="path",
+                    required=True,
+                    schema={"type": "array", "items": {"type": "integer"}},
+                ),
+            ],
+            parameter_map={
+                "ids": {"location": "path", "openapi_name": "ids"},
+            },
+        )
+        request = director.build(route, {"ids": [1, 2, 3]}, "https://api.example.com")
+        decoded = unquote(str(request.url))
+        assert decoded == "https://api.example.com/items/1,2,3"
+        assert "[" not in decoded
+        assert "%5B" not in str(request.url)
+
+    def test_boolean_path_param_is_lowercase_true(self, director):
+        """Boolean path params are true/false, not Python True/False."""
+        route = HTTPRoute(
+            path="/flags/{enabled}",
+            method="GET",
+            operation_id="get_flag",
+            parameters=[
+                ParameterInfo(
+                    name="enabled",
+                    location="path",
+                    required=True,
+                    schema={"type": "boolean"},
+                ),
+            ],
+            parameter_map={
+                "enabled": {"location": "path", "openapi_name": "enabled"},
+            },
+        )
+        request = director.build(route, {"enabled": True}, "https://api.example.com")
+        url = str(request.url)
+        assert url.endswith("/flags/true")
+        assert "True" not in url
+
+    def test_boolean_path_param_is_lowercase_false(self, director):
+        route = HTTPRoute(
+            path="/flags/{enabled}",
+            method="GET",
+            operation_id="get_flag",
+            parameters=[
+                ParameterInfo(
+                    name="enabled",
+                    location="path",
+                    required=True,
+                    schema={"type": "boolean"},
+                ),
+            ],
+            parameter_map={
+                "enabled": {"location": "path", "openapi_name": "enabled"},
+            },
+        )
+        request = director.build(route, {"enabled": False}, "https://api.example.com")
+        url = str(request.url)
+        assert url.endswith("/flags/false")
+        assert "False" not in url

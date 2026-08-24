@@ -26,6 +26,17 @@ def _query_scalar_to_str(value: Any) -> str:
     return str(value)
 
 
+def _simple_style_to_str(value: Any) -> str:
+    """Serialize a value in OpenAPI `simple` style (default for path and header).
+
+    Arrays become comma-separated (`a,b`). Booleans use JSON/OpenAPI
+    `true`/`false` rather than Python's `True`/`False`.
+    """
+    if isinstance(value, list):
+        return ",".join(_query_scalar_to_str(v) for v in value)
+    return _query_scalar_to_str(value)
+
+
 class RequestDirector:
     """Builds httpx2.Request objects from HTTPRoute and arguments using openapi-core."""
 
@@ -72,7 +83,13 @@ class RequestDirector:
         # Step 4: Prepare request data
         method: str = route.method.upper()
         params = query_params if query_params else None
-        headers = header_params if header_params else None
+        # httpx requires header values to be str or bytes; use OpenAPI
+        # simple style (true/false, comma-separated arrays) like cookies.
+        headers = (
+            {k: _simple_style_to_str(v) for k, v in header_params.items()}
+            if header_params
+            else None
+        )
         json_body: dict[str, Any] | list[Any] | None = None
         content: str | bytes | None = None
 
@@ -134,7 +151,8 @@ class RequestDirector:
                     # sets application/json.
                     content = _json.dumps(body, allow_nan=False).encode("utf-8")
                     headers = dict(headers) if headers else {}
-                    headers["Content-Type"] = raw_content_type
+                    if raw_content_type is not None:
+                        headers["Content-Type"] = raw_content_type
                 else:
                     json_body = body
             else:
@@ -364,7 +382,9 @@ class RequestDirector:
         for param_name, param_value in path_params.items():
             placeholder = f"{{{param_name}}}"
             if placeholder in url_path:
-                safe_value = quote(str(param_value), safe="").replace(".", "%2E")
+                safe_value = quote(_simple_style_to_str(param_value), safe="").replace(
+                    ".", "%2E"
+                )
                 url_path = url_path.replace(placeholder, safe_value)
 
         # Combine with base URL
