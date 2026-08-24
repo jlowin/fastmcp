@@ -15,6 +15,7 @@ from unittest.mock import AsyncMock, patch
 import psutil
 import pytest
 from mcp_types import TextContent
+from mcp_types.version import MODERN_PROTOCOL_VERSIONS
 from pydantic import ConfigDict
 
 from fastmcp import Context, FastMCP
@@ -100,13 +101,26 @@ class InMemoryStdioMCPServer(StdioMCPServer):
         return FastMCPTransport(mcp=self.mcp)
 
 
-class TestConfigTransportLegacyOnly:
-    """`MCPConfigTransport.legacy_only` gating (regression for the over-broad flag).
+class LegacyFastMCPTransport(FastMCPTransport):
+    """In-memory transport that requires the handshake protocol era."""
+
+    legacy_only = True
+
+
+class LegacyInMemoryStdioMCPServer(InMemoryStdioMCPServer):
+    """In-memory config entry that behaves like a legacy-only backend."""
+
+    def to_transport(self) -> FastMCPTransport:
+        return LegacyFastMCPTransport(mcp=self.mcp)
+
+
+class TestConfigTransportEraNegotiation:
+    """`MCPConfigTransport` negotiates one era across every connection leg.
 
     A single-server config delegates directly to the underlying transport with no
-    proxy, so it must mirror that transport's era capability rather than being
-    forced legacy. Only the multi-server composite (backed by legacy-era
-    ProxyClients) is legacy-only.
+    proxy. A multi-server config discovers its backends before the composite client
+    negotiates, allowing an all-modern configuration to stay modern and a mixed
+    configuration to fall back consistently to the handshake era.
     """
 
     def test_single_modern_capable_server_is_not_forced_legacy(self):
@@ -129,8 +143,7 @@ class TestConfigTransportLegacyOnly:
         assert isinstance(transport.transport, SSETransport)
         assert transport.legacy_only is True
 
-    def test_multi_server_config_is_legacy_only(self):
-        """A multi-server composite is legacy-only regardless of backend eras."""
+    def test_multi_server_config_is_not_assumed_legacy_before_connect(self):
         config = {
             "mcpServers": {
                 "a": {"url": "https://a.example.com/mcp"},
@@ -138,7 +151,7 @@ class TestConfigTransportLegacyOnly:
             },
         }
         transport = MCPConfigTransport(config)
-        assert transport.legacy_only is True
+        assert transport.legacy_only is False
 
     def test_transforming_single_server_wrapper_is_legacy_only(self):
         """A single-server config that uses tool transforms or tag filters wraps
@@ -156,6 +169,92 @@ class TestConfigTransportLegacyOnly:
         mcp_config = MCPConfig.from_dict(config)
         transport = mcp_config.mcpServers["a"].to_transport()
         assert transport.legacy_only is True
+
+
+def _make_protocol_era_server(name: str) -> FastMCP:
+    server = FastMCP(name)
+
+    @server.tool
+    async def protocol_era(ctx: Context) -> str:
+        assert ctx.request_context is not None
+        return ctx.request_context.protocol_version
+
+    @server.tool
+    def add(a: int, b: int) -> int:
+        return a + b
+
+    return server
+
+
+async def test_multi_server_auto_negotiates_modern_end_to_end():
+    """Modern backends keep the default multi-server client modern end to end."""
+    config = MCPConfig(
+        mcpServers={
+            "alpha": InMemoryStdioMCPServer(mcp=_make_protocol_era_server("alpha")),
+            "beta": InMemoryStdioMCPServer(mcp=_make_protocol_era_server("beta")),
+        }
+    )
+
+    async with Client(config) as client:
+        assert client.protocol_version == "2026-07-28"
+
+        tools = await client.list_tools()
+        assert {tool.name for tool in tools} == {
+            "alpha_add",
+            "alpha_protocol_era",
+            "beta_add",
+            "beta_protocol_era",
+        }
+
+        alpha_era = await client.call_tool("alpha_protocol_era", {})
+        beta_era = await client.call_tool("beta_protocol_era", {})
+        result = await client.call_tool("alpha_add", {"a": 2, "b": 3})
+
+    assert alpha_era.data == "2026-07-28"
+    assert beta_era.data == "2026-07-28"
+    assert result.data == 5
+
+
+async def test_multi_server_auto_falls_back_all_legs_when_one_backend_is_legacy():
+    """A mixed config never leaves the composite and its backends on different eras."""
+    config = MCPConfig(
+        mcpServers={
+            "modern": InMemoryStdioMCPServer(mcp=_make_protocol_era_server("modern")),
+            "legacy": LegacyInMemoryStdioMCPServer(
+                mcp=_make_protocol_era_server("legacy")
+            ),
+        }
+    )
+
+    async with Client(config) as client:
+        assert client.protocol_version not in MODERN_PROTOCOL_VERSIONS
+        modern_era = await client.call_tool("modern_protocol_era", {})
+        legacy_era = await client.call_tool("legacy_protocol_era", {})
+
+    assert modern_era.data not in MODERN_PROTOCOL_VERSIONS
+    assert legacy_era.data not in MODERN_PROTOCOL_VERSIONS
+
+
+@pytest.mark.parametrize(
+    ("mode", "is_modern"),
+    [("legacy", False), ("2026-07-28", True)],
+)
+async def test_multi_server_explicit_mode_reaches_every_backend(mode, is_modern):
+    config = MCPConfig(
+        mcpServers={
+            "alpha": InMemoryStdioMCPServer(mcp=_make_protocol_era_server("alpha")),
+            "beta": InMemoryStdioMCPServer(mcp=_make_protocol_era_server("beta")),
+        }
+    )
+
+    async with Client(config, mode=mode) as client:
+        alpha_era = await client.call_tool("alpha_protocol_era", {})
+        beta_era = await client.call_tool("beta_protocol_era", {})
+
+        assert (client.protocol_version in MODERN_PROTOCOL_VERSIONS) is is_modern
+
+    assert (alpha_era.data in MODERN_PROTOCOL_VERSIONS) is is_modern
+    assert (beta_era.data in MODERN_PROTOCOL_VERSIONS) is is_modern
 
 
 def test_parse_single_stdio_config():
@@ -927,7 +1026,9 @@ async def test_multi_client_with_elicitation():
     config = MCPConfig(
         mcpServers={
             "test_server": InMemoryStdioMCPServer(mcp=_make_elicit_server()),
-            "test_server_2": InMemoryStdioMCPServer(mcp=_make_elicit_server()),
+            # One legacy-only backend makes the aggregate reconnect every leg
+            # under the handshake era, where server-initiated elicitation works.
+            "test_server_2": LegacyInMemoryStdioMCPServer(mcp=_make_elicit_server()),
         }
     )
 
@@ -1046,7 +1147,9 @@ async def test_multi_server_session_persistence():
     config = MCPConfig(
         mcpServers={
             "server1": InMemoryStdioMCPServer(mcp=_make_session_server()),
-            "server2": InMemoryStdioMCPServer(mcp=_make_session_server()),
+            # Session identity is a handshake-era feature. A legacy-only sibling
+            # verifies aggregate auto-negotiation preserves it on every backend.
+            "server2": LegacyInMemoryStdioMCPServer(mcp=_make_session_server()),
         }
     )
 

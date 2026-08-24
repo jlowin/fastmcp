@@ -212,7 +212,7 @@ async with Client("https://example.com/mcp", mode="auto") as client:
 <Note>
 `mode="auto"` is the default as of FastMCP 4.0. Earlier versions defaulted to `"legacy"`. If a server behaves unexpectedly under discovery, or you depend on the legacy `initialize` result, pin the old behavior with `Client(..., mode="legacy")`.
 
-The SSE transport is legacy-only — it cannot carry the sessionless modern era — so a client connecting over SSE always negotiates the legacy handshake, even under `mode="auto"`. A multi-server config (`MCPConfigTransport` with more than one server) is likewise legacy-only, because it mounts each backend behind a legacy-era proxy; a single-server config mirrors its one backend transport's era.
+The SSE transport is legacy-only — it cannot carry the sessionless modern era — so a client connecting over SSE always negotiates the legacy handshake, even under `mode="auto"`. A multi-server config (`MCPConfigTransport` with more than one server) negotiates the best era shared by every connected backend: it stays modern when every backend is modern-capable and reconnects every leg under the handshake era when any backend requires legacy. Pinning `mode="legacy"` or a modern version applies that mode to every backend.
 </Note>
 
 ## Response caching

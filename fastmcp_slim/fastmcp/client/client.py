@@ -583,7 +583,15 @@ class Client(
 
         # Session context management - see class docstring for detailed explanation
         self._session_state = ClientSessionState()
-        self._transport_options: TransportOptions | None = None
+        # A multi-server config builds backend clients on this client's behalf.
+        # Carry the requested era into those clients so the internal composite
+        # does not silently pin its backend legs to ProxyClient's legacy default.
+        self._transport_options: TransportOptions | None = (
+            TransportOptions(backend_mode=mode)
+            if isinstance(self.transport, MCPConfigTransport)
+            and len(self.transport.config.mcpServers) > 1
+            else None
+        )
 
     def _build_response_cache(
         self, cache: CacheConfig | bool | None
@@ -847,9 +855,10 @@ class Client(
         else:
             timeout = normalize_timeout_to_seconds(timeout)
 
-        # A legacy-only transport (SSE, a multi-server proxy config) cannot serve
-        # the modern era; treat "auto" as "legacy" there rather than probing
-        # server/discover, which some such servers answer but then cannot serve.
+        # A legacy-only transport cannot serve the modern era; treat "auto" as
+        # "legacy" there rather than probing server/discover. Multi-server config
+        # transports resolve this flag from their connected backend set before
+        # negotiation reaches this point.
         effective_mode = self.mode
         if effective_mode == "auto" and self.transport.legacy_only:
             effective_mode = "legacy"
