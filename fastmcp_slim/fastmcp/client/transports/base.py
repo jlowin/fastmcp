@@ -44,6 +44,8 @@ class TransportOptions:
 
     These belong to the client rather than to the transport, so a transport
     shared between clients doesn't leak one client's settings to another.
+    Different client layers may own different fields; a layer that adds its
+    settings must preserve the existing options rather than replace the bundle.
 
     Attributes:
         session_class: The ClientSession class to instantiate. Proxies supply a
