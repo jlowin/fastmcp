@@ -16,8 +16,8 @@ from fastmcp.tools.base import Tool
 
 
 def _tokenize(text: str) -> list[str]:
-    """Lowercase, split on non-alphanumeric, filter short tokens."""
-    return [t for t in re.split(r"[^a-z0-9]+", text.lower()) if len(t) > 1]
+    """Lowercase, split on non-alphanumeric (Unicode-aware), filter short tokens."""
+    return [t for t in re.split(r"\W+", text.lower()) if len(t) > 1]
 
 
 class _BM25Index:
