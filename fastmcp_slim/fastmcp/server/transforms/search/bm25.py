@@ -3,6 +3,7 @@
 import hashlib
 import math
 import re
+import unicodedata
 from collections.abc import Sequence
 from typing import Annotated, Any
 
@@ -16,17 +17,9 @@ from fastmcp.tools.base import Tool
 
 
 def _tokenize(text: str) -> list[str]:
-    """Lowercase, split on non-alphanumeric, and retain mixed-script parts."""
-    tokens: list[str] = []
-    for token in re.split(r"[_\W]+", text.lower()):
-        if len(token) > 1:
-            tokens.append(token)
-        tokens.extend(
-            part
-            for part in re.findall(r"[a-z0-9]+|[^a-z0-9]+", token)
-            if len(part) > 1 and part != token
-        )
-    return tokens
+    """Normalize and extract Unicode alphanumeric tokens."""
+    normalized = unicodedata.normalize("NFKC", text).casefold()
+    return re.findall(r"[^\W_]{2,}", normalized)
 
 
 class _BM25Index:

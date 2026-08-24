@@ -441,11 +441,12 @@ class TestBM25Index:
         index.build(["show portfolio", "показать портфель"])
         assert index.query("портфель", 5) == [1]
 
-    def test_mixed_script_tokens(self):
+    def test_unicode_normalization(self):
         index = _BM25Index()
-        index.build(["get天气"])
-        assert index.query("get", 5) == [0]
-        assert index.query("天气", 5) == [0]
+        index.build(["Straße ＰＯＲＴＦＯＬＩＯ cafe\u0301"])
+        assert index.query("STRASSE", 5) == [0]
+        assert index.query("portfolio", 5) == [0]
+        assert index.query("café", 5) == [0]
 
 
 # ---------------------------------------------------------------------------
