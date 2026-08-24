@@ -413,6 +413,21 @@ class TestBM25Search:
 # ---------------------------------------------------------------------------
 
 
+    async def test_search_unicode_description(self) -> None:
+        """BM25 search should work with non-ASCII text (e.g. Cyrillic, CJK)."""
+        mcp = FastMCP("test")
+
+        @mcp.tool
+        def get_portfolio() -> str:
+            """Показывает текущий портфель пользователя"""
+            return "portfolio"
+
+        mcp.add_transform(BM25SearchTransform())
+        await mcp.list_tools()
+        result = await mcp.call_tool("search_tools", {"query": "портфель"})
+        tools = _parse_tool_result(result)
+        assert any(t["name"] == "get_portfolio" for t in tools)
+
 class TestBM25Index:
     def test_basic_ranking(self):
         index = _BM25Index()
