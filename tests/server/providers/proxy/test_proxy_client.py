@@ -47,20 +47,6 @@ class TestProxyClientEraDefault:
         mcp = FastMCP("Backend")
         assert ProxyClient(mcp, mode="auto").mode == "auto"
 
-    @pytest.mark.parametrize("mode", ["auto", "legacy", "2026-07-28"])
-    def test_multi_server_proxy_client_propagates_mode_to_backends(self, mode: str):
-        config = {
-            "mcpServers": {
-                "alpha": {"url": "https://alpha.example.com/mcp"},
-                "beta": {"url": "https://beta.example.com/mcp"},
-            }
-        }
-
-        client = ProxyClient(config, mode=mode)
-
-        assert client._transport_options is not None
-        assert client._transport_options.backend_mode == mode
-
     def test_create_proxy_backend_defaults_to_legacy(self):
         """The backend client `create_proxy` builds is legacy by default too."""
         mcp = FastMCP("Backend")

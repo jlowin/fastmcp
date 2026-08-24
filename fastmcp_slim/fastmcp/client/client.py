@@ -9,7 +9,7 @@ import ssl
 import uuid
 from collections.abc import AsyncIterator, Callable, Coroutine, Mapping, Sequence
 from contextlib import AsyncExitStack, asynccontextmanager, suppress
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Generic, Literal, TypeVar, cast, overload
 
@@ -583,15 +583,7 @@ class Client(
 
         # Session context management - see class docstring for detailed explanation
         self._session_state = ClientSessionState()
-        # A multi-server config builds backend clients on this client's behalf.
-        # Carry the requested era into those clients so the internal composite
-        # does not silently pin its backend legs to ProxyClient's legacy default.
-        self._transport_options: TransportOptions | None = (
-            TransportOptions(backend_mode=mode)
-            if isinstance(self.transport, MCPConfigTransport)
-            and len(self.transport.config.mcpServers) > 1
-            else None
-        )
+        self._transport_options: TransportOptions | None = None
 
     def _build_response_cache(
         self, cache: CacheConfig | bool | None
@@ -808,11 +800,23 @@ class Client(
 
     @asynccontextmanager
     async def _context_manager(self):
+        transport_options = self._transport_options
+        if (
+            isinstance(self.transport, MCPConfigTransport)
+            and len(self.transport.config.mcpServers) > 1
+        ):
+            # Resolve mutable connection policy here rather than at construction:
+            # both `Client.mode` and an MCPConfig's server set may change before
+            # the client connects. Preserve options contributed by other layers.
+            transport_options = replace(
+                transport_options or TransportOptions(), backend_mode=self.mode
+            )
+
         # Only passed when this client actually wants non-default settings, so an
         # ordinary client never sends an argument a transport might not accept.
-        if self._transport_options is not None:
+        if transport_options is not None:
             connection = self.transport.connect_session(
-                transport_options=self._transport_options, **self._session_kwargs
+                transport_options=transport_options, **self._session_kwargs
             )
         else:
             connection = self.transport.connect_session(**self._session_kwargs)

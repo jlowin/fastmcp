@@ -276,6 +276,47 @@ async def test_multi_server_proxy_client_auto_negotiates_modern_end_to_end():
     assert beta_era.data == "2026-07-28"
 
 
+async def test_multi_server_mode_is_resolved_when_proxy_client_connects():
+    config = MCPConfig(
+        mcpServers={
+            "alpha": InMemoryStdioMCPServer(mcp=_make_protocol_era_server("alpha")),
+            "beta": InMemoryStdioMCPServer(mcp=_make_protocol_era_server("beta")),
+        }
+    )
+    client = ProxyClient(config, mode="legacy")
+    client.mode = "auto"
+
+    async with client:
+        alpha_era = await client.call_tool("alpha_protocol_era", {})
+        beta_era = await client.call_tool("beta_protocol_era", {})
+
+    assert alpha_era.data == "2026-07-28"
+    assert beta_era.data == "2026-07-28"
+
+
+async def test_multi_server_shape_is_resolved_when_client_connects():
+    config = MCPConfig(
+        mcpServers={
+            "alpha": InMemoryStdioMCPServer(mcp=_make_protocol_era_server("alpha"))
+        }
+    )
+    client = Client(config)
+    config.add_server(
+        "beta", InMemoryStdioMCPServer(mcp=_make_protocol_era_server("beta"))
+    )
+
+    async with client:
+        assert client.protocol_version == "2026-07-28"
+        tools = await client.list_tools()
+
+    assert {tool.name for tool in tools} == {
+        "alpha_add",
+        "alpha_protocol_era",
+        "beta_add",
+        "beta_protocol_era",
+    }
+
+
 def test_parse_single_stdio_config():
     config = {
         "mcpServers": {
