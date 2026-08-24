@@ -441,6 +441,12 @@ class TestBM25Index:
         index.build(["show portfolio", "показать портфель"])
         assert index.query("портфель", 5) == [1]
 
+    def test_mixed_script_tokens(self):
+        index = _BM25Index()
+        index.build(["get天气"])
+        assert index.query("get", 5) == [0]
+        assert index.query("天气", 5) == [0]
+
 
 # ---------------------------------------------------------------------------
 # call_tool self-reference guard
