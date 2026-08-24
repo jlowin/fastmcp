@@ -1744,7 +1744,14 @@ class ProxyClient(Client[ClientTransportT]):
                 self._proxy_restoring_handler_keys.add(key)
         super().__init__(transport=transport, **kwargs)  # ty: ignore[no-matching-overload]
 
-        self._transport_options = PROXY_TRANSPORT_OPTIONS
+        backend_mode = (
+            self._transport_options.backend_mode
+            if self._transport_options is not None
+            else None
+        )
+        self._transport_options = replace(
+            PROXY_TRANSPORT_OPTIONS, backend_mode=backend_mode
+        )
 
     def _bind_restoring_handlers(self) -> None:
         if "roots" in self._proxy_restoring_handler_keys:

@@ -40,6 +40,7 @@ from fastmcp.mcp_config import (
     TransformingStdioMCPServer,
 )
 from fastmcp.server.elicitation import AcceptedElicitation
+from fastmcp.server.providers.proxy import ProxyClient
 from fastmcp.tools.base import Tool as FastMCPTool
 
 # Some tests in this module spawn subprocess servers via stdio, each paying a
@@ -255,6 +256,24 @@ async def test_multi_server_explicit_mode_reaches_every_backend(mode, is_modern)
 
     assert (alpha_era.data in MODERN_PROTOCOL_VERSIONS) is is_modern
     assert (beta_era.data in MODERN_PROTOCOL_VERSIONS) is is_modern
+
+
+async def test_multi_server_proxy_client_auto_negotiates_modern_end_to_end():
+    """ProxyClient keeps its proxy options without losing the aggregate era."""
+    config = MCPConfig(
+        mcpServers={
+            "alpha": InMemoryStdioMCPServer(mcp=_make_protocol_era_server("alpha")),
+            "beta": InMemoryStdioMCPServer(mcp=_make_protocol_era_server("beta")),
+        }
+    )
+
+    async with ProxyClient(config, mode="auto") as client:
+        assert client.protocol_version == "2026-07-28"
+        alpha_era = await client.call_tool("alpha_protocol_era", {})
+        beta_era = await client.call_tool("beta_protocol_era", {})
+
+    assert alpha_era.data == "2026-07-28"
+    assert beta_era.data == "2026-07-28"
 
 
 def test_parse_single_stdio_config():
