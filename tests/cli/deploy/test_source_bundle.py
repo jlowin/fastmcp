@@ -150,7 +150,6 @@ async def test_selected_config_is_sanitized_for_horizon(
     (project / "src" / "package" / "pyproject.toml").write_text(
         "[project]\nname = 'package'\n"
     )
-    (project / "src" / "shared").mkdir()
     (project / "fastmcp.json").write_text(
         json.dumps(
             {
@@ -161,11 +160,9 @@ async def test_selected_config_is_sanitized_for_horizon(
                     "requirements": "requirements-base.txt",
                     "project": "package",
                     "dependencies": ["httpx>=0.27"],
-                    "editable": ["shared"],
                 },
                 "deployment": {
                     "cwd": "src",
-                    "env": {"API_KEY": "not-archived"},
                     "host": "127.0.0.1",
                 },
             }
@@ -180,7 +177,6 @@ async def test_selected_config_is_sanitized_for_horizon(
         "deployment": {"cwd": "src"},
         "environment": {
             "dependencies": ["httpx>=0.27"],
-            "editable": ["shared"],
             "project": "package",
             "python": ">=3.10",
             "requirements": "requirements-base.txt",
@@ -202,7 +198,7 @@ async def test_explicit_config_is_archived_as_fastmcp_config(
             {
                 "source": {"path": "src/server.py", "entrypoint": "app"},
                 "environment": {"requirements": "requirements.txt"},
-                "deployment": {"env": {"TOKEN": "not-archived"}},
+                "deployment": {"host": "127.0.0.1"},
             }
         )
     )
@@ -276,6 +272,33 @@ async def test_configured_source_is_not_imported_locally(
     assert not side_effect.exists()
 
 
+@pytest.mark.parametrize(
+    ("unsupported_config", "error"),
+    [
+        ({"environment": {"editable": ["shared"]}}, "environment.editable"),
+        ({"deployment": {"env": {"TOKEN": "secret"}}}, "deployment.env"),
+        ({"deployment": {"args": ["--token", "secret"]}}, "deployment.args"),
+    ],
+)
+async def test_unsupported_hosted_config_fails_before_archive_creation(
+    project: Path,
+    tmp_path: Path,
+    unsupported_config: dict[str, object],
+    error: str,
+) -> None:
+    write_server(project / "server.py")
+    (project / "shared").mkdir()
+    (project / "fastmcp.json").write_text(
+        json.dumps({"source": {"path": "server.py"}, **unsupported_config})
+    )
+
+    archive_path = tmp_path / "source.tar.gz"
+    with pytest.raises(SourceInvalidError, match=error):
+        await create_source_bundle(None, archive_path)
+
+    assert not archive_path.exists()
+
+
 async def test_explicit_file_does_not_activate_nearby_config(
     project: Path,
     tmp_path: Path,
@@ -341,6 +364,7 @@ async def test_external_config_paths_are_rejected(
             "https://example.com/private.whl?token=secret",
             "must not contain URL query parameters",
         ),
+        ("private @ http://[", "contains an invalid URL"),
     ],
 )
 async def test_sensitive_dependency_urls_are_rejected(

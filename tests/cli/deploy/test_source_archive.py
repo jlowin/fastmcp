@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import tarfile
 from pathlib import Path
 
@@ -216,6 +217,26 @@ async def test_external_symlink_is_rejected(project: Path, tmp_path: Path) -> No
     (project / "outside-link").symlink_to(outside)
 
     with pytest.raises(SourceInvalidError, match="Symbolic link leaves"):
+        await create_source_bundle("server.py", tmp_path / "source.tar.gz")
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Directory junctions are Windows-only")
+async def test_external_directory_junction_is_rejected(
+    project: Path,
+    tmp_path: Path,
+) -> None:
+    write_server(project / "server.py")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "secret.txt").write_text("secret")
+    junction = project / "outside-junction"
+    subprocess.run(
+        ["cmd", "/c", "mklink", "/J", str(junction), str(outside)],
+        check=True,
+        capture_output=True,
+    )
+
+    with pytest.raises(SourceInvalidError, match="Directory link leaves"):
         await create_source_bundle("server.py", tmp_path / "source.tar.gz")
 
 

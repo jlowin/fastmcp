@@ -46,6 +46,8 @@ async def create_source_bundle(
 ) -> SourceBundle:
     """Resolve a FastMCP server input and create its deployment archive."""
     config, source_root, config_path = _load_config(server_spec)
+    if config_path is not None:
+        _validate_hosted_config(config)
     resolved_archive_path = _resolve_archive_path(source_root, archive_path)
     source_base = (
         _resolve_path(
@@ -153,25 +155,29 @@ def _sanitized_config(
             environment.project,
             label="Environment project",
         )
-    if environment.editable is not None:
-        archived_environment["editable"] = [
-            _sanitized_path(
-                source_root,
-                dependency_base,
-                path,
-                label="Editable dependency",
-            )
-            for path in environment.editable
-        ]
-
     archived: dict[str, object] = {"environment": archived_environment}
     if config.deployment.cwd is not None:
         archived["deployment"] = {"cwd": _relative_path(source_root, dependency_base)}
     return (json.dumps(archived, sort_keys=True, separators=(",", ":")) + "\n").encode()
 
 
+def _validate_hosted_config(config: MCPServerConfig) -> None:
+    if config.environment.editable:
+        raise SourceInvalidError(
+            "Hosted deployments do not support environment.editable. "
+            "Declare hosted packages in environment.dependencies instead."
+        )
+    if config.deployment.env:
+        raise SourceInvalidError(
+            "Hosted deployments do not support deployment.env. "
+            "Configure environment variables in the hosted deployment instead."
+        )
+    if config.deployment.args:
+        raise SourceInvalidError("Hosted deployments do not support deployment.args.")
+
+
 def _sanitized_dependency(dependency: str) -> str:
-    bare_url = urlsplit(dependency.strip())
+    bare_url = _split_dependency_url(dependency.strip(), label="URL")
     if bare_url.scheme:
         _validate_dependency_url(bare_url, label="URL")
 
@@ -182,8 +188,18 @@ def _sanitized_dependency(dependency: str) -> str:
     if requirement.url is None:
         return dependency
 
-    _validate_dependency_url(urlsplit(requirement.url), label=requirement.name)
+    requirement_url = _split_dependency_url(requirement.url, label=requirement.name)
+    _validate_dependency_url(requirement_url, label=requirement.name)
     return dependency
+
+
+def _split_dependency_url(value: str, *, label: str) -> SplitResult:
+    try:
+        return urlsplit(value)
+    except ValueError as exc:
+        raise SourceInvalidError(
+            f"The dependency contains an invalid URL: {label}"
+        ) from exc
 
 
 def _validate_dependency_url(url: SplitResult, *, label: str) -> None:

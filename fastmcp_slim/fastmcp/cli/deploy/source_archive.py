@@ -111,6 +111,7 @@ def _collect_entries(
                 _validate_symlink(source_root, path)
                 entries[relative.as_posix()] = path
             else:
+                _validate_traversable_directory(source_root, path)
                 entries[relative.as_posix()] = path
                 traversable.append(name)
                 rules_by_directory[path] = rules
@@ -343,6 +344,26 @@ def _is_ignored(
         if result.include is not None:
             ignored = result.include
     return ignored
+
+
+def _validate_traversable_directory(source_root: Path, path: Path) -> None:
+    relative = path.relative_to(source_root)
+    try:
+        resolved = path.resolve(strict=True)
+        resolved.relative_to(source_root)
+        file_attributes = getattr(path.lstat(), "st_file_attributes", 0)
+    except ValueError:
+        raise SourceInvalidError(
+            f"Directory link leaves the source root: {relative}"
+        ) from None
+    except (OSError, RuntimeError) as exc:
+        raise SourceInvalidError(
+            f"Source directory could not be resolved: {relative}"
+        ) from exc
+
+    reparse_point = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+    if reparse_point and file_attributes & reparse_point:
+        raise SourceInvalidError(f"Directory links cannot be archived: {relative}")
 
 
 def _validate_symlink(source_root: Path, path: Path) -> Path:
