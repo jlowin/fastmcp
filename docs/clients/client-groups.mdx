@@ -1,0 +1,88 @@
+---
+title: Client Groups
+sidebarTitle: Client Groups
+icon: layer-group
+---
+
+<Warning>
+`ClientGroup` is experimental. Its API may change before it moves out of `fastmcp.experimental`.
+</Warning>
+
+A `ClientGroup` coordinates several independent FastMCP clients without combining them behind a proxy server. Each client keeps its own connection, negotiated protocol version, capabilities, and handlers. The group adds namespaced tool discovery and routes each call back to the client that advertised the tool.
+
+This differs from passing a multi-server configuration directly to `Client`. `Client(config)` presents one aggregate MCP endpoint and therefore selects one protocol era shared by its proxy chain. A `ClientGroup` retains one MCP connection per configured server, so legacy and modern servers can operate in their native eras at the same time.
+
+## Create a group from clients
+
+Construct the clients explicitly when each server needs its own handlers, authentication, or connection settings:
+
+```python
+import asyncio
+
+from fastmcp import Client
+from fastmcp.experimental.client_group import ClientGroup
+
+legacy_client = Client("legacy_server.py", mode="legacy")
+modern_client = Client("https://modern.example.com/mcp", mode="auto")
+
+group = ClientGroup(
+    {
+        "legacy": legacy_client,
+        "modern": modern_client,
+    }
+)
+
+
+async def main() -> None:
+    async with group:
+        tools = await group.list_tools()
+        print([tool.name for tool in tools])
+
+        result = await group.call_tool(
+            "modern_get_weather",
+            {"city": "Chicago"},
+        )
+        print(result)
+
+
+asyncio.run(main())
+```
+
+Tool names are prefixed with the configured client name by default. For example, a `get_weather` tool exposed by the `modern` client becomes `modern_get_weather`.
+
+## Create a group from configuration
+
+`ClientGroup.from_config` creates one client per server rather than passing the entire configuration through a proxy. A FastMCP-specific `mode` field can select the protocol behavior for each server:
+
+```python
+from fastmcp.experimental.client_group import ClientGroup
+
+config = {
+    "mcpServers": {
+        "legacy": {
+            "command": "python",
+            "args": ["legacy_server.py"],
+            "mode": "legacy",
+        },
+        "modern": {
+            "url": "https://modern.example.com/mcp",
+            "mode": "auto",
+        },
+    }
+}
+
+group = ClientGroup.from_config(config)
+```
+
+Entries without a `mode` use `"auto"` by default.
+
+## Manage connections explicitly
+
+Using the group as a context manager is optional. Applications can own each client connection and use the group only for discovery and routing:
+
+```python
+async with legacy_client, modern_client:
+    tools = await group.list_tools()
+```
+
+It is also safe to enter the group inside a client context. FastMCP client contexts are reference counted, so leaving the group does not close a connection still owned by an outer context.
