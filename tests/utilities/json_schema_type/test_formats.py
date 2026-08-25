@@ -1,7 +1,8 @@
 """Tests for format handling in JSON schema conversion."""
 
 from dataclasses import Field
-from datetime import datetime
+from datetime import date, datetime, time, timedelta
+from uuid import UUID
 
 import pytest
 from pydantic import AnyUrl, TypeAdapter, ValidationError
@@ -23,6 +24,22 @@ class TestFormatTypes:
         return json_schema_to_type({"type": "string", "format": "date-time"})
 
     @pytest.fixture
+    def date_format(self):
+        return json_schema_to_type({"type": "string", "format": "date"})
+
+    @pytest.fixture
+    def time_format(self):
+        return json_schema_to_type({"type": "string", "format": "time"})
+
+    @pytest.fixture
+    def duration_format(self):
+        return json_schema_to_type({"type": "string", "format": "duration"})
+
+    @pytest.fixture
+    def uuid_format(self):
+        return json_schema_to_type({"type": "string", "format": "uuid"})
+
+    @pytest.fixture
     def email_format(self):
         return json_schema_to_type({"type": "string", "format": "email"})
 
@@ -37,6 +54,22 @@ class TestFormatTypes:
     @pytest.fixture
     def json_format(self):
         return json_schema_to_type({"type": "string", "format": "json"})
+
+    @pytest.fixture
+    def datetime_family_object(self):
+        return json_schema_to_type(
+            {
+                "type": "object",
+                "properties": {
+                    "ts": {"type": "string", "format": "date-time"},
+                    "day": {"type": "string", "format": "date"},
+                    "at": {"type": "string", "format": "time"},
+                    "dur": {"type": "string", "format": "duration"},
+                    "ident": {"type": "string", "format": "uuid"},
+                },
+                "required": ["ts", "day", "at", "dur", "ident"],
+            }
+        )
 
     @pytest.fixture
     def mixed_formats_object(self):
@@ -59,6 +92,46 @@ class TestFormatTypes:
         validator = TypeAdapter(datetime_format)
         with pytest.raises(ValidationError):
             validator.validate_python("not-a-date")
+
+    def test_date_valid(self, date_format):
+        validator = TypeAdapter(date_format)
+        result = validator.validate_python("2024-01-17")
+        assert result == date(2024, 1, 17)
+
+    def test_date_invalid(self, date_format):
+        validator = TypeAdapter(date_format)
+        with pytest.raises(ValidationError):
+            validator.validate_python("not-a-date")
+
+    def test_time_valid(self, time_format):
+        validator = TypeAdapter(time_format)
+        result = validator.validate_python("12:34:56")
+        assert result == time(12, 34, 56)
+
+    def test_time_invalid(self, time_format):
+        validator = TypeAdapter(time_format)
+        with pytest.raises(ValidationError):
+            validator.validate_python("not-a-time")
+
+    def test_duration_valid(self, duration_format):
+        validator = TypeAdapter(duration_format)
+        result = validator.validate_python("P1DT2H")
+        assert result == timedelta(days=1, hours=2)
+
+    def test_duration_invalid(self, duration_format):
+        validator = TypeAdapter(duration_format)
+        with pytest.raises(ValidationError):
+            validator.validate_python("not-a-duration")
+
+    def test_uuid_valid(self, uuid_format):
+        validator = TypeAdapter(uuid_format)
+        result = validator.validate_python("00000000-0000-0000-0000-000000000007")
+        assert result == UUID(int=7)
+
+    def test_uuid_invalid(self, uuid_format):
+        validator = TypeAdapter(uuid_format)
+        with pytest.raises(ValidationError):
+            validator.validate_python("not-a-uuid")
 
     def test_email_valid(self, email_format):
         validator = TypeAdapter(email_format)
@@ -112,3 +185,28 @@ class TestFormatTypes:
         )
         assert isinstance(result.full_uri, AnyUrl)
         assert isinstance(result.ref_uri, str)
+
+    def test_datetime_family_round_trips_from_a_model_output_schema(
+        self, datetime_family_object
+    ):
+        """The formats pydantic emits for the datetime/uuid family all rehydrate.
+
+        A server annotating a tool with these types produces exactly this
+        schema, so a client reconstructing it should get the Python objects
+        back rather than the ISO strings.
+        """
+        validator = TypeAdapter(datetime_family_object)
+        result = validator.validate_python(
+            {
+                "ts": "2024-01-17T12:34:56Z",
+                "day": "2024-01-17",
+                "at": "12:34:56",
+                "dur": "P1DT2H",
+                "ident": "00000000-0000-0000-0000-000000000007",
+            }
+        )
+        assert isinstance(result.ts, datetime)
+        assert result.day == date(2024, 1, 17)
+        assert result.at == time(12, 34, 56)
+        assert result.dur == timedelta(days=1, hours=2)
+        assert result.ident == UUID(int=7)
