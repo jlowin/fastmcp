@@ -3,21 +3,17 @@
 from __future__ import annotations
 
 import contextlib
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from types import TracebackType
 from typing import Any
 
+import anyio
 import mcp_types
 
 from fastmcp.client.client import CallToolResult, Client, ConnectMode
 from fastmcp.client.progress import ProgressHandler
 from fastmcp.mcp_config import MCPConfig
-
-ToolNameFn = Callable[[str, str], str]
-
-
-def _prefix_tool_name(server_name: str, tool_name: str) -> str:
-    return f"{server_name}_{tool_name}"
+from fastmcp.utilities.async_utils import gather
 
 
 class ClientGroup:
@@ -31,19 +27,14 @@ class ClientGroup:
     is safe because client contexts are reference counted.
     """
 
-    def __init__(
-        self,
-        clients: Mapping[str, Client[Any]],
-        *,
-        tool_name_fn: ToolNameFn = _prefix_tool_name,
-    ) -> None:
+    def __init__(self, clients: Mapping[str, Client[Any]]) -> None:
         if not clients:
             raise ValueError("ClientGroup requires at least one client")
 
         self.clients = dict(clients)
-        self.tool_name_fn = tool_name_fn
         self._exit_stack: contextlib.AsyncExitStack | None = None
         self._tool_routes: dict[str, tuple[Client[Any], str]] = {}
+        self._route_lock = anyio.Lock()
 
     @classmethod
     def from_config(
@@ -51,7 +42,6 @@ class ClientGroup:
         config: MCPConfig | dict[str, Any],
         *,
         default_mode: ConnectMode = "auto",
-        tool_name_fn: ToolNameFn = _prefix_tool_name,
     ) -> ClientGroup:
         """Create one independent client for each configured server.
 
@@ -69,7 +59,7 @@ class ClientGroup:
                 raise TypeError(f"Protocol mode for server {name!r} must be a string")
             clients[name] = Client(server.to_transport(), mode=configured_mode)
 
-        return cls(clients, tool_name_fn=tool_name_fn)
+        return cls(clients)
 
     @property
     def protocol_versions(self) -> dict[str, str | None]:
@@ -117,10 +107,14 @@ class ClientGroup:
         self._require_connected()
         tools: list[mcp_types.Tool] = []
         routes: dict[str, tuple[Client[Any], str]] = {}
+        clients = list(self.clients.items())
+        tool_lists = await gather(client.list_tools() for _, client in clients)
 
-        for server_name, client in self.clients.items():
-            for tool in await client.list_tools():
-                public_name = self.tool_name_fn(server_name, tool.name)
+        for (server_name, client), server_tools in zip(
+            clients, tool_lists, strict=True
+        ):
+            for tool in server_tools:
+                public_name = f"{server_name}_{tool.name}"
                 if public_name in routes:
                     raise ValueError(f"Tool name collision: {public_name!r}")
                 routes[public_name] = (client, tool.name)
@@ -133,8 +127,11 @@ class ClientGroup:
         self._require_connected()
         route = self._tool_routes.get(name)
         if route is None:
-            await self.list_tools()
-            route = self._tool_routes.get(name)
+            async with self._route_lock:
+                route = self._tool_routes.get(name)
+                if route is None:
+                    await self.list_tools()
+                    route = self._tool_routes.get(name)
         if route is None:
             raise KeyError(f"Unknown tool: {name!r}")
         return route

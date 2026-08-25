@@ -1,6 +1,8 @@
+import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
+from unittest.mock import patch
 
 from pydantic import ConfigDict
 
@@ -101,6 +103,31 @@ async def test_call_tool_populates_routes_lazily():
     assert result.data == "server: hello"
 
 
+async def test_concurrent_cold_calls_share_tool_discovery():
+    first = Client(make_server("first"))
+    second = Client(make_server("second"))
+    group = ClientGroup({"first": first, "second": second})
+
+    with (
+        patch.object(first, "list_tools", wraps=first.list_tools) as first_list,
+        patch.object(second, "list_tools", wraps=second.list_tools) as second_list,
+    ):
+        async with group:
+            results = await asyncio.gather(
+                group.call_tool("first_echo", {"value": "one"}),
+                group.call_tool("second_echo", {"value": "two"}),
+                group.call_tool("first_protocol_era"),
+            )
+
+    assert [result.data for result in results] == [
+        "first: one",
+        "second: two",
+        "2026-07-28",
+    ]
+    assert first_list.call_count == 1
+    assert second_list.call_count == 1
+
+
 async def test_callers_can_manage_connections():
     old = Client(LegacyFastMCPTransport(make_server("old")))
     new = Client(FastMCPTransport(make_server("new")))
@@ -177,18 +204,28 @@ async def test_group_keeps_one_connection_per_server():
 
 
 async def test_tool_name_collisions_are_rejected():
+    first = FastMCP("first")
+    second = FastMCP("second")
+
+    @first.tool(name="b_echo")
+    def first_echo() -> str:
+        return "first"
+
+    @second.tool(name="echo")
+    def second_echo() -> str:
+        return "second"
+
     group = ClientGroup(
         {
-            "one": Client(make_server("one")),
-            "two": Client(make_server("two")),
-        },
-        tool_name_fn=lambda _server, tool: tool,
+            "a": Client(first),
+            "a_b": Client(second),
+        }
     )
 
     async with group:
         try:
             await group.list_tools()
         except ValueError as exc:
-            assert str(exc) == "Tool name collision: 'protocol_era'"
+            assert str(exc) == "Tool name collision: 'a_b_echo'"
         else:
             raise AssertionError("Expected a tool name collision")
