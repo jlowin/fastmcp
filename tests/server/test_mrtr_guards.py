@@ -636,6 +636,22 @@ class TestMultiServerConfigEraMirroring:
         """Two entries so the transport takes its multi-server composite path."""
         return {"mcpServers": {"a": {"url": url}, "b": {"url": url}}}
 
+    async def test_direct_multi_server_client_drives_modern_guard_round_trips(self):
+        """The config-based client itself stays modern through every backend leg."""
+        async with run_server_async(_era_reporting_backend()) as url:
+            asked: list[str] = []
+            async with Client(
+                self._config(url),
+                elicitation_handler=_two_answer_handler(asked),
+            ) as client:
+                era = await client.call_tool("a_backend_era", {})
+                result = await client.call_tool("a_book_flight", {})
+
+        assert client.protocol_version is None
+        assert era.data == "2026-07-28"
+        assert result.data == "Booked Paris on 2026-08-01"
+        assert len(asked) == 2
+
     async def test_modern_front_reaches_modern_backends(self):
         """A modern front reaches each real backend on a modern session, and a
         backend guard tool round-trips end to end across both proxy hops."""

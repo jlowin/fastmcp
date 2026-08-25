@@ -9,7 +9,7 @@ import ssl
 import uuid
 from collections.abc import AsyncIterator, Callable, Coroutine, Mapping, Sequence
 from contextlib import AsyncExitStack, asynccontextmanager, suppress
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Generic, Literal, TypeVar, cast, overload
 
@@ -800,11 +800,23 @@ class Client(
 
     @asynccontextmanager
     async def _context_manager(self):
+        transport_options = self._transport_options
+        if (
+            isinstance(self.transport, MCPConfigTransport)
+            and len(self.transport.config.mcpServers) > 1
+        ):
+            # Resolve mutable connection policy here rather than at construction:
+            # both `Client.mode` and an MCPConfig's server set may change before
+            # the client connects. Preserve options contributed by other layers.
+            transport_options = replace(
+                transport_options or TransportOptions(), backend_mode=self.mode
+            )
+
         # Only passed when this client actually wants non-default settings, so an
         # ordinary client never sends an argument a transport might not accept.
-        if self._transport_options is not None:
+        if transport_options is not None:
             connection = self.transport.connect_session(
-                transport_options=self._transport_options, **self._session_kwargs
+                transport_options=transport_options, **self._session_kwargs
             )
         else:
             connection = self.transport.connect_session(**self._session_kwargs)
@@ -847,9 +859,10 @@ class Client(
         else:
             timeout = normalize_timeout_to_seconds(timeout)
 
-        # A legacy-only transport (SSE, a multi-server proxy config) cannot serve
-        # the modern era; treat "auto" as "legacy" there rather than probing
-        # server/discover, which some such servers answer but then cannot serve.
+        # A legacy-only transport cannot serve the modern era; treat "auto" as
+        # "legacy" there rather than probing server/discover. Multi-server config
+        # transports resolve this flag from their connected backend set before
+        # negotiation reaches this point.
         effective_mode = self.mode
         if effective_mode == "auto" and self.transport.legacy_only:
             effective_mode = "legacy"
