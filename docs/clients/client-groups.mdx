@@ -52,6 +52,8 @@ Tool names are prefixed with the configured client name by default. For example,
 
 The first routed call loads the tool catalog lazily. After a successful load, unknown tool names fail locally rather than repeating discovery against every server. Call `list_tools()` explicitly to refresh the routes when servers add or remove tools dynamically.
 
+Higher-level tool adapters can call `resolve_tool()` to recover a public tool's server name, client, and original upstream name. This preserves per-server callback and interceptor context without reimplementing the group's routing rules.
+
 ## Create a group from configuration
 
 `ClientGroup.from_config` creates one client per server rather than passing the entire configuration through a proxy. A FastMCP-specific `mode` field can select the protocol behavior for each server:

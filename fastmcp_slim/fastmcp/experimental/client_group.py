@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 from collections.abc import Mapping
+from dataclasses import dataclass
 from types import TracebackType
 from typing import Any
 
@@ -14,6 +15,15 @@ from fastmcp.client.client import CallToolResult, Client, ConnectMode
 from fastmcp.client.progress import ProgressHandler
 from fastmcp.mcp_config import MCPConfig
 from fastmcp.utilities.async_utils import gather
+
+
+@dataclass(frozen=True)
+class ToolRoute:
+    """The client and upstream name behind a public group tool name."""
+
+    server_name: str
+    client: Client[Any]
+    upstream_name: str
 
 
 class ClientGroup:
@@ -33,7 +43,7 @@ class ClientGroup:
 
         self.clients = dict(clients)
         self._exit_stack: contextlib.AsyncExitStack | None = None
-        self._tool_routes: dict[str, tuple[Client[Any], str]] = {}
+        self._tool_routes: dict[str, ToolRoute] = {}
         self._catalog_loaded = False
         self._route_lock = anyio.Lock()
 
@@ -108,7 +118,7 @@ class ClientGroup:
         """List tools from every client with namespaced names."""
         self._require_connected()
         tools: list[mcp_types.Tool] = []
-        routes: dict[str, tuple[Client[Any], str]] = {}
+        routes: dict[str, ToolRoute] = {}
         clients = list(self.clients.items())
         tool_lists = await gather(client.list_tools() for _, client in clients)
 
@@ -119,14 +129,19 @@ class ClientGroup:
                 public_name = f"{server_name}_{tool.name}"
                 if public_name in routes:
                     raise ValueError(f"Tool name collision: {public_name!r}")
-                routes[public_name] = (client, tool.name)
+                routes[public_name] = ToolRoute(
+                    server_name=server_name,
+                    client=client,
+                    upstream_name=tool.name,
+                )
                 tools.append(tool.model_copy(update={"name": public_name}))
 
         self._tool_routes = routes
         self._catalog_loaded = True
         return tools
 
-    async def _resolve_tool(self, name: str) -> tuple[Client[Any], str]:
+    async def resolve_tool(self, name: str) -> ToolRoute:
+        """Resolve a public tool name to its client and upstream identity."""
         self._require_connected()
         route = self._tool_routes.get(name)
         if route is not None:
@@ -156,9 +171,9 @@ class ClientGroup:
         meta: dict[str, Any] | None = None,
     ) -> mcp_types.CallToolResult:
         """Call a namespaced tool and return its raw MCP result."""
-        client, upstream_name = await self._resolve_tool(name)
-        return await client.call_tool_mcp(
-            upstream_name,
+        route = await self.resolve_tool(name)
+        return await route.client.call_tool_mcp(
+            route.upstream_name,
             arguments or {},
             timeout=timeout,
             progress_handler=progress_handler,
@@ -177,9 +192,9 @@ class ClientGroup:
         meta: dict[str, Any] | None = None,
     ) -> CallToolResult:
         """Call a namespaced tool through the client that advertised it."""
-        client, upstream_name = await self._resolve_tool(name)
-        return await client.call_tool(
-            upstream_name,
+        route = await self.resolve_tool(name)
+        return await route.client.call_tool(
+            route.upstream_name,
             arguments,
             version=version,
             timeout=timeout,

@@ -66,6 +66,10 @@ async def test_clients_negotiate_independently():
             "new_protocol_era",
             "new_echo",
         }
+        route = await group.resolve_tool("new_echo")
+        assert route.server_name == "new"
+        assert route.client is modern
+        assert route.upstream_name == "echo"
 
         old_era = await group.call_tool("old_protocol_era")
         new_era = await group.call_tool("new_protocol_era")
