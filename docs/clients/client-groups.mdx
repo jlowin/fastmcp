@@ -50,6 +50,8 @@ asyncio.run(main())
 
 Tool names are prefixed with the configured client name by default. For example, a `get_weather` tool exposed by the `modern` client becomes `modern_get_weather`.
 
+The first routed call loads the tool catalog lazily. After a successful load, unknown tool names fail locally rather than repeating discovery against every server. Call `list_tools()` explicitly to refresh the routes when servers add or remove tools dynamically.
+
 ## Create a group from configuration
 
 `ClientGroup.from_config` creates one client per server rather than passing the entire configuration through a proxy. A FastMCP-specific `mode` field can select the protocol behavior for each server:

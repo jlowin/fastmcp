@@ -34,6 +34,7 @@ class ClientGroup:
         self.clients = dict(clients)
         self._exit_stack: contextlib.AsyncExitStack | None = None
         self._tool_routes: dict[str, tuple[Client[Any], str]] = {}
+        self._catalog_loaded = False
         self._route_lock = anyio.Lock()
 
     @classmethod
@@ -90,6 +91,7 @@ class ClientGroup:
         stack = self._exit_stack
         self._exit_stack = None
         self._tool_routes.clear()
+        self._catalog_loaded = False
         if stack is not None:
             return await stack.__aexit__(exc_type, exc_value, traceback)
         return None
@@ -121,17 +123,25 @@ class ClientGroup:
                 tools.append(tool.model_copy(update={"name": public_name}))
 
         self._tool_routes = routes
+        self._catalog_loaded = True
         return tools
 
     async def _resolve_tool(self, name: str) -> tuple[Client[Any], str]:
         self._require_connected()
         route = self._tool_routes.get(name)
-        if route is None:
-            async with self._route_lock:
+        if route is not None:
+            return route
+        if self._catalog_loaded:
+            raise KeyError(f"Unknown tool: {name!r}")
+
+        async with self._route_lock:
+            route = self._tool_routes.get(name)
+            if route is not None:
+                return route
+            if not self._catalog_loaded:
+                await self.list_tools()
                 route = self._tool_routes.get(name)
-                if route is None:
-                    await self.list_tools()
-                    route = self._tool_routes.get(name)
+
         if route is None:
             raise KeyError(f"Unknown tool: {name!r}")
         return route

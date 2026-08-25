@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from typing import Any
 from unittest.mock import patch
 
+import pytest
 from pydantic import ConfigDict
 
 from fastmcp import Client, Context, FastMCP
@@ -124,6 +125,24 @@ async def test_concurrent_cold_calls_share_tool_discovery():
         "second: two",
         "2026-07-28",
     ]
+    assert first_list.call_count == 1
+    assert second_list.call_count == 1
+
+
+async def test_unknown_tools_do_not_repeat_discovery():
+    first = Client(make_server("first"))
+    second = Client(make_server("second"))
+    group = ClientGroup({"first": first, "second": second})
+
+    with (
+        patch.object(first, "list_tools", wraps=first.list_tools) as first_list,
+        patch.object(second, "list_tools", wraps=second.list_tools) as second_list,
+    ):
+        async with group:
+            for name in ("missing", "also_missing", "missing"):
+                with pytest.raises(KeyError, match=f"Unknown tool: {name!r}"):
+                    await group.call_tool(name)
+
     assert first_list.call_count == 1
     assert second_list.call_count == 1
 
