@@ -110,12 +110,14 @@ class _DescopeJWTVerifier(JWTVerifier):
             return True
         if not isinstance(issuer, str):
             return False
-        # A tenant ID extends the project issuer and an MCP server ID extends
-        # the project's agentic path, so exactly one segment may follow either.
-        for prefix in (self.project_issuer, self.agentic_issuer):
+        # An MCP server ID extends the project's agentic path and a tenant ID
+        # extends the project issuer, so exactly one segment may follow either.
+        # The agentic path is checked first as the more specific of the two.
+        for prefix in (self.agentic_issuer, self.project_issuer):
             if issuer.startswith(f"{prefix}/"):
                 segment = issuer[len(prefix) + 1 :].strip("/")
-                return bool(segment) and "/" not in segment
+                if segment and "/" not in segment:
+                    return True
         return False
 
 
