@@ -242,9 +242,7 @@ async def test_grace_does_not_replay_for_another_client():
         return_value=setup.upstream_client,
     ):
         first = await post_refresh(setup, setup.refresh_token)
-        replay = await setup.proxy.load_refresh_token(
-            other_client, setup.refresh_token
-        )
+        replay = await setup.proxy.load_refresh_token(other_client, setup.refresh_token)
 
     assert first.status_code == 200
     assert replay is None
@@ -262,9 +260,7 @@ async def test_revoking_predecessor_removes_rotation_response():
         return_value=setup.upstream_client,
     ):
         first = await post_refresh(setup, setup.refresh_token)
-        predecessor = await setup.proxy.load_refresh_token(
-            client, setup.refresh_token
-        )
+        predecessor = await setup.proxy.load_refresh_token(client, setup.refresh_token)
         assert predecessor is not None
         await setup.proxy.revoke_token(predecessor)
         replay = await setup.proxy.load_refresh_token(client, setup.refresh_token)
