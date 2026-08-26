@@ -90,3 +90,9 @@ async with legacy_client, modern_client:
 ```
 
 It is also safe to enter the group inside a client context. FastMCP client contexts are reference counted, so leaving the group does not close a connection still owned by an outer context.
+
+## Relationship to SDK session groups
+
+The official MCP Python SDK provides `ClientSessionGroup` for aggregating raw `ClientSession` connections, including tools, resources, and prompts. Use it when raw SDK sessions and dynamic group membership fit the application.
+
+`ClientGroup` instead retains fully configured FastMCP clients. Calls continue through the selected `Client`, preserving its independently negotiated protocol mode, authentication, handlers, caching, tracing, result parsing, and multi-round tool behavior. The experimental API is intentionally narrower and currently aggregates tools only.
