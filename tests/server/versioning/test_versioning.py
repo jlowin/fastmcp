@@ -428,8 +428,12 @@ class TestDedupeVersionMetadataDeterminism:
     (version_sort_key) now applies here too.
     """
 
-    def _tool(self, version: str) -> Tool:
+    def _tool(self, version: str | None) -> Tool:
         return Tool.from_function(lambda: None, name="demo", version=version)
+
+    def _versions(self, tool: Tool) -> list[str]:
+        assert tool.meta is not None
+        return tool.meta["fastmcp"]["versions"]
 
     def test_equivalent_spellings_order_independent(self):
         forward = dedupe_with_versions(
@@ -438,21 +442,21 @@ class TestDedupeVersionMetadataDeterminism:
         reverse = dedupe_with_versions(
             [self._tool("1.0"), self._tool("1")], key_fn=lambda c: c.name
         )
-        assert forward[0].meta["fastmcp"]["versions"] == ["1.0", "1"]
-        assert reverse[0].meta["fastmcp"]["versions"] == ["1.0", "1"]
+        assert self._versions(forward[0]) == ["1.0", "1"]
+        assert self._versions(reverse[0]) == ["1.0", "1"]
 
     def test_primary_version_order_still_descending(self):
         result = dedupe_with_versions(
             [self._tool("1"), self._tool("2.0"), self._tool("1.10")],
             key_fn=lambda c: c.name,
         )
-        assert result[0].meta["fastmcp"]["versions"] == ["2.0", "1.10", "1"]
+        assert self._versions(result[0]) == ["2.0", "1.10", "1"]
 
     def test_unversioned_components_excluded_from_list(self):
         result = dedupe_with_versions(
             [self._tool(None), self._tool("1")], key_fn=lambda c: c.name
         )
-        assert result[0].meta["fastmcp"]["versions"] == ["1"]
+        assert self._versions(result[0]) == ["1"]
 
     def test_malformed_versions_tiebreak_lexicographically(self):
         forward = dedupe_with_versions(
@@ -461,5 +465,5 @@ class TestDedupeVersionMetadataDeterminism:
         reverse = dedupe_with_versions(
             [self._tool("LATEST"), self._tool("latest")], key_fn=lambda c: c.name
         )
-        assert forward[0].meta["fastmcp"]["versions"] == ["latest", "LATEST"]
-        assert reverse[0].meta["fastmcp"]["versions"] == ["latest", "LATEST"]
+        assert self._versions(forward[0]) == ["latest", "LATEST"]
+        assert self._versions(reverse[0]) == ["latest", "LATEST"]
