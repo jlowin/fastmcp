@@ -56,7 +56,14 @@ jobs:
         with:
           app-id: ${{ secrets.MARVIN_APP_ID }}
           private-key: ${{ secrets.MARVIN_APP_PRIVATE_KEY }}
-          owner: PrefectHQ
+          # No `owner:` — with it set and `repositories:` empty the token is
+          # scoped to every repo in the PrefectHQ installation. Triage only
+          # ever touches this one. The permissions below match the job's
+          # `permissions:` block; unscoped the token would also carry
+          # contents: write and actions: write from the App installation.
+          permission-contents: read
+          permission-issues: write
+          permission-pull-requests: write
 
       - name: Set triage prompt
         id: triage-prompt

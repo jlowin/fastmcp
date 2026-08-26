@@ -16,17 +16,17 @@ The sections below cover what FastMCP handles for you, the changes you must make
 While FastMCP 4 is in prerelease, pin the beta explicitly. The `fastmcp` package is a thin wrapper that depends on `fastmcp-slim` at the same version, so asking for a prerelease of one means asking for a prerelease of the other. pip infers that on its own:
 
 ```bash
-pip install "fastmcp==4.0.0b3"
+pip install "fastmcp==4.0.0b4"
 ```
 
 uv is stricter: it allows prereleases only for packages you name, and `fastmcp-slim` arrives transitively. Constrain it alongside the requirement in `pyproject.toml`:
 
 ```toml
 [project]
-dependencies = ["fastmcp==4.0.0b3"]
+dependencies = ["fastmcp==4.0.0b4"]
 
 [tool.uv]
-constraint-dependencies = ["fastmcp-slim==4.0.0b3"]
+constraint-dependencies = ["fastmcp-slim==4.0.0b4"]
 ```
 
 Then run `uv lock` or `uv sync` normally. Naming the one package keeps the rest of your graph on stable releases, where `--prerelease allow` would opt every dependency into prereleases. The MCP SDK needs no constraint at all now that it ships stable releases — pinning `mcp==2.0.0b2` here would in fact break the resolution, since a prerelease does not satisfy FastMCP's own `mcp>=2.0.0` requirement.
@@ -307,12 +307,12 @@ The extension ships in a separate package, so the pin from [Install the v4 Prere
 
 ```toml
 [project]
-dependencies = ["fastmcp[tasks]==4.0.0b3"]
+dependencies = ["fastmcp[tasks]==4.0.0b4"]
 
 [tool.uv]
 constraint-dependencies = [
-    "fastmcp-slim==4.0.0b3",
-    "fastmcp-tasks==4.0.0b3",
+    "fastmcp-slim==4.0.0b4",
+    "fastmcp-tasks==4.0.0b4",
 ]
 ```
 
