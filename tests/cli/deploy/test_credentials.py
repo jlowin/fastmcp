@@ -183,6 +183,29 @@ async def test_interactive_credential_rejects_an_origin_change(
     assert store.load() is None
 
 
+def test_conditional_clear_preserves_newer_state(tmp_path: Path) -> None:
+    store = CredentialStore(tmp_path)
+    store.save("fmcp_current")
+
+    store.clear_if_matches(
+        "fmcp_different",
+        expected_api_origin="https://horizon.prefect.io",
+    )
+    store.clear_if_matches(
+        "fmcp_current",
+        expected_api_origin="https://dev.horizon.prefect.io",
+    )
+
+    assert load_secret(store).get_secret_value() == "fmcp_current"
+
+    store.clear_if_matches(
+        "fmcp_current",
+        expected_api_origin="https://horizon.prefect.io",
+    )
+
+    assert store.load() is None
+
+
 async def test_missing_noninteractive_credential_is_explicit(tmp_path: Path) -> None:
     with pytest.raises(AuthenticationRequiredError):
         await resolve_credential(CredentialStore(tmp_path), environ={})

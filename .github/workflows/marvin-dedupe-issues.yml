@@ -36,6 +36,12 @@ jobs:
         with:
           app-id: ${{ secrets.MARVIN_APP_ID }}
           private-key: ${{ secrets.MARVIN_APP_PRIVATE_KEY }}
+          # Match the job's `permissions:` block above. Unscoped, the token
+          # inherits the App installation's full set — which includes
+          # contents: write and actions: write, neither of which this job
+          # declares and both of which end up in the model's shell as GH_TOKEN.
+          permission-contents: read
+          permission-issues: write
 
       - name: Set dedupe prompt
         id: dedupe-prompt
@@ -114,8 +120,12 @@ jobs:
           prompt: ${{ steps.dedupe-prompt.outputs.PROMPT }}
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY_FOR_CI }}
           allowed_non_write_users: "*"
+          # No `Bash(gh api:*)`: it reaches every endpoint the token can, which
+          # is the reason marvin-label-triage routes its one write through
+          # .github/scripts/triage-label.sh instead. Dedupe searches, reads and
+          # comments — the four verbs below cover that.
           claude_args: |
-            --allowedTools "Bash(gh issue view:*)","Bash(gh search:*)","Bash(gh issue list:*)","Bash(gh api:*)","Bash(gh issue comment:*)",Task
+            --allowedTools "Bash(gh issue view:*)","Bash(gh search:*)","Bash(gh issue list:*)","Bash(gh issue comment:*)",Task
           settings: |
             {
               "model": "claude-sonnet-5",

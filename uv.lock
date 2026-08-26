@@ -13,7 +13,7 @@ resolution-markers = [
 ]
 
 [options]
-exclude-newer = "0001-01-01T00:00:00Z" # This has no effect and is included for backwards compatibility when using relative exclude-newer values.
+exclude-newer = "2026-08-15T18:52:05.050937Z"
 exclude-newer-span = "P1W"
 
 [options.exclude-newer-package]
@@ -1043,7 +1043,7 @@ server = [
 
 [package.metadata]
 requires-dist = [
-    { name = "anthropic", marker = "extra == 'anthropic'", specifier = ">=0.48.0" },
+    { name = "anthropic", marker = "extra == 'anthropic'", specifier = ">=0.48.0,<1" },
     { name = "authlib", marker = "extra == 'client'", specifier = ">=1.6.11" },
     { name = "authlib", marker = "extra == 'server'", specifier = ">=1.6.11" },
     { name = "azure-identity", marker = "extra == 'azure'", specifier = ">=1.16.0" },
