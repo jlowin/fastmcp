@@ -46,6 +46,8 @@ Before you begin, you will need:
     ```
     https://api.descope.com/v1/apps/P.../.well-known/openid-configuration
     ```
+
+    The project-level URL is the recommended one: it covers every MCP server in the project.
 </Step>
 </Steps>
 
@@ -101,6 +103,18 @@ auth_provider = DescopeProvider(
 ```
 
 `scopes_supported` controls what the protected resource metadata advertises. `required_scopes` controls what the JWT verifier requires during token validation. When only `required_scopes` is set, those scopes are also advertised to clients.
+
+### Token issuers
+
+A Descope project mints tokens under more than one issuer, and which one a token carries depends on how it was minted rather than on the Well-Known URL you configured:
+
+| Issuer | Form |
+| --- | --- |
+| Project | `https://api.descope.com/v1/apps/P...` |
+| MCP server | `https://api.descope.com/v1/apps/agentic/P.../M...` |
+| Tenant (cross-app access) | `https://api.descope.com/v1/apps/P.../T...` |
+
+`DescopeProvider` accepts all of them, as long as they name the project it was configured with. Issuers from another project, another Descope deployment, or with extra path segments are rejected, and the audience check still pins tokens to your project ID. Use `required_scopes` to control what a token must carry to reach your server.
 
 ## Testing
 
