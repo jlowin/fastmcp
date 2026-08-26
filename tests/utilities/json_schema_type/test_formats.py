@@ -1,7 +1,8 @@
 """Tests for format handling in JSON schema conversion."""
 
 from dataclasses import Field
-from datetime import datetime
+from datetime import date, datetime, time, timedelta
+from uuid import UUID
 
 import pytest
 from pydantic import AnyUrl, TypeAdapter, ValidationError
@@ -37,6 +38,37 @@ class TestFormatTypes:
     @pytest.fixture
     def json_format(self):
         return json_schema_to_type({"type": "string", "format": "json"})
+
+    @pytest.fixture
+    def date_format(self):
+        return json_schema_to_type({"type": "string", "format": "date"})
+
+    @pytest.fixture
+    def time_format(self):
+        return json_schema_to_type({"type": "string", "format": "time"})
+
+    @pytest.fixture
+    def duration_format(self):
+        return json_schema_to_type({"type": "string", "format": "duration"})
+
+    @pytest.fixture
+    def uuid_format(self):
+        return json_schema_to_type({"type": "string", "format": "uuid"})
+
+    @pytest.fixture
+    def datetime_family_object(self):
+        return json_schema_to_type(
+            {
+                "type": "object",
+                "properties": {
+                    "ts": {"type": "string", "format": "date-time"},
+                    "day": {"type": "string", "format": "date"},
+                    "at": {"type": "string", "format": "time"},
+                    "dur": {"type": "string", "format": "duration"},
+                    "ident": {"type": "string", "format": "uuid"},
+                },
+            }
+        )
 
     @pytest.fixture
     def mixed_formats_object(self):
@@ -104,6 +136,63 @@ class TestFormatTypes:
         validator = TypeAdapter(json_format)
         with pytest.raises(ValidationError):
             validator.validate_python("{invalid json}")
+
+    def test_date_valid(self, date_format):
+        validator = TypeAdapter(date_format)
+        result = validator.validate_python("2024-01-17")
+        assert isinstance(result, date)
+
+    def test_date_invalid(self, date_format):
+        validator = TypeAdapter(date_format)
+        with pytest.raises(ValidationError):
+            validator.validate_python("not-a-date")
+
+    def test_time_valid(self, time_format):
+        validator = TypeAdapter(time_format)
+        result = validator.validate_python("12:34:56")
+        assert isinstance(result, time)
+
+    def test_time_invalid(self, time_format):
+        validator = TypeAdapter(time_format)
+        with pytest.raises(ValidationError):
+            validator.validate_python("not-a-time")
+
+    def test_duration_valid(self, duration_format):
+        validator = TypeAdapter(duration_format)
+        result = validator.validate_python("P1D")
+        assert isinstance(result, timedelta)
+
+    def test_duration_invalid(self, duration_format):
+        validator = TypeAdapter(duration_format)
+        with pytest.raises(ValidationError):
+            validator.validate_python("not-a-duration")
+
+    def test_uuid_valid(self, uuid_format):
+        validator = TypeAdapter(uuid_format)
+        result = validator.validate_python("00000000-0000-0000-0000-000000000007")
+        assert isinstance(result, UUID)
+
+    def test_uuid_invalid(self, uuid_format):
+        validator = TypeAdapter(uuid_format)
+        with pytest.raises(ValidationError):
+            validator.validate_python("not-a-uuid")
+
+    def test_datetime_family_object_hydrates_all_types(self, datetime_family_object):
+        validator = TypeAdapter(datetime_family_object)
+        result = validator.validate_python(
+            {
+                "ts": "2024-01-01T12:00:00",
+                "day": "2024-01-01",
+                "at": "01:02:00",
+                "dur": "P1D",
+                "ident": "00000000-0000-0000-0000-000000000007",
+            }
+        )
+        assert isinstance(result.ts, datetime)
+        assert isinstance(result.day, date)
+        assert isinstance(result.at, time)
+        assert isinstance(result.dur, timedelta)
+        assert isinstance(result.ident, UUID)
 
     def test_mixed_formats_object(self, mixed_formats_object):
         validator = TypeAdapter(mixed_formats_object)
