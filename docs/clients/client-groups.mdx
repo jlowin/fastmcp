@@ -93,6 +93,6 @@ It is also safe to enter the group inside a client context. FastMCP client conte
 
 ## Relationship to SDK session groups
 
-The official MCP Python SDK provides `ClientSessionGroup` for aggregating raw `ClientSession` connections, including tools, resources, and prompts. Use it when raw SDK sessions and dynamic group membership fit the application.
+The upstream official MCP Python SDK provides `ClientSessionGroup` for aggregating raw `ClientSession` connections, including tools, resources, and prompts. Its `connect_to_server()` path uses the classic `initialize` handshake, so it does not negotiate the modern protocol. Use it when classic sessions, raw SDK results, and dynamic group membership fit the application.
 
-`ClientGroup` instead retains fully configured FastMCP clients. Calls continue through the selected `Client`, preserving its independently negotiated protocol mode, authentication, handlers, caching, tracing, result parsing, and multi-round tool behavior. The experimental API is intentionally narrower and currently aggregates tools only.
+`connect_with_session()` can register a modern session that was connected separately, but the caller must create and keep that client alive because the SDK group does not own sessions registered this way. `ClientGroup` instead manages fully configured FastMCP clients directly. Each client can negotiate its own modern or legacy protocol, and calls continue through that client, preserving its authentication, handlers, caching, tracing, result parsing, and multi-round tool behavior. The experimental API is intentionally narrower and currently aggregates tools only.
