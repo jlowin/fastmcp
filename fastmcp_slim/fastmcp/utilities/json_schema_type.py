@@ -61,6 +61,7 @@ from collections.abc import Callable, Mapping
 from copy import deepcopy
 from dataclasses import MISSING, field, make_dataclass
 from datetime import date, datetime, time, timedelta
+from pathlib import Path
 from typing import (
     Annotated,
     Any,
@@ -125,6 +126,8 @@ FORMAT_TYPES: dict[str, Any] = {
     "time": time,
     "duration": timedelta,
     "uuid": UUID,
+    "binary": bytes,
+    "path": Path,
     "email": EmailStr,
     "uri": AnyUrl,
     "json": Json,

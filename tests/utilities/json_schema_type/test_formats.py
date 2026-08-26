@@ -2,6 +2,7 @@
 
 from dataclasses import Field
 from datetime import date, datetime, time, timedelta
+from pathlib import Path
 from uuid import UUID
 
 import pytest
@@ -54,6 +55,26 @@ class TestFormatTypes:
     @pytest.fixture
     def uuid_format(self):
         return json_schema_to_type({"type": "string", "format": "uuid"})
+
+    @pytest.fixture
+    def binary_format(self):
+        return json_schema_to_type({"type": "string", "format": "binary"})
+
+    @pytest.fixture
+    def path_format(self):
+        return json_schema_to_type({"type": "string", "format": "path"})
+
+    @pytest.fixture
+    def binary_path_object(self):
+        return json_schema_to_type(
+            {
+                "type": "object",
+                "properties": {
+                    "data": {"type": "string", "format": "binary"},
+                    "path": {"type": "string", "format": "path"},
+                },
+            }
+        )
 
     @pytest.fixture
     def datetime_family_object(self):
@@ -176,6 +197,26 @@ class TestFormatTypes:
         validator = TypeAdapter(uuid_format)
         with pytest.raises(ValidationError):
             validator.validate_python("not-a-uuid")
+
+    def test_binary_valid(self, binary_format):
+        validator = TypeAdapter(binary_format)
+        result = validator.validate_python("\x00\x01")
+        assert isinstance(result, bytes)
+        assert result == b"\x00\x01"
+
+    def test_path_valid(self, path_format):
+        validator = TypeAdapter(path_format)
+        result = validator.validate_python("/tmp/foo.txt")
+        assert isinstance(result, Path)
+
+    def test_binary_path_object_hydrates_types(self, binary_path_object):
+        validator = TypeAdapter(binary_path_object)
+        result = validator.validate_python(
+            {"data": "\x00\x01", "path": "/tmp/foo.txt"}
+        )
+        assert isinstance(result.data, bytes)
+        assert result.data == b"\x00\x01"
+        assert isinstance(result.path, Path)
 
     def test_datetime_family_object_hydrates_all_types(self, datetime_family_object):
         validator = TypeAdapter(datetime_family_object)
