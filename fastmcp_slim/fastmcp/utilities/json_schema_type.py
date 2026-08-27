@@ -353,7 +353,22 @@ def _create_array_type(
     schemas: Mapping[str, Any],
     resolving_refs: frozenset[str],
 ) -> type | Annotated[Any, ...]:
-    """Create list/set type with optional constraints."""
+    """Create list/set/tuple type with optional constraints."""
+    prefix_items = schema.get("prefixItems")
+    if (
+        prefix_items
+        and not schema.get("items")
+        and schema.get("minItems") == len(prefix_items)
+        and schema.get("maxItems") == len(prefix_items)
+    ):
+        # Fixed-length positional schema (draft 2020-12), as generated for
+        # e.g. ``tuple[date, int]``: hydrate as a typed tuple. Length is
+        # implied by the tuple type itself.
+        item_types = tuple(
+            _schema_to_type(s, schemas, resolving_refs) for s in prefix_items
+        )
+        return tuple[item_types]  # ty:ignore[invalid-type-form]
+
     items = schema.get("items", {})
     if isinstance(items, list):
         # Handle positional item schemas

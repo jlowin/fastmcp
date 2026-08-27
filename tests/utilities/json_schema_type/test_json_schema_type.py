@@ -21,6 +21,28 @@ def get_dataclass_field(type: type, field_name: str) -> Field:
 class TestSimpleTypes:
     """Test suite for basic type validation."""
 
+    def test_prefix_items_hydrate_to_typed_tuple(self):
+        schema = {
+            "type": "array",
+            "prefixItems": [{"type": "integer"}, {"type": "string"}],
+            "minItems": 2,
+            "maxItems": 2,
+        }
+        validator = TypeAdapter(json_schema_to_type(schema))
+        result = validator.validate_python([1, "a"])
+        assert result == (1, "a")
+        assert isinstance(result, tuple)
+        with pytest.raises(ValidationError):
+            validator.validate_python(["a", 1])
+
+    def test_prefix_items_with_open_tail_stays_list(self):
+        # Without a matching maxItems, additional items are allowed by the
+        # schema, so the result must remain a list.
+        schema = {"type": "array", "prefixItems": [{"type": "integer"}]}
+        validator = TypeAdapter(json_schema_to_type(schema))
+        result = validator.validate_python([1, 2, 3])
+        assert isinstance(result, list)
+
     @pytest.fixture
     def simple_string(self):
         return json_schema_to_type({"type": "string"})
