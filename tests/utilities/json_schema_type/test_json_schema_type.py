@@ -3,8 +3,11 @@
 import dataclasses
 import warnings
 from dataclasses import Field
+from datetime import date, datetime, time, timedelta
 from enum import Enum
+from pathlib import Path
 from typing import Any, Literal, cast
+from uuid import UUID
 
 import pytest
 from pydantic import TypeAdapter, ValidationError
@@ -20,6 +23,30 @@ def get_dataclass_field(type: type, field_name: str) -> Field:
 
 class TestSimpleTypes:
     """Test suite for basic type validation."""
+
+    @pytest.fixture
+    def format_cases(self):
+        return [
+            ("date-time", "2026-08-27T14:30:00", datetime(2026, 8, 27, 14, 30)),
+            ("date", "2026-08-27", date(2026, 8, 27)),
+            ("time", "14:30:00", time(14, 30)),
+            ("duration", "PT90S", timedelta(seconds=90)),
+            (
+                "uuid",
+                "550e8400-e29b-41d4-a716-446655440000",
+                UUID("550e8400-e29b-41d4-a716-446655440000"),
+            ),
+            ("path", "/tmp/example.txt", Path("/tmp/example.txt")),
+        ]
+
+    def test_string_formats_hydrate_to_python_types(self, format_cases):
+        for fmt, value, expected in format_cases:
+            validator = TypeAdapter(
+                json_schema_to_type({"type": "string", "format": fmt})
+            )
+            result = validator.validate_python(value)
+            assert result == expected
+            assert isinstance(result, type(expected))
 
     @pytest.fixture
     def simple_string(self):

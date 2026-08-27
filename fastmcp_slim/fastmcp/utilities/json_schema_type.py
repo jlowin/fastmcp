@@ -60,7 +60,8 @@ import warnings
 from collections.abc import Callable, Mapping
 from copy import deepcopy
 from dataclasses import MISSING, field, make_dataclass
-from datetime import date, datetime
+from datetime import date, datetime, time, timedelta
+from pathlib import Path
 from typing import (
     Annotated,
     Any,
@@ -69,6 +70,7 @@ from typing import (
     Union,
     cast,
 )
+from uuid import UUID
 
 from pydantic import (
     AnyUrl,
@@ -120,6 +122,11 @@ _UnsatisfiableType = Annotated[Any, BeforeValidator(_reject_all)]
 
 FORMAT_TYPES: dict[str, Any] = {
     "date-time": datetime,
+    "date": date,
+    "time": time,
+    "duration": timedelta,
+    "uuid": UUID,
+    "path": Path,
     "email": EmailStr,
     "uri": AnyUrl,
     "json": Json,
