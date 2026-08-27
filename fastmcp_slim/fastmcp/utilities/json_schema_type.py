@@ -61,6 +61,7 @@ from collections.abc import Callable, Mapping
 from copy import deepcopy
 from dataclasses import MISSING, field, make_dataclass
 from datetime import date, datetime
+from pathlib import Path
 from typing import (
     Annotated,
     Any,
@@ -123,6 +124,8 @@ FORMAT_TYPES: dict[str, Any] = {
     "email": EmailStr,
     "uri": AnyUrl,
     "json": Json,
+    "binary": bytes,
+    "path": Path,
 }
 
 _classes: dict[tuple[str, Any], type | None] = {}
