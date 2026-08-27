@@ -225,9 +225,9 @@ async def test_oauth_callback_handler_propagates_iss_to_authorization_code_resul
         tg.start_soon(send_callback)
         result = await oauth.callback_handler()
 
-    assert result.code == "auth-code-123"
-    assert result.state == "state-xyz"
-    assert result.iss == "https://issuer.example.com"
+        assert result.code == "auth-code-123"
+        assert result.state == "state-xyz"
+        assert result.iss == "https://issuer.example.com"
 
 
 class TestOAuthClientUrlHandling:
