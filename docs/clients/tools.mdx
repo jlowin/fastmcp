@@ -29,6 +29,29 @@ async with client:
 
 Arguments are passed as a dictionary. For multi-server clients, tool names are automatically prefixed with the server name (e.g., `weather_get_forecast` for a tool named `get_forecast` on the `weather` server).
 
+## Tool Name Prefixes
+
+<VersionBadge version="4.0.0" />
+
+When an application composes tools from several independent clients — for example, providing tools from multiple servers to the same agent — tool names can collide. The `tool_name_prefix` parameter namespaces a single client's tools without involving a proxy or a multi-server configuration:
+
+```python
+from fastmcp import Client
+
+weather = Client("https://weather-api.example.com/mcp", tool_name_prefix="weather_")
+assistant = Client("https://assistant-api.example.com/mcp", tool_name_prefix="assistant_")
+
+async with weather:
+    tools = await weather.list_tools()
+    # tool names: weather_get_forecast, weather_get_temperature, ...
+
+    result = await weather.call_tool("weather_get_forecast", {"city": "Chicago"})
+```
+
+The prefix is a literal string used verbatim — include a trailing separator if you want one. `list_tools()` presents prefixed names and `call_tool()` accepts them (an unprefixed name raises `ValueError`), so the names an agent discovers are always the names it can call.
+
+The prefix is presentation-only and applies to tools only. The wire-level methods `list_tools_mcp()` and `call_tool_mcp()`, direct `client.session` access, and server-initiated messages such as notifications and sampling all use the server's unprefixed names — the server never sees the prefix.
+
 ## Execution Options
 
 The `call_tool()` method supports timeout control and progress monitoring:

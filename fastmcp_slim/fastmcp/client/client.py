@@ -335,6 +335,15 @@ class Client(
             rather than replacing it. A claimed `call_tool` result is resolved
             transparently through the owning extension's resolver. For an advertise-only
             entry, use `mcp.client.advertise(identifier, settings)`.
+        tool_name_prefix: Optional literal string prepended to every tool name this
+            client presents. Applied to names in `list_tools()` results and stripped
+            from the name passed to `call_tool()`, so an application composing several
+            clients can namespace their tools (e.g. `tool_name_prefix="weather_"`).
+            The prefix is presentation-only and applies to tools only: the wire-level
+            `list_tools_mcp()` / `call_tool_mcp()` methods, direct `client.session`
+            access, and server-initiated messages (notifications, sampling) all use
+            the server's unprefixed names. The string is used verbatim — include a
+            separator if you want one.
         result_claims: Additional `ResultClaim`s (SEP-2133) keyed by the identifier of
             an extension already advertised through `extensions`, merged with that
             extension's own claims. Rarely needed directly; prefer declaring claims on
@@ -442,8 +451,11 @@ class Client(
         cache: CacheConfig | bool | None = None,
         extensions: Sequence[ClientExtension] | None = None,
         result_claims: Mapping[str, Sequence[ResultClaim[Any]]] | None = None,
+        tool_name_prefix: str | None = None,
     ) -> None:
         self.name = name or self.generate_name()
+
+        self.tool_name_prefix = tool_name_prefix
 
         self.input_required_max_rounds = input_required_max_rounds
 

@@ -97,6 +97,10 @@ class ClientToolsMixin:
         returning the complete list. For manual pagination control (e.g., to handle
         large result sets incrementally), use list_tools_mcp() with the cursor parameter.
 
+        When the client was built with a `tool_name_prefix`, tool names in the
+        returned list carry that prefix; `list_tools_mcp()` always returns the
+        server's unprefixed names.
+
         Args:
             max_pages: Maximum number of pages to fetch before raising. Defaults to 250.
 
@@ -132,7 +136,35 @@ class ClientToolsMixin:
                 " or increase max_pages."
             )
 
+        prefix = self.tool_name_prefix
+        if prefix:
+            all_tools = [
+                tool.model_copy(update={"name": f"{prefix}{tool.name}"})
+                for tool in all_tools
+            ]
+
         return all_tools
+
+    def _strip_tool_name_prefix(self: Client, name: str) -> str:
+        """Map a presented (prefixed) tool name back to the server's name.
+
+        With no `tool_name_prefix` configured, names pass through untouched.
+        With one configured, `list_tools()` presents prefixed names, so
+        `call_tool()` only accepts prefixed names — an unprefixed name raises
+        rather than silently reaching the server under a name the caller never
+        saw in a listing.
+        """
+        prefix = self.tool_name_prefix
+        if not prefix:
+            return name
+        if not name.startswith(prefix):
+            raise ValueError(
+                f"[{self.name}] Tool name {name!r} does not start with this"
+                f" client's tool_name_prefix {prefix!r}. call_tool() expects the"
+                " prefixed names presented by list_tools(); use call_tool_mcp()"
+                " for unprefixed wire-level names."
+            )
+        return name[len(prefix) :]
 
     # --- Call Tool ---
 
@@ -287,7 +319,9 @@ class ClientToolsMixin:
         Unlike call_tool_mcp, this method raises a ToolError if the tool call results in an error.
 
         Args:
-            name (str): The name of the tool to call.
+            name (str): The name of the tool to call. When the client was built with
+                a `tool_name_prefix`, this is the prefixed name as presented by
+                `list_tools()`; an unprefixed name raises ValueError.
             arguments (dict[str, Any] | None, optional): Arguments to pass to the tool. Defaults to None.
             version (str | None, optional): Specific tool version to call. If None, calls highest version.
             timeout (datetime.timedelta | float | int | None, optional): The timeout for the tool call. Defaults to None.
@@ -311,6 +345,8 @@ class ClientToolsMixin:
             MCPError: If the tool call request results in a TimeoutError | JSONRPCError
             RuntimeError: If called while the client is not connected.
         """
+        name = self._strip_tool_name_prefix(name)
+
         # Merge version into request-level meta (not arguments)
         request_meta = dict(meta) if meta else {}
         if version is not None:
