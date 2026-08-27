@@ -81,15 +81,13 @@ For each item found, show the original code, say what it did, and give the FastM
 
 ## Install
 
-FastMCP 4 is in prerelease, so pin the exact version rather than installing unqualified — a bare `pip install fastmcp` or `uv add fastmcp` resolves to the latest *stable* release, which today is FastMCP 3:
+FastMCP 4 is in prerelease, so pin the exact version rather than installing unqualified — a bare `pip install fastmcp` resolves to the latest *stable* release, which today is FastMCP 3:
 
 ```bash
-pip install "fastmcp==4.0.0b1"
-# or
-uv add "fastmcp==4.0.0b1"
+pip install "fastmcp==4.0.0b4"
 ```
 
-An exact version pin installs even though it's a prerelease — neither installer needs `--pre` or `--prerelease allow` for a version this specific, only for an open-ended range. For a reproducible lockfile that also pins the prerelease protocol dependencies, see [Install the v4 Prerelease](/getting-started/upgrading/from-fastmcp-3#install-the-v4-prerelease).
+An exact pip pin installs even though it's a prerelease; it does not need `--pre`. uv also needs an explicit constraint for the transitive `fastmcp-slim` prerelease, so follow [Install the v4 Prerelease](/getting-started/upgrading/from-fastmcp-3#install-the-v4-prerelease) for a reproducible uv setup.
 
 FastMCP depends on the `mcp` package, so the SDK stays installed. FastMCP 4 builds on SDK v2, where the protocol types live in a standalone `mcp_types` package that stays importable as `mcp.types`. Most of your `mcp.types` imports disappear entirely in the rewrite below, since FastMCP derives the protocol types from your function signatures.
 

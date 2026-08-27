@@ -20,9 +20,9 @@ FastMCP v4.0 is an engine swap. Three forces drive the major version:
 
 ## Release strategy
 
-The migration merges to `main` and development continues there with subsequent PRs. Releases follow the SDK's own beta timeline:
+The migration lives on `main`, which now depends on the stable MCP Python SDK 2.0 line. FastMCP continues cutting prereleases while the v4 APIs soak, then ships 4.0.0 from the same branch.
 
-- **`main` carries the beta pins.** While the SDK is on `mcp==2.0.0b1` / `mcp-types==2.0.0b1`, `main` cuts **pre-releases** (`4.0.0b1`, `4.0.0b2`, …). No stable PyPI release goes out until `mcp 2.0.0` reaches GA — at which point the pins swap to the stable SDK and `4.0.0` ships. The pin-swap is a tracked checklist item on the [Known Gaps](known-gaps.md) page.
+- **`main` owns FastMCP 4.** It carries stable `mcp>=2.0.0` and `mcp-types>=2.0.0` dependencies. Beta 4 is the current prerelease target; the [Known Gaps](known-gaps.md) page tracks the remaining decisions before 4.0.0.
 - **`release/3.x` is the maintenance line.** A `release/3.x` branch is cut from pre-merge `main`. It stays on the SDK v1 line, receives upstream security patches, and serves users who cannot move to the SDK v2 beta yet.
 
 ### Release codenames
@@ -34,8 +34,10 @@ Following the pun-title convention (`v<version>: <pun>`), the v4 line runs a sin
 | `4.0.0a1` (alpha) | **Fourst Contact** | _first contact_ — the first, cautious look at the new engine |
 | `4.0.0a2` (alpha) | **Back and Fourth** | _back and forth_ — the second pass, where background tasks and stateless state land |
 | `4.0.0b1` (beta) | **Fourgone Conclusion** | _foregone conclusion_ — once the MCP SDK went v2, v4 was inevitable |
-| `4.0.0b2` (beta) | **Fourmidable** | _formidable_ — held in reserve for a second beta if one is needed |
-| `4.0.0` (stable) | **Fast Fourward** | _fast forward_ — full speed onto the new foundation |
+| `4.0.0b2` (beta) | **Four the Better** | _for the better_ — a hardening release focused on correctness, compatibility, and security |
+| `4.0.0b3` (beta) | **Fast Fourward** | _fast forward_ — the accumulated v4 work enters its GA soak |
+| `4.0.0b4` (beta) | **Calm Befour the Storm** | _calm before the storm_ — one last hardening pass before the stable release |
+| `4.0.0` (stable) | **Fourmidable** | _formidable_ — the stable release of the new protocol foundation |
 
 ## How to read the register
 

@@ -1,0 +1,224 @@
+---
+title: template
+sidebarTitle: template
+---
+
+# `fastmcp.resources.template`
+
+
+Resource template functionality.
+
+## Functions
+
+### `extract_query_params` <sup><a href="https://github.com/PrefectHQ/fastmcp/blob/main/fastmcp_slim/fastmcp/resources/template.py#L38" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+
+```python
+extract_query_params(uri_template: str) -> set[str]
+```
+
+
+Extract query parameter names from RFC 6570 `{?param1,param2}` syntax.
+
+
+### `build_regex` <sup><a href="https://github.com/PrefectHQ/fastmcp/blob/main/fastmcp_slim/fastmcp/resources/template.py#L46" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+
+```python
+build_regex(template: str) -> re.Pattern[str] | None
+```
+
+
+Build regex pattern for URI template, handling RFC 6570 syntax.
+
+Supports:
+- `{var}` - simple path parameter
+- `{var*}` - wildcard path parameter (captures multiple segments)
+- `{?var1,var2}` - query parameters (ignored in path matching)
+
+Hyphens in parameter names are normalized to underscores in regex group
+names so that matched groups are valid Python identifiers.
+
+Returns None if the template produces an invalid regex (e.g. parameter
+names with leading digits or duplicates from a remote server).
+
+
+### `match_uri_template` <sup><a href="https://github.com/PrefectHQ/fastmcp/blob/main/fastmcp_slim/fastmcp/resources/template.py#L83" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+
+```python
+match_uri_template(uri: str, uri_template: str) -> dict[str, str] | None
+```
+
+
+Match URI against template and extract both path and query parameters.
+
+Supports RFC 6570 URI templates:
+- Path params: `{var}`, `{var*}`
+- Query params: `{?var1,var2}`
+
+
+### `expand_uri_template` <sup><a href="https://github.com/PrefectHQ/fastmcp/blob/main/fastmcp_slim/fastmcp/resources/template.py#L122" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+
+```python
+expand_uri_template(uri_template: str, params: dict[str, Any]) -> str
+```
+
+
+Expand a URI template with parameters — inverse of `match_uri_template`.
+
+Supports the same RFC 6570 subset:
+- Path params: `{var}`, `{var*}`
+- Query params: `{?var1,var2}`
+
+
+## Classes
+
+### `ResourceTemplate` <sup><a href="https://github.com/PrefectHQ/fastmcp/blob/main/fastmcp_slim/fastmcp/resources/template.py#L170" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+
+
+A template for dynamically creating resources.
+
+
+**Methods:**
+
+#### `resolve_security` <sup><a href="https://github.com/PrefectHQ/fastmcp/blob/main/fastmcp_slim/fastmcp/resources/template.py#L203" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+
+```python
+resolve_security(self, server_default: ResourceSecurity | None) -> ResourceSecurity | None
+```
+
+Resolve the effective security policy for this template.
+
+A per-component ``security`` overrides the server default.
+``INHERIT_SECURITY`` (the field default) inherits ``server_default``;
+an explicit ``None`` disables screening for this template.
+
+
+#### `from_function` <sup><a href="https://github.com/PrefectHQ/fastmcp/blob/main/fastmcp_slim/fastmcp/resources/template.py#L220" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+
+```python
+from_function(fn: Callable[..., Any], uri_template: str, name: str | None = None, version: str | int | None = None, title: str | None = None, description: str | None = None, icons: list[Icon] | None = None, mime_type: str | None = None, tags: set[str] | None = None, annotations: Annotations | None = None, meta: dict[str, Any] | None = None, auth: AuthCheck | list[AuthCheck] | None = None, security: ResourceSecurity | None | InheritSecurity = INHERIT_SECURITY) -> FunctionResourceTemplate
+```
+
+#### `set_default_mime_type` <sup><a href="https://github.com/PrefectHQ/fastmcp/blob/main/fastmcp_slim/fastmcp/resources/template.py#L253" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+
+```python
+set_default_mime_type(cls, mime_type: str | None) -> str
+```
+
+Set default MIME type if not provided.
+
+
+#### `matches` <sup><a href="https://github.com/PrefectHQ/fastmcp/blob/main/fastmcp_slim/fastmcp/resources/template.py#L259" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+
+```python
+matches(self, uri: str) -> dict[str, Any] | None
+```
+
+Check if URI matches template and extract parameters.
+
+
+#### `read` <sup><a href="https://github.com/PrefectHQ/fastmcp/blob/main/fastmcp_slim/fastmcp/resources/template.py#L263" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+
+```python
+read(self, arguments: dict[str, Any]) -> str | bytes | ResourceResult
+```
+
+Read the resource content.
+
+
+#### `convert_result` <sup><a href="https://github.com/PrefectHQ/fastmcp/blob/main/fastmcp_slim/fastmcp/resources/template.py#L269" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+
+```python
+convert_result(self, raw_value: Any) -> ResourceResult
+```
+
+Convert a raw result to ResourceResult.
+
+This is used in two contexts:
+1. In _read() to convert user function return values to ResourceResult
+2. In tasks_result_handler() to convert Docket task results to ResourceResult
+
+Handles ResourceResult passthrough and converts raw values using
+ResourceResult's normalization. The template's own ``mime_type`` is
+forwarded so that reads match the MIME type the template advertises
+in ``resources/templates/list``.
+
+
+#### `create_resource` <sup><a href="https://github.com/PrefectHQ/fastmcp/blob/main/fastmcp_slim/fastmcp/resources/template.py#L296" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+
+```python
+create_resource(self, uri: str, params: dict[str, Any]) -> Resource
+```
+
+Create a resource from the template with the given parameters.
+
+The base implementation does not support background tasks.
+Use FunctionResourceTemplate for task support.
+
+
+#### `to_mcp_template` <sup><a href="https://github.com/PrefectHQ/fastmcp/blob/main/fastmcp_slim/fastmcp/resources/template.py#L307" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+
+```python
+to_mcp_template(self, **overrides: Any) -> SDKResourceTemplate
+```
+
+Convert the resource template to an SDKResourceTemplate.
+
+
+#### `from_mcp_template` <sup><a href="https://github.com/PrefectHQ/fastmcp/blob/main/fastmcp_slim/fastmcp/resources/template.py#L327" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+
+```python
+from_mcp_template(cls, mcp_template: SDKResourceTemplate) -> ResourceTemplate
+```
+
+Creates a FastMCP ResourceTemplate from a raw MCP ResourceTemplate object.
+
+
+#### `key` <sup><a href="https://github.com/PrefectHQ/fastmcp/blob/main/fastmcp_slim/fastmcp/resources/template.py#L340" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+
+```python
+key(self) -> str
+```
+
+The globally unique lookup key for this template.
+
+
+#### `get_span_attributes` <sup><a href="https://github.com/PrefectHQ/fastmcp/blob/main/fastmcp_slim/fastmcp/resources/template.py#L345" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+
+```python
+get_span_attributes(self) -> dict[str, Any]
+```
+
+### `FunctionResourceTemplate` <sup><a href="https://github.com/PrefectHQ/fastmcp/blob/main/fastmcp_slim/fastmcp/resources/template.py#L352" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+
+
+A template for dynamically creating resources.
+
+
+**Methods:**
+
+#### `create_resource` <sup><a href="https://github.com/PrefectHQ/fastmcp/blob/main/fastmcp_slim/fastmcp/resources/template.py#L367" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+
+```python
+create_resource(self, uri: str, params: dict[str, Any]) -> Resource
+```
+
+Create a resource from the template with the given parameters.
+
+
+#### `read` <sup><a href="https://github.com/PrefectHQ/fastmcp/blob/main/fastmcp_slim/fastmcp/resources/template.py#L389" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+
+```python
+read(self, arguments: dict[str, Any]) -> str | bytes | ResourceResult
+```
+
+Read the resource content.
+
+
+#### `from_function` <sup><a href="https://github.com/PrefectHQ/fastmcp/blob/main/fastmcp_slim/fastmcp/resources/template.py#L429" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+
+```python
+from_function(cls, fn: Callable[..., Any], uri_template: str, name: str | None = None, version: str | int | None = None, title: str | None = None, description: str | None = None, icons: list[Icon] | None = None, mime_type: str | None = None, tags: set[str] | None = None, annotations: Annotations | None = None, meta: dict[str, Any] | None = None, auth: AuthCheck | list[AuthCheck] | None = None, security: ResourceSecurity | None | InheritSecurity = INHERIT_SECURITY) -> FunctionResourceTemplate
+```
+
+Create a template from a function.
+

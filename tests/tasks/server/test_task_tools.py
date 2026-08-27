@@ -12,11 +12,13 @@ from __future__ import annotations
 
 import asyncio
 import functools
+from typing import Any
 
 import pytest
 from fastmcp_tasks.models import CreateTaskResult
 from pydantic import BaseModel
 
+import fastmcp.tools.function_tool as function_tool
 from fastmcp import FastMCP
 from fastmcp.exceptions import ValidationError
 from fastmcp.tools.function_tool import _resolve_param_hints
@@ -143,20 +145,32 @@ async def test_valid_argument_submits_under_strict_validation():
     assert final.result["structuredContent"] == {"result": 16}
 
 
-def test_resolve_param_hints_handles_partials():
-    """Partials aren't introspectable by get_type_hints; resolve via the func.
+def test_resolve_param_hints_handles_partials(monkeypatch: pytest.MonkeyPatch):
+    """Resolve partials via their function when direct introspection is empty.
 
     Argument coercion must not raise for partial-wrapped callables — it should
-    resolve hints for the still-unbound parameters.
+    resolve hints for the still-unbound parameters. Python 3.14 returns an empty
+    mapping instead of raising ``TypeError`` for the partial itself.
     """
 
     async def base(prefix: str, items: list[_Item]) -> str:
         return prefix
 
     partial_fn = functools.partial(base, "bound")
+    get_type_hints = function_tool.get_type_hints
+
+    def python_314_get_type_hints(
+        obj: object, *, include_extras: bool = False
+    ) -> dict[str, Any]:
+        if isinstance(obj, functools.partial):
+            return {}
+        return get_type_hints(obj, include_extras=include_extras)
+
+    monkeypatch.setattr(function_tool, "get_type_hints", python_314_get_type_hints)
     hints = _resolve_param_hints(partial_fn)
 
     assert hints["items"] == list[_Item]
+    assert "prefix" not in hints
 
 
 # ---------------------------------------------------------------------------

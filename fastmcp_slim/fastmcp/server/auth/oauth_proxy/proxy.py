@@ -100,6 +100,7 @@ from fastmcp.server.auth.oauth_proxy.models import (
     DEFAULT_REFRESH_TOKEN_EXPIRY_SECONDS,
     HTTP_TIMEOUT_SECONDS,
     ClientCode,
+    ConsentCSRFToken,
     JTIMapping,
     OAuthTransaction,
     ProxyDCRClient,
@@ -649,6 +650,19 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
             raise_on_validation_error=True,
         )
 
+        # Consent CSRF tokens, keyed by a hash of the token rather than by
+        # transaction. Each render of a consent page writes its own key, so
+        # renders that overlap cannot overwrite one another the way appending
+        # to a list on the transaction would.
+        self._consent_csrf_store: PydanticAdapter[ConsentCSRFToken] = PydanticAdapter[
+            ConsentCSRFToken
+        ](
+            key_value=self._client_storage,
+            pydantic_model=ConsentCSRFToken,
+            default_collection="mcp-consent-csrf-tokens",
+            raise_on_validation_error=True,
+        )
+
         self._code_store: PydanticAdapter[ClientCode] = PydanticAdapter[ClientCode](
             key_value=self._client_storage,
             pydantic_model=ClientCode,
@@ -907,7 +921,8 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
         provided to the DCR client during registration, not the upstream client ID.
 
         For unregistered clients, returns None (which will raise an error in the SDK).
-        CIMD clients (URL-based client IDs) are looked up and cached automatically.
+        CIMD clients (URL-based client IDs) are looked up through the bounded
+        in-process document cache rather than persisted in the DCR client store.
         """
         # Load from storage
         client = await self._client_store.get(key=client_id)
@@ -917,31 +932,22 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
                 client.allowed_redirect_uri_patterns = (
                     self._allowed_client_redirect_uris
                 )
+            if client.cimd_document is None:
+                return client
 
-            # Refresh CIMD clients using HTTP cache-aware fetcher.
-            if self._cimd_manager is not None and client.cimd_document is not None:
-                try:
-                    refreshed = await self._cimd_manager.get_client(client_id)
-                    if refreshed is not None:
-                        await self._client_store.put(key=client_id, value=refreshed)
-                        return refreshed
-                except Exception as e:
-                    logger.debug(
-                        "CIMD refresh failed for %s, using cached client: %s",
-                        client_id,
-                        e,
-                    )
-
-            return client
-
-        # Client not in storage — try CIMD lookup for URL-based client IDs
+        # Resolve URL-derived clients through the bounded CIMD cache. Older
+        # versions persisted them indefinitely, so remove those records only
+        # after a successful refresh and keep them as a fallback until then.
         if self._cimd_manager is not None and self._cimd_manager.is_cimd_client_id(
             client_id
         ):
             cimd_client = await self._cimd_manager.get_client(client_id)
             if cimd_client is not None:
-                await self._client_store.put(key=client_id, value=cimd_client)
+                if client is not None:
+                    await self._client_store.delete(key=client_id)
                 return cimd_client
+            if client is not None:
+                return client
 
         # Some MCP clients (e.g. claude.ai) skip Dynamic Client Registration and
         # send the upstream OAuth App's client_id directly in the /authorize request.

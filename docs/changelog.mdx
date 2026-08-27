@@ -5,6 +5,101 @@ rss: true
 tag: NEW
 ---
 
+<Update label="v4.0.0b4" description="2026-08-26">
+
+**[v4.0.0b4: Calm Befour the Storm](https://github.com/PrefectHQ/fastmcp/releases/tag/v4.0.0b4)**
+
+FastMCP 4 beta 4 improves modern multi-server clients and adds Prefect Horizon account commands, while tightening proxy and CIMD security boundaries and fixing Unicode search and inspect output.
+
+### Enhancements ✨
+* Add Prefect Horizon account commands by [@parkedwards](https://github.com/parkedwards) in [#4786](https://github.com/PrefectHQ/fastmcp/pull/4786)
+* Cap anthropic dependency to &lt;1 by [@craigie-ant](https://github.com/craigie-ant) in [#4864](https://github.com/PrefectHQ/fastmcp/pull/4864)
+
+### Security 🔒
+* Scope Marvin App token to each job's declared permissions by [@zzstoatzz](https://github.com/zzstoatzz) in [#4834](https://github.com/PrefectHQ/fastmcp/pull/4834)
+* Exclude Cookie from forwarded HTTP headers by [@zzstoatzz](https://github.com/zzstoatzz) in [#4843](https://github.com/PrefectHQ/fastmcp/pull/4843)
+* Bump cryptography to 50.0.0 in the testing_demo example by [@zzstoatzz](https://github.com/zzstoatzz) in [#4844](https://github.com/PrefectHQ/fastmcp/pull/4844)
+* Bound CIMD cache growth by [@jlowin](https://github.com/jlowin) in [#4852](https://github.com/PrefectHQ/fastmcp/pull/4852)
+
+### Fixes 🐞
+* Fix instructions in MCP inspect output by [@zzstoatzz](https://github.com/zzstoatzz) in [#4873](https://github.com/PrefectHQ/fastmcp/pull/4873)
+* fix: support Unicode tokens in BM25 search by [@zzstoatzz](https://github.com/zzstoatzz) in [#4889](https://github.com/PrefectHQ/fastmcp/pull/4889)
+* fix: support modern protocol in multi-server clients by [@zzstoatzz](https://github.com/zzstoatzz) in [#4893](https://github.com/PrefectHQ/fastmcp/pull/4893)
+
+### Docs 📚
+* docs: fix idempotent tool hint wording by [@Theater-ahyeon](https://github.com/Theater-ahyeon) in [#4875](https://github.com/PrefectHQ/fastmcp/pull/4875)
+* docs: prepare FastMCP 4 beta 4 by [@zzstoatzz](https://github.com/zzstoatzz) in [#4914](https://github.com/PrefectHQ/fastmcp/pull/4914)
+
+### Other Changes 🦾
+* chore(deps): Update j178/prek-action action to v3 by [@prefect-renovate](https://github.com/apps/prefect-renovate)[bot] in [#4808](https://github.com/PrefectHQ/fastmcp/pull/4808)
+* chore(deps): Update dependency node to v24 by [@prefect-renovate](https://github.com/apps/prefect-renovate)[bot] in [#4807](https://github.com/PrefectHQ/fastmcp/pull/4807)
+* chore(deps): Update astral-sh/setup-uv action to v9 by [@prefect-renovate](https://github.com/apps/prefect-renovate)[bot] in [#4806](https://github.com/PrefectHQ/fastmcp/pull/4806)
+* Fix proxy forwarding of MCP transport headers by [@jakekaplan](https://github.com/jakekaplan) in [#4853](https://github.com/PrefectHQ/fastmcp/pull/4853)
+* Add FastMCP security report review skill by [@zzstoatzz](https://github.com/zzstoatzz) in [#4859](https://github.com/PrefectHQ/fastmcp/pull/4859)
+
+## New Contributors
+* @prefect-renovate[bot] made their first contribution in [#4808](https://github.com/PrefectHQ/fastmcp/pull/4808)
+* @craigie-ant made their first contribution in [#4864](https://github.com/PrefectHQ/fastmcp/pull/4864)
+* @Theater-ahyeon made their first contribution in [#4875](https://github.com/PrefectHQ/fastmcp/pull/4875)
+
+**Full Changelog**: [v4.0.0b3...v4.0.0b4](https://github.com/PrefectHQ/fastmcp/compare/v4.0.0b3...v4.0.0b4)
+
+</Update>
+
+<Update label="v4.0.0b3" description="2026-08-14">
+
+**[v4.0.0b3: Fast Fourward](https://github.com/PrefectHQ/fastmcp/releases/tag/v4.0.0b3)**
+
+FastMCP 4 beta 3 moves the v4 line toward general availability with Prefect Horizon authentication, `CallArgument` and `Depends` bindings for tools and background tasks, and a round of OAuth, proxy, OpenAPI, and Python 3.14 compatibility hardening.
+
+### Enhancements ✨
+* Add Prefect Horizon authentication client and local state by [@parkedwards](https://github.com/parkedwards) in [#4785](https://github.com/PrefectHQ/fastmcp/pull/4785)
+* Clarify auto-closed PR message by [@jlowin](https://github.com/jlowin) in [#4820](https://github.com/PrefectHQ/fastmcp/pull/4820)
+* Support CallArgument and Depends bindings from uncalled-for 0.4.0 by [@chrisguidry](https://github.com/chrisguidry) in [#4802](https://github.com/PrefectHQ/fastmcp/pull/4802)
+* Fix static analysis under newer ty releases by [@zzstoatzz](https://github.com/zzstoatzz) in [#4831](https://github.com/PrefectHQ/fastmcp/pull/4831)
+* Cover CallArgument resolution in background tasks by [@zzstoatzz](https://github.com/zzstoatzz) in [#4833](https://github.com/PrefectHQ/fastmcp/pull/4833)
+* Scalekit issuer updates backward compatibility by [@AkshayParihar33](https://github.com/AkshayParihar33) in [#4798](https://github.com/PrefectHQ/fastmcp/pull/4798)
+
+### Security 🔒
+* Add audience pinning to GoogleTokenVerifier by [@zzstoatzz](https://github.com/zzstoatzz) in [#4827](https://github.com/PrefectHQ/fastmcp/pull/4827)
+* Bump cryptography to 50.0.0 by [@zzstoatzz](https://github.com/zzstoatzz) in [#4836](https://github.com/PrefectHQ/fastmcp/pull/4836)
+
+### Fixes 🐞
+* Fix partial parameter hints on Python 3.14 by [@zzstoatzz](https://github.com/zzstoatzz) in [#4796](https://github.com/PrefectHQ/fastmcp/pull/4796)
+* fix(openapi): extract parameter-level example and examples by [@doneman536](https://github.com/doneman536) in [#4793](https://github.com/PrefectHQ/fastmcp/pull/4793)
+* Keep earlier consent CSRF tokens valid within a transaction by [@trevhud](https://github.com/trevhud) in [#4818](https://github.com/PrefectHQ/fastmcp/pull/4818)
+* Fix StatefulProxyClient reconnection after session failure by [@jlowin](https://github.com/jlowin) in [#4829](https://github.com/PrefectHQ/fastmcp/pull/4829)
+
+### Docs 📚
+* Docs language dropdown by [@znicholasbrown](https://github.com/znicholasbrown) in [#4801](https://github.com/PrefectHQ/fastmcp/pull/4801)
+* Docs: mirror v3.4.7 release notes by [@jlowin](https://github.com/jlowin) in [#4811](https://github.com/PrefectHQ/fastmcp/pull/4811)
+* docs: prepare FastMCP 4 beta 3 by [@jlowin](https://github.com/jlowin) in [#4840](https://github.com/PrefectHQ/fastmcp/pull/4840)
+* docs: add FastMCP 4 beta 3 release entries by [@jlowin](https://github.com/jlowin) in [#4841](https://github.com/PrefectHQ/fastmcp/pull/4841)
+
+## New Contributors
+* @parkedwards made their first contribution in [#4785](https://github.com/PrefectHQ/fastmcp/pull/4785)
+* @trevhud made their first contribution in [#4818](https://github.com/PrefectHQ/fastmcp/pull/4818)
+
+**Full Changelog**: [v4.0.0b2...v4.0.0b3](https://github.com/PrefectHQ/fastmcp/compare/v4.0.0b2...v4.0.0b3)
+
+</Update>
+
+<Update label="v3.4.7" description="2026-08-10">
+
+**[v3.4.7: Know Your Audience](https://github.com/PrefectHQ/fastmcp/releases/tag/v3.4.7)**
+
+FastMCP 3.4.7 fixes CIMD `private_key_jwt` authentication on bare-origin OAuth proxy deployments by validating client assertions against the exact token endpoint advertised in OAuth metadata.
+
+### Security 🔒
+* Backport CIMD assertion audience fix to v3 by [@jlowin](https://github.com/jlowin) in [#4799](https://github.com/PrefectHQ/fastmcp/pull/4799)
+
+### Docs 📚
+* Docs: add v3.4.7 changelog entries by [@jlowin](https://github.com/jlowin) in [#4810](https://github.com/PrefectHQ/fastmcp/pull/4810)
+
+**Full Changelog**: [v3.4.6...v3.4.7](https://github.com/PrefectHQ/fastmcp/compare/v3.4.6...v3.4.7)
+
+</Update>
+
 <Update label="v3.4.6" description="2026-08-05">
 
 **[v3.4.6: Trust, but Proxy](https://github.com/PrefectHQ/fastmcp/releases/tag/v3.4.6)**

@@ -14,7 +14,7 @@ import warnings
 from collections.abc import Awaitable, Callable, Sequence
 from copy import deepcopy
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Generic, Literal, TypeVar, cast
 
 import anyio
 import httpx2
@@ -96,12 +96,23 @@ class _ForwardingClientSession(ClientSession):
 
 
 # Settings every proxy-backend connection uses: relay results without policing
-# the backend's output schema, and forward the caller's authorization header
-# upstream (appropriate for a proxy, where credentials are meant to propagate).
+# the backend's output schema, and forward eligible caller headers upstream
+# without inheriting frontend-owned MCP transport state.
 PROXY_TRANSPORT_OPTIONS = TransportOptions(
     session_class=_ForwardingClientSession,
     forward_incoming_headers=True,
 )
+
+
+def _with_proxy_transport_options(
+    options: TransportOptions | None,
+) -> TransportOptions:
+    """Layer proxy-owned settings onto options supplied by another client layer."""
+    return replace(
+        options or TransportOptions(),
+        session_class=PROXY_TRANSPORT_OPTIONS.session_class,
+        forward_incoming_headers=PROXY_TRANSPORT_OPTIONS.forward_incoming_headers,
+    )
 
 
 #: Transport-level failures that can escape a backend connection attempt.
@@ -819,12 +830,15 @@ class ProxyPrompt(Prompt):
 # -----------------------------------------------------------------------------
 
 
-class _CacheEntry:
+_ComponentT = TypeVar("_ComponentT")
+
+
+class _CacheEntry(Generic[_ComponentT]):
     """A cached sequence of components with a monotonic timestamp."""
 
     __slots__ = ("items", "timestamp")
 
-    def __init__(self, items: Sequence[Any], timestamp: float):
+    def __init__(self, items: Sequence[_ComponentT], timestamp: float):
         self.items = items
         self.timestamp = timestamp
 
@@ -1350,7 +1364,8 @@ def _create_client_factory(
             # stopping at the composite router (see
             # `TransportOptions.backend_mode`).
             fresh._transport_options = replace(
-                PROXY_TRANSPORT_OPTIONS, backend_mode=fresh.mode
+                _with_proxy_transport_options(fresh._transport_options),
+                backend_mode=fresh.mode,
             )
             return fresh
 
@@ -1420,7 +1435,8 @@ def _create_client_factory(
                 # moment a client is built for this request — so it tracks the
                 # front era rather than whatever was true at construction.
                 fresh._transport_options = replace(
-                    PROXY_TRANSPORT_OPTIONS, backend_mode=backend_mode
+                    _with_proxy_transport_options(fresh._transport_options),
+                    backend_mode=backend_mode,
                 )
             return fresh
 
@@ -1741,7 +1757,7 @@ class ProxyClient(Client[ClientTransportT]):
                 self._proxy_restoring_handler_keys.add(key)
         super().__init__(transport=transport, **kwargs)  # ty: ignore[no-matching-overload]
 
-        self._transport_options = PROXY_TRANSPORT_OPTIONS
+        self._transport_options = _with_proxy_transport_options(self._transport_options)
 
     def _bind_restoring_handlers(self) -> None:
         if "roots" in self._proxy_restoring_handler_keys:
@@ -1804,10 +1820,12 @@ class StatefulProxyClient(ProxyClient[ClientTransportT]):
         return cast(StatefulProxyClient[ClientTransportT], super().new())
 
     async def __aexit__(self, exc_type, exc_value, traceback) -> None:  # type: ignore[override]  # ty:ignore[invalid-method-override]
-        """The stateful proxy client will be forced disconnected when the session is exited.
-
-        So we do nothing here.
-        """
+        """Release this context without disconnecting the persistent session."""
+        with anyio.CancelScope(shield=True):
+            async with self._session_state.lock:
+                self._session_state.nesting_counter = max(
+                    0, self._session_state.nesting_counter - 1
+                )
 
     async def clear(self):
         """Clear all cached clients and force disconnect them."""

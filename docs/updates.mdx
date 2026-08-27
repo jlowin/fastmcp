@@ -5,6 +5,52 @@ icon: "sparkles"
 tag: NEW
 ---
 
+<Update label="FastMCP 4.0.0b4" description="August 26, 2026" tags={["Releases"]}>
+<Card
+title="FastMCP v4.0.0b4: Calm Befour the Storm"
+href="https://github.com/PrefectHQ/fastmcp/releases/tag/v4.0.0b4"
+cta="Read the release notes"
+>
+FastMCP 4 beta 4 is the final hardening pass before the stable release, improving modern multi-server clients, operational tooling, and security boundaries.
+
+🌐 **Modern multi-server clients** — proxy-backed client configurations now preserve modern protocol support instead of forcing the legacy handshake.
+
+☁️ **Horizon accounts** — new commands manage Prefect Horizon account authentication from the FastMCP CLI.
+
+🔐 **Safer boundaries** — HTTP proxies no longer forward cookies, MCP transport headers reach their backends correctly, and CIMD caches stay bounded.
+
+🔎 **Sharper tools** — BM25 search handles Unicode tokens and MCP inspect reports server instructions correctly.
+</Card>
+</Update>
+
+<Update label="FastMCP 4.0.0b3" description="August 14, 2026" tags={["Releases"]}>
+<Card
+title="FastMCP v4.0.0b3: Fast Fourward"
+href="https://github.com/PrefectHQ/fastmcp/releases/tag/v4.0.0b3"
+cta="Read the release notes"
+>
+FastMCP 4 beta 3 moves the v4 line toward general availability with new authentication and dependency-injection capabilities, plus compatibility hardening across OAuth, proxies, OpenAPI, and Python 3.14.
+
+🔐 **Authentication foundations** — Prefect Horizon gains a native authentication client and local state, Google token verification can pin audiences, and Scalekit issuer updates preserve backward compatibility.
+
+🧰 **Tool dependencies** — `CallArgument` and `Depends` bindings from `uncalled-for` 0.4 work in regular tools and background tasks.
+
+🔄 **Runtime reliability** — stateful proxy clients reconnect after session failures, consent transactions keep valid earlier CSRF tokens, and partial parameter hints work on Python 3.14.
+
+🧾 **OpenAPI fidelity** — parameter-level `example` and `examples` values now flow into generated tool schemas.
+</Card>
+</Update>
+
+<Update label="FastMCP 3.4.7" description="August 10, 2026" tags={["Releases"]}>
+<Card
+title="FastMCP v3.4.7: Know Your Audience"
+href="https://github.com/PrefectHQ/fastmcp/releases/tag/v3.4.7"
+cta="Read the release notes"
+>
+FastMCP 3.4.7 restores CIMD `private_key_jwt` authentication for bare-origin OAuth proxy deployments by validating client assertions against the exact token endpoint advertised to clients.
+</Card>
+</Update>
+
 <Update label="FastMCP 3.4.6" description="August 5, 2026" tags={["Releases"]}>
 <Card
 title="FastMCP v3.4.6: Trust, but Proxy"
