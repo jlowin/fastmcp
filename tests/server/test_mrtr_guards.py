@@ -22,7 +22,6 @@ from typing import Annotated
 
 import mcp_types
 import pytest
-from docket import Docket
 from mcp.client._input_required import InputRequiredRoundsExceededError
 from mcp.server.request_state import RequestStateSecurity
 from mcp.shared.exceptions import MCPError
@@ -1177,18 +1176,7 @@ class TestTaskExecution:
     background task has no such request, so returning a guard result from a task
     is rejected with a clear error rather than silently yielding empty content."""
 
-    @pytest.fixture
-    def reset_docket_memory_server(self):
-        """Force a fresh memory:// Docket server bound to this test's loop."""
-        if hasattr(Docket, "_memory_server"):
-            delattr(Docket, "_memory_server")
-        yield
-        if hasattr(Docket, "_memory_server"):
-            delattr(Docket, "_memory_server")
-
-    async def test_guard_result_from_task_parks_for_input(
-        self, reset_docket_memory_server
-    ):
+    async def test_guard_result_from_task_parks_for_input(self):
         mcp = FastMCP("guard-task")
         mcp.add_extension(TasksExtension())
 
