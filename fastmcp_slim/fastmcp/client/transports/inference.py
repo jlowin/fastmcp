@@ -124,13 +124,21 @@ def infer_transport(
         )
 
     # the transport is a path to a script
-    elif isinstance(transport, Path | str) and Path(transport).exists():
-        if str(transport).endswith(".py"):
-            inferred_transport = PythonStdioTransport(script_path=cast(Path, transport))
-        elif str(transport).endswith(".js"):
-            inferred_transport = NodeStdioTransport(script_path=cast(Path, transport))
+    elif isinstance(transport, Path):
+        if transport.suffix == ".py":
+            inferred_transport = PythonStdioTransport(script_path=transport)
+        elif transport.suffix == ".js":
+            inferred_transport = NodeStdioTransport(script_path=transport)
         else:
             raise ValueError(f"Unsupported script type: {transport}")
+
+    # a string that looks like a script path: refuse rather than execute
+    elif isinstance(transport, str) and transport.endswith((".py", ".js")):
+        raise ValueError(
+            f"Refusing to infer a stdio transport from the string {transport!r}."
+            " Strings are treated as URLs; pass a pathlib.Path or an explicit"
+            " StdioTransport to run a local script."
+        )
 
     # the transport is an http(s) URL
     elif isinstance(transport, AnyUrl | str) and str(transport).startswith("http"):
