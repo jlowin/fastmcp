@@ -436,6 +436,18 @@ class TestBM25Index:
         index.build(["alpha beta gamma"])
         assert index.query("zzz", 5) == []
 
+    def test_unicode_tokens(self):
+        index = _BM25Index()
+        index.build(["show portfolio", "показать портфель"])
+        assert index.query("портфель", 5) == [1]
+
+    def test_unicode_normalization(self):
+        index = _BM25Index()
+        index.build(["Straße ＰＯＲＴＦＯＬＩＯ cafe\u0301"])
+        assert index.query("STRASSE", 5) == [0]
+        assert index.query("portfolio", 5) == [0]
+        assert index.query("café", 5) == [0]
+
 
 # ---------------------------------------------------------------------------
 # call_tool self-reference guard

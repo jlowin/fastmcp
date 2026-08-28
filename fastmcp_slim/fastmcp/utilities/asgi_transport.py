@@ -307,6 +307,7 @@ async def run_asgi_lifespan(app: ASGIApp) -> AsyncIterator[None]:
         raise
     finally:
         await receive_queue.put({"type": "lifespan.shutdown"})
+        results: tuple[object, ...] = ()
         with anyio.CancelScope(shield=True):
             results = await asyncio.gather(
                 shutdown_complete, task, return_exceptions=True

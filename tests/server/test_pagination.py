@@ -263,6 +263,7 @@ class TestPaginationCycleDetection:
             async def returning_constant_cursor(
                 *,
                 cursor: str | None = None,
+                cache_mode: str = "use",
             ) -> mcp_types.ListToolsResult:
                 result = await original(cursor=cursor)
                 result.next_cursor = "stuck"
@@ -292,6 +293,7 @@ class TestPaginationCycleDetection:
             async def returning_constant_cursor(
                 *,
                 cursor: str | None = None,
+                cache_mode: str = "use",
             ) -> mcp_types.ListPromptsResult:
                 result = await original(cursor=cursor)
                 result.next_cursor = "stuck"
@@ -319,6 +321,7 @@ class TestPaginationCycleDetection:
             async def returning_constant_cursor(
                 *,
                 cursor: str | None = None,
+                cache_mode: str = "use",
             ) -> mcp_types.ListResourcesResult:
                 result = await original(cursor=cursor)
                 result.next_cursor = "stuck"
@@ -346,6 +349,7 @@ class TestPaginationCycleDetection:
             async def returning_constant_cursor(
                 *,
                 cursor: str | None = None,
+                cache_mode: str = "use",
             ) -> mcp_types.ListResourceTemplatesResult:
                 result = await original(cursor=cursor)
                 result.next_cursor = "stuck"
@@ -375,6 +379,7 @@ class TestPaginationCycleDetection:
             async def returning_cycling_cursor(
                 *,
                 cursor: str | None = None,
+                cache_mode: str = "use",
             ) -> mcp_types.ListToolsResult:
                 nonlocal call_count
                 result = await original(cursor=cursor)
@@ -407,6 +412,7 @@ class TestPaginationCycleDetection:
             async def returning_empty_cursor(
                 *,
                 cursor: str | None = None,
+                cache_mode: str = "use",
             ) -> mcp_types.ListToolsResult:
                 result = await original(cursor=cursor)
                 result.next_cursor = ""
@@ -435,6 +441,7 @@ class TestPaginationCycleDetection:
             async def returning_unique_cursor(
                 *,
                 cursor: str | None = None,
+                cache_mode: str = "use",
             ) -> mcp_types.ListToolsResult:
                 nonlocal call_count
                 result = await original(cursor=cursor)
@@ -465,6 +472,7 @@ class TestPaginationCycleDetection:
             async def returning_unique_cursor(
                 *,
                 cursor: str | None = None,
+                cache_mode: str = "use",
             ) -> mcp_types.ListResourcesResult:
                 nonlocal call_count
                 result = await original(cursor=cursor)
@@ -495,6 +503,7 @@ class TestPaginationCycleDetection:
             async def returning_unique_cursor(
                 *,
                 cursor: str | None = None,
+                cache_mode: str = "use",
             ) -> mcp_types.ListPromptsResult:
                 nonlocal call_count
                 result = await original(cursor=cursor)

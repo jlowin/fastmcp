@@ -3,7 +3,6 @@
 import asyncio
 from contextlib import asynccontextmanager
 
-import pytest
 from docket import Docket
 from docket.worker import Worker
 from fastmcp_tasks.dependencies import CurrentDocket, CurrentWorker
@@ -14,16 +13,6 @@ from fastmcp.server.dependencies import get_context
 from fastmcp_tasks import TasksExtension
 
 HUZZAH = "huzzah!"
-
-
-@pytest.fixture(autouse=True)
-def reset_docket_memory_server():
-    """Force a fresh memory:// Docket server bound to each test's event loop."""
-    if hasattr(Docket, "_memory_server"):
-        delattr(Docket, "_memory_server")
-    yield
-    if hasattr(Docket, "_memory_server"):
-        delattr(Docket, "_memory_server")
 
 
 async def test_docket_not_initialized_without_task_components():

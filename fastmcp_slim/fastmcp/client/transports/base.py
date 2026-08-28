@@ -44,6 +44,8 @@ class TransportOptions:
 
     These belong to the client rather than to the transport, so a transport
     shared between clients doesn't leak one client's settings to another.
+    Different client layers may own different fields; a layer that adds its
+    settings must preserve the existing options rather than replace the bundle.
 
     Attributes:
         session_class: The ClientSession class to instantiate. Proxies supply a
@@ -59,9 +61,10 @@ class TransportOptions:
             transport builds on this client's behalf, so a chain of connections
             speaks one protocol era end to end. `None` leaves each backend
             client at its own default. Honored by `MCPConfigTransport`, whose
-            multi-server form mounts a proxy per configured server; ignored by
-            transports that connect to a single backend directly, since those
-            carry the connecting client's own session and era.
+            multi-server form mounts a proxy per configured server and resolves
+            one shared era for the aggregate; ignored by transports that connect
+            to a single backend directly, since those carry the connecting
+            client's own session and era.
     """
 
     session_class: type[ClientSession] = ClientSession

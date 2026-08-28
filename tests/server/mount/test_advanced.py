@@ -1,7 +1,6 @@
 """Advanced mounting scenarios."""
 
 import pytest
-from docket import Docket
 from mcp_types import TextContent
 from starlette.routing import Route
 
@@ -11,16 +10,6 @@ from fastmcp.server.providers import FastMCPProvider
 from fastmcp.server.providers.wrapped_provider import _WrappedProvider
 from fastmcp_tasks import TasksExtension
 from tests.tasks.task_helpers import running_task_server
-
-
-@pytest.fixture
-def reset_docket_memory_server():
-    """Force a fresh memory:// Docket server bound to this test's event loop."""
-    if hasattr(Docket, "_memory_server"):
-        delattr(Docket, "_memory_server")
-    yield
-    if hasattr(Docket, "_memory_server"):
-        delattr(Docket, "_memory_server")
 
 
 class TestDynamicChanges:
@@ -611,9 +600,7 @@ class TestMountedServerDocketBehavior:
     includes Docket creation.
     """
 
-    async def test_mounted_server_does_not_have_docket(
-        self, reset_docket_memory_server
-    ):
+    async def test_mounted_server_does_not_have_docket(self):
         """Test that a mounted server doesn't create its own Docket.
 
         MountedProvider.lifespan() should call only the server's _lifespan

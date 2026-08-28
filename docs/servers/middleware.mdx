@@ -618,7 +618,7 @@ def search(query: str) -> str:
 When a response exceeds the limit, the middleware extracts all text content, joins it together, truncates to fit within the limit, and returns a single `TextContent` block. For non-text responses, the serialized JSON is used as the text source.
 
 <Note>
-If a tool defines an `output_schema`, truncated responses will no longer conform to that schema — the client will receive a plain `TextContent` block instead of the expected structured output. Keep this in mind when setting size limits for tools with structured responses.
+Because truncation can replace structured output with plain text, the middleware omits `outputSchema` from `tools/list` for every tool it limits. Responses below the limit still include their original structured content, but clients cannot validate or hydrate it against an advertised output schema. Tools excluded with the `tools` parameter keep their output schemas.
 </Note>
 
 ```python

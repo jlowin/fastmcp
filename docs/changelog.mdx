@@ -5,6 +5,71 @@ rss: true
 tag: NEW
 ---
 
+<Update label="v4.0.0b5" description="2026-08-28">
+
+**[v4.0.0b5: Group Effourt](https://github.com/PrefectHQ/fastmcp/releases/tag/v4.0.0b5)**
+
+FastMCP 4 beta 5 introduces `ClientGroup` — one managed client per server, each negotiating its own protocol era independently, with collision-checked tool namespacing and call routing and no proxy in the middle — and aligns middleware response limits with output schemas.
+
+### Enhancements ✨
+* Remove obsolete Docket memory-server reset fixtures by [@TyceHerrman](https://github.com/TyceHerrman) in [#4912](https://github.com/PrefectHQ/fastmcp/pull/4912)
+* add independent client groups by [@zzstoatzz](https://github.com/zzstoatzz) in [#4904](https://github.com/PrefectHQ/fastmcp/pull/4904)
+
+### Fixes 🐞
+* fix(ci): satisfy latest ty control-flow checks by [@zzstoatzz](https://github.com/zzstoatzz) in [#4928](https://github.com/PrefectHQ/fastmcp/pull/4928)
+* fix(middleware): align response limits with output schemas by [@zzstoatzz](https://github.com/zzstoatzz) in [#4931](https://github.com/PrefectHQ/fastmcp/pull/4931)
+
+### Docs 📚
+* docs: fix beta 4 changelog MDX by [@zzstoatzz](https://github.com/zzstoatzz) in [#4916](https://github.com/PrefectHQ/fastmcp/pull/4916)
+
+## New Contributors
+* @TyceHerrman made their first contribution in [#4912](https://github.com/PrefectHQ/fastmcp/pull/4912)
+
+**Full Changelog**: [v4.0.0b4...v4.0.0b5](https://github.com/PrefectHQ/fastmcp/compare/v4.0.0b4...v4.0.0b5)
+
+</Update>
+
+<Update label="v4.0.0b4" description="2026-08-26">
+
+**[v4.0.0b4: Calm Befour the Storm](https://github.com/PrefectHQ/fastmcp/releases/tag/v4.0.0b4)**
+
+FastMCP 4 beta 4 improves modern multi-server clients and adds Prefect Horizon account commands, while tightening proxy and CIMD security boundaries and fixing Unicode search and inspect output.
+
+### Enhancements ✨
+* Add Prefect Horizon account commands by [@parkedwards](https://github.com/parkedwards) in [#4786](https://github.com/PrefectHQ/fastmcp/pull/4786)
+* Cap anthropic dependency to &lt;1 by [@craigie-ant](https://github.com/craigie-ant) in [#4864](https://github.com/PrefectHQ/fastmcp/pull/4864)
+
+### Security 🔒
+* Scope Marvin App token to each job's declared permissions by [@zzstoatzz](https://github.com/zzstoatzz) in [#4834](https://github.com/PrefectHQ/fastmcp/pull/4834)
+* Exclude Cookie from forwarded HTTP headers by [@zzstoatzz](https://github.com/zzstoatzz) in [#4843](https://github.com/PrefectHQ/fastmcp/pull/4843)
+* Bump cryptography to 50.0.0 in the testing_demo example by [@zzstoatzz](https://github.com/zzstoatzz) in [#4844](https://github.com/PrefectHQ/fastmcp/pull/4844)
+* Bound CIMD cache growth by [@jlowin](https://github.com/jlowin) in [#4852](https://github.com/PrefectHQ/fastmcp/pull/4852)
+
+### Fixes 🐞
+* Fix instructions in MCP inspect output by [@zzstoatzz](https://github.com/zzstoatzz) in [#4873](https://github.com/PrefectHQ/fastmcp/pull/4873)
+* fix: support Unicode tokens in BM25 search by [@zzstoatzz](https://github.com/zzstoatzz) in [#4889](https://github.com/PrefectHQ/fastmcp/pull/4889)
+* fix: support modern protocol in multi-server clients by [@zzstoatzz](https://github.com/zzstoatzz) in [#4893](https://github.com/PrefectHQ/fastmcp/pull/4893)
+
+### Docs 📚
+* docs: fix idempotent tool hint wording by [@Theater-ahyeon](https://github.com/Theater-ahyeon) in [#4875](https://github.com/PrefectHQ/fastmcp/pull/4875)
+* docs: prepare FastMCP 4 beta 4 by [@zzstoatzz](https://github.com/zzstoatzz) in [#4914](https://github.com/PrefectHQ/fastmcp/pull/4914)
+
+### Other Changes 🦾
+* chore(deps): Update j178/prek-action action to v3 by [@prefect-renovate](https://github.com/apps/prefect-renovate)[bot] in [#4808](https://github.com/PrefectHQ/fastmcp/pull/4808)
+* chore(deps): Update dependency node to v24 by [@prefect-renovate](https://github.com/apps/prefect-renovate)[bot] in [#4807](https://github.com/PrefectHQ/fastmcp/pull/4807)
+* chore(deps): Update astral-sh/setup-uv action to v9 by [@prefect-renovate](https://github.com/apps/prefect-renovate)[bot] in [#4806](https://github.com/PrefectHQ/fastmcp/pull/4806)
+* Fix proxy forwarding of MCP transport headers by [@jakekaplan](https://github.com/jakekaplan) in [#4853](https://github.com/PrefectHQ/fastmcp/pull/4853)
+* Add FastMCP security report review skill by [@zzstoatzz](https://github.com/zzstoatzz) in [#4859](https://github.com/PrefectHQ/fastmcp/pull/4859)
+
+## New Contributors
+* @prefect-renovate[bot] made their first contribution in [#4808](https://github.com/PrefectHQ/fastmcp/pull/4808)
+* @craigie-ant made their first contribution in [#4864](https://github.com/PrefectHQ/fastmcp/pull/4864)
+* @Theater-ahyeon made their first contribution in [#4875](https://github.com/PrefectHQ/fastmcp/pull/4875)
+
+**Full Changelog**: [v4.0.0b3...v4.0.0b4](https://github.com/PrefectHQ/fastmcp/compare/v4.0.0b3...v4.0.0b4)
+
+</Update>
+
 <Update label="v4.0.0b3" description="2026-08-14">
 
 **[v4.0.0b3: Fast Fourward](https://github.com/PrefectHQ/fastmcp/releases/tag/v4.0.0b3)**
