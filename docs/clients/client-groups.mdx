@@ -4,9 +4,9 @@ sidebarTitle: Client Groups
 icon: layer-group
 ---
 
-<Warning>
-`ClientGroup` is experimental. Its API may change before it moves out of `fastmcp.experimental`.
-</Warning>
+import { VersionBadge } from '/snippets/version-badge.mdx'
+
+<VersionBadge version="4.0.0" />
 
 A `ClientGroup` coordinates several independent FastMCP clients without combining them behind a proxy server. Each client keeps its own connection, negotiated protocol version, capabilities, and handlers. The group adds namespaced tool discovery and routes each call back to the client that advertised the tool.
 
@@ -20,7 +20,7 @@ Construct the clients explicitly when each server needs its own handlers, authen
 import asyncio
 
 from fastmcp import Client
-from fastmcp.experimental.client_group import ClientGroup
+from fastmcp.client.group import ClientGroup
 
 legacy_client = Client("legacy_server.py", mode="legacy")
 modern_client = Client("https://modern.example.com/mcp", mode="auto")
@@ -50,6 +50,8 @@ asyncio.run(main())
 
 Tool names are prefixed with the configured client name by default. For example, a `get_weather` tool exposed by the `modern` client becomes `modern_get_weather`.
 
+A group with a single client is a supported way to get namespacing alone: the one server's tools are presented under its configured name, with no other behavior change.
+
 The first routed call loads the tool catalog lazily. After a successful load, unknown tool names fail locally rather than repeating discovery against every server. Call `list_tools()` explicitly to refresh the routes when servers add or remove tools dynamically.
 
 ## Bind tools to their owning client
@@ -72,7 +74,7 @@ The group aggregates names and detects collisions; it never stands between the a
 `ClientGroup.from_config` creates one client per server rather than passing the entire configuration through a proxy. A FastMCP-specific `mode` field can select the protocol behavior for each server:
 
 ```python
-from fastmcp.experimental.client_group import ClientGroup
+from fastmcp.client.group import ClientGroup
 
 config = {
     "mcpServers": {
@@ -104,8 +106,10 @@ async with legacy_client, modern_client:
 
 It is also safe to enter the group inside a client context. FastMCP client contexts are reference counted, so leaving the group does not close a connection still owned by an outer context.
 
+The group adds no session handling of its own. Each client owns its transport and session exactly as it does standalone, so a legacy stateful session (for example over SSE or stdio) is held open by its client for as long as that client's context is active, whether the group or the caller entered it.
+
 ## Relationship to SDK session groups
 
 The upstream official MCP Python SDK provides `ClientSessionGroup` for aggregating raw `ClientSession` connections, including tools, resources, and prompts. Its `connect_to_server()` path uses the classic `initialize` handshake, so it does not negotiate the modern protocol. Use it when classic sessions, raw SDK results, and dynamic group membership fit the application.
 
-`connect_with_session()` can register a modern session that was connected separately, but the caller must create and keep that client alive because the SDK group does not own sessions registered this way. `ClientGroup` instead manages fully configured FastMCP clients directly. Each client can negotiate its own modern or legacy protocol, and calls continue through that client, preserving its authentication, handlers, caching, tracing, result parsing, and multi-round tool behavior. The experimental API is intentionally narrower and currently aggregates tools only.
+`connect_with_session()` can register a modern session that was connected separately, but the caller must create and keep that client alive because the SDK group does not own sessions registered this way. `ClientGroup` instead manages fully configured FastMCP clients directly. Each client can negotiate its own modern or legacy protocol, and calls continue through that client, preserving its authentication, handlers, caching, tracing, result parsing, and multi-round tool behavior. The API is intentionally narrower and currently aggregates tools only.

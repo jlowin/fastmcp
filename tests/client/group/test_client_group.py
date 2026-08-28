@@ -8,8 +8,8 @@ import pytest
 from pydantic import ConfigDict
 
 from fastmcp import Client, Context, FastMCP
+from fastmcp.client.group import ClientGroup
 from fastmcp.client.transports import FastMCPTransport
-from fastmcp.experimental.client_group import ClientGroup
 from fastmcp.mcp_config import MCPConfig, StdioMCPServer
 
 
@@ -252,3 +252,14 @@ async def test_tool_name_collisions_are_rejected():
             assert str(exc) == "Tool name collision: 'a_b_echo'"
         else:
             raise AssertionError("Expected a tool name collision")
+
+
+async def test_single_client_group_provides_namespacing_alone():
+    group = ClientGroup({"solo": Client(FastMCPTransport(make_server("solo")))})
+
+    async with group:
+        tools = await group.list_tools()
+        assert sorted(tool.name for tool in tools) == ["solo_echo", "solo_protocol_era"]
+
+        result = await group.call_tool("solo_echo", {"value": "hi"})
+        assert result.data == "solo: hi"

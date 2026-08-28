@@ -1,4 +1,4 @@
-"""Experimental coordination of independent MCP client connections."""
+"""Coordination of independent MCP client connections."""
 
 from __future__ import annotations
 
