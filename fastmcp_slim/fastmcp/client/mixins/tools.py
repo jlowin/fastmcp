@@ -90,6 +90,8 @@ class ClientToolsMixin:
     async def list_tools(
         self: Client,
         max_pages: int = AUTO_PAGINATION_MAX_PAGES,
+        *,
+        cache_mode: CacheMode = "use",
     ) -> list[mcp_types.Tool]:
         """Retrieve all tools available on the server.
 
@@ -99,6 +101,11 @@ class ClientToolsMixin:
 
         Args:
             max_pages: Maximum number of pages to fetch before raising. Defaults to 250.
+            cache_mode: Response-cache behavior for the first page (only active when
+                the client was built with a cache and the connection is modern).
+                `"use"` (default) serves and stores; `"refresh"` stores without
+                serving; `"bypass"` skips the cache. Subsequent cursor pages always
+                skip the cache.
 
         Returns:
             list[mcp_types.Tool]: A list of all Tool objects.
@@ -112,7 +119,7 @@ class ClientToolsMixin:
         seen_cursors: set[str] = set()
 
         for _ in range(max_pages):
-            result = await self.list_tools_mcp(cursor=cursor)
+            result = await self.list_tools_mcp(cursor=cursor, cache_mode=cache_mode)
             all_tools.extend(result.tools)
             if not result.next_cursor:
                 break

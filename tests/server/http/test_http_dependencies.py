@@ -1,7 +1,6 @@
 import json
 
 import pytest
-from docket import Docket
 from fastmcp_tasks.context import _recall_snapshot, get_task_context
 from mcp_types import TextContent, TextResourceContents
 from starlette.requests import Request
@@ -12,16 +11,6 @@ from fastmcp.server.server import FastMCP
 from fastmcp.utilities.tests import ASGIServer, asgi_server
 from fastmcp_tasks import TasksExtension
 from tests.tasks.task_helpers import running_task_server, submit_task, wait_for_task
-
-
-@pytest.fixture
-def reset_docket_memory_server():
-    """Force a fresh memory:// Docket server bound to this test's event loop."""
-    if hasattr(Docket, "_memory_server"):
-        delattr(Docket, "_memory_server")
-    yield
-    if hasattr(Docket, "_memory_server"):
-        delattr(Docket, "_memory_server")
 
 
 def _http_request_with_headers(headers: dict[str, str]) -> Request:
@@ -246,9 +235,7 @@ def _worker_snapshot_headers() -> dict[str, str]:
     return dict(snapshot.http_headers)
 
 
-async def test_background_task_can_read_snapshotted_request_headers(
-    reset_docket_memory_server,
-):
+async def test_background_task_can_read_snapshotted_request_headers():
     """A background task worker reads the HTTP headers snapshotted at submission.
 
     There is no client task-submission API yet (Phase 4), so the task is driven
@@ -278,9 +265,7 @@ async def test_background_task_can_read_snapshotted_request_headers(
     assert final.result["structuredContent"] == {"result": "tenant-123"}
 
 
-async def test_background_task_snapshot_preserves_all_request_headers(
-    reset_docket_memory_server,
-):
+async def test_background_task_snapshot_preserves_all_request_headers():
     """The task snapshot preserves every request header, including authorization."""
     server = FastMCP()
     server.add_extension(TasksExtension())

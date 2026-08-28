@@ -121,6 +121,10 @@ async with client:
     icons = await client.read_resource("weather://weather/icons/sunny")
 ```
 
+<Note>
+A multi-server configuration presents one aggregate MCP endpoint. Each entry still configures its own transport, headers, and auth, but every backend shares the outer client's negotiated protocol era, handlers, and client-level policy. To hold several fully independent connections — each with its own protocol `mode` and handlers — see [Client Groups](/clients/client-groups).
+</Note>
+
 ## Connection Lifecycle
 
 The client uses context managers for connection management. When you enter the context, the client establishes a connection and negotiates the protocol era with the server. Metadata returned by either legacy initialization or modern discovery is exposed through the same client properties.
@@ -212,7 +216,7 @@ async with Client("https://example.com/mcp", mode="auto") as client:
 <Note>
 `mode="auto"` is the default as of FastMCP 4.0. Earlier versions defaulted to `"legacy"`. If a server behaves unexpectedly under discovery, or you depend on the legacy `initialize` result, pin the old behavior with `Client(..., mode="legacy")`.
 
-The SSE transport is legacy-only — it cannot carry the sessionless modern era — so a client connecting over SSE always negotiates the legacy handshake, even under `mode="auto"`. A multi-server config (`MCPConfigTransport` with more than one server) negotiates the best era shared by every connected backend: it stays modern when every backend is modern-capable and reconnects every leg under the handshake era when any backend requires legacy. Pinning `mode="legacy"` or a modern version applies that mode to every backend. All-modern configurations follow normal modern semantics; applications that rely on handshake-era server-initiated sampling or elicitation should pin `mode="legacy"`.
+The SSE transport is legacy-only — it cannot carry the sessionless modern era — so a client connecting over SSE always negotiates the legacy handshake, even under `mode="auto"`. A multi-server config (`MCPConfigTransport` with more than one server) negotiates the best era shared by every connected backend: it stays modern when every backend is modern-capable and reconnects every leg under the handshake era when any backend requires legacy. Pinning `mode="legacy"` or a modern version applies that mode to every backend. All-modern configurations follow normal modern semantics; applications that rely on handshake-era server-initiated sampling or elicitation should pin `mode="legacy"`. To keep each server on its own natively negotiated era instead, use one client per server — [Client Groups](/clients/client-groups) coordinate several independent clients under one tool catalog.
 </Note>
 
 ## Response caching
@@ -243,11 +247,11 @@ config = CacheConfig(target_id="weather-api", default_ttl_ms=60_000)
 client = Client("https://example.com/mcp", mode="auto", cache=config)
 ```
 
-The high-level `list_tools`, `list_resources`, and `list_prompts` methods always use the cache when one is configured. To override the behavior for a single call, use the lower-level `list_tools_mcp`, `list_resources_mcp`, `list_resource_templates_mcp`, and `list_prompts_mcp` variants, which accept a `cache_mode` argument: `"use"` (the default) serves and stores, `"refresh"` stores a fresh result without serving a cached one, and `"bypass"` skips the cache entirely.
+The listing methods use the cache by default when one is configured. To override the behavior for a single call, pass `cache_mode`: `"use"` (the default) serves and stores, `"refresh"` stores a fresh result without serving a cached one, and `"bypass"` skips the cache entirely. `list_tools` accepts it directly; the lower-level `list_tools_mcp`, `list_resources_mcp`, `list_resource_templates_mcp`, and `list_prompts_mcp` variants accept it as well.
 
 ```python
 async with client:
-    fresh = await client.list_tools_mcp(cache_mode="refresh")
+    fresh = await client.list_tools(cache_mode="refresh")
 ```
 
 ### Sharing a cache across clients
