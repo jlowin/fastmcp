@@ -1,0 +1,37 @@
+---
+title: tool_injection
+sidebarTitle: tool_injection
+---
+
+# `fastmcp.server.middleware.tool_injection`
+
+
+A middleware for injecting tools into the MCP server context.
+
+## Classes
+
+### `ToolInjectionMiddleware` <sup><a href="https://github.com/PrefectHQ/fastmcp/blob/main/fastmcp_slim/fastmcp/server/middleware/tool_injection.py#L16" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+
+
+A middleware for injecting tools into the context.
+
+
+**Methods:**
+
+#### `on_list_tools` <sup><a href="https://github.com/PrefectHQ/fastmcp/blob/main/fastmcp_slim/fastmcp/server/middleware/tool_injection.py#L27" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+
+```python
+on_list_tools(self, context: MiddlewareContext[mcp_types.ListToolsRequest], call_next: CallNext[mcp_types.ListToolsRequest, Sequence[Tool]]) -> Sequence[Tool]
+```
+
+Inject tools into the response.
+
+
+#### `on_call_tool` <sup><a href="https://github.com/PrefectHQ/fastmcp/blob/main/fastmcp_slim/fastmcp/server/middleware/tool_injection.py#L36" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+
+```python
+on_call_tool(self, context: MiddlewareContext[mcp_types.CallToolRequestParams], call_next: CallNext[mcp_types.CallToolRequestParams, ToolResult]) -> ToolResult
+```
+
+Intercept tool calls to injected tools.
+
