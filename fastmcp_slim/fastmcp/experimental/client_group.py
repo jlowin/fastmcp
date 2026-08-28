@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import datetime
 from collections.abc import Mapping
 from dataclasses import dataclass
 from types import TracebackType
@@ -147,7 +148,10 @@ class ClientGroup:
         if route is not None:
             return route
         if self._catalog_loaded:
-            raise KeyError(f"Unknown tool: {name!r}")
+            raise KeyError(
+                f"Unknown tool: {name!r}. If servers changed their tools,"
+                " call list_tools() to refresh the catalog."
+            )
 
         async with self._route_lock:
             route = self._tool_routes.get(name)
@@ -158,7 +162,10 @@ class ClientGroup:
                 route = self._tool_routes.get(name)
 
         if route is None:
-            raise KeyError(f"Unknown tool: {name!r}")
+            raise KeyError(
+                f"Unknown tool: {name!r}. If servers changed their tools,"
+                " call list_tools() to refresh the catalog."
+            )
         return route
 
     async def call_tool_mcp(
@@ -166,7 +173,7 @@ class ClientGroup:
         name: str,
         arguments: dict[str, Any] | None = None,
         *,
-        timeout: float | int | None = None,
+        timeout: datetime.timedelta | float | int | None = None,
         progress_handler: ProgressHandler | None = None,
         meta: dict[str, Any] | None = None,
     ) -> mcp_types.CallToolResult:
@@ -186,7 +193,7 @@ class ClientGroup:
         arguments: dict[str, Any] | None = None,
         *,
         version: str | None = None,
-        timeout: float | int | None = None,
+        timeout: datetime.timedelta | float | int | None = None,
         progress_handler: ProgressHandler | None = None,
         raise_on_error: bool = True,
         meta: dict[str, Any] | None = None,
