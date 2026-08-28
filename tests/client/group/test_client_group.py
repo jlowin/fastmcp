@@ -304,3 +304,19 @@ async def test_known_route_survives_an_unrelated_dead_client():
 
         with pytest.raises(RuntimeError, match="doomed"):
             await group.call_tool("doomed_echo", {"value": "hi"})
+
+
+async def test_partial_connect_failure_unwinds_connected_clients():
+    ok = Client(FastMCPTransport(make_server("ok")))
+    bad = Client(FastMCPTransport(make_server("bad")))
+    group = ClientGroup({"ok": ok, "bad": bad})
+
+    from unittest.mock import AsyncMock
+
+    with patch.object(bad, "__aenter__", AsyncMock(side_effect=RuntimeError("boom"))):
+        with pytest.raises(RuntimeError, match="boom"):
+            async with group:
+                pass
+
+    assert not ok.is_connected()
+    assert group._exit_stack is None

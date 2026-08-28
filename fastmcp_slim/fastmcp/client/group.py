@@ -96,13 +96,27 @@ class ClientGroup:
         stack = contextlib.AsyncExitStack()
         self._exit_stack = stack
         await stack.__aenter__()
-        try:
-            for client in self._clients.values():
-                await stack.enter_async_context(client)
-        except BaseException:
+
+        # Connect concurrently: entry latency stays one handshake deep instead
+        # of growing linearly with the number of servers. With
+        # return_exceptions=True every connection attempt runs to completion,
+        # so on partial failure the successes are known and can be unwound.
+        clients = list(self._clients.values())
+        results = await gather(
+            (client.__aenter__() for client in clients), return_exceptions=True
+        )
+        errors = [result for result in results if isinstance(result, BaseException)]
+        if errors:
+            for client, result in zip(clients, results, strict=True):
+                if not isinstance(result, BaseException):
+                    with contextlib.suppress(Exception):
+                        await client.__aexit__(None, None, None)
             self._exit_stack = None
             await stack.aclose()
-            raise
+            raise errors[0]
+
+        for client in clients:
+            stack.push_async_exit(client)
 
         return self
 
