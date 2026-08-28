@@ -109,11 +109,12 @@ The SDK v2 raises FastMCP's dependency floors, which matters before any of your 
 Objects that FastMCP hands back to you — the results of `client.list_tools()`, `client.call_tool_mcp()`, `client.read_resource()`, and the parameter objects passed to your sampling and elicitation handlers — are SDK v2 objects with snake_case fields. FastMCP installs a compatibility bridge at import time that routes the old camelCase names to their new snake_case fields, so code written against FastMCP 2.x still reads correctly:
 
 ```python
+from pathlib import Path
 from fastmcp import Client
 
 
 async def read_schema():
-    async with Client("my_mcp_server.py") as client:
+    async with Client(Path("my_mcp_server.py")) as client:
         tools = await client.list_tools()
         return tools[0].inputSchema  # still works, warns once
 ```
@@ -380,6 +381,15 @@ ToolError: elicitation via server-initiated requests is unavailable on 2026-07-2
 ```
 
 The gate is strict in both directions, which is what makes it debuggable: a guard tool that returns an input request on a handshake connection raises the mirror-image error rather than misbehaving quietly. You have three ways forward. Rewrite the tool as a guard tool that *returns* a description of the input it needs, which is the form that works on modern connections. Branch on `ctx.request_context.protocol_version` and keep both paths if you serve both eras. Or keep this server's clients on the handshake era with `Client(server, mode="legacy")`, which leaves `ctx.elicit()` working as written. See [Elicitation](/servers/elicitation#which-approach-to-use) for the two shapes side by side.
+
+**`Client("server.py")` no longer starts a subprocess.** Transport inference treats a string as a URL. A string that ends in `.py` or `.js` raises at construction rather than being executed, so a string can no longer select between fetching a URL and running local code depending on whether a file happens to exist. Pass a `pathlib.Path` to keep stdio inference, or build a `StdioTransport` explicitly:
+
+```python test="skip"
+from pathlib import Path
+from fastmcp import Client
+
+client = Client(Path("server.py"))
+```
 
 **Middleware sees traffic it never saw before.** Dispatch now begins in the SDK's middleware layer, the single point every inbound message passes through, so `on_message`, `on_request`, and `on_notification` observe *every* message a client sends — including `notifications/cancelled`, `notifications/initialized`, and `notifications/progress`, and including requests that fail before reaching a handler, such as an unknown method or a `tools/call` whose params fail validation. In 3.x those never reached your hooks. Middleware that assumed every message it saw was a routable request, or that counted messages to measure tool traffic, needs a guard on the message type. The operation hooks (`on_call_tool`, `on_list_tools`, and the rest) are unaffected: they still fire exactly once per request and still receive typed component results. See [What middleware sees](/servers/middleware#what-middleware-sees).
 

@@ -5,6 +5,8 @@ import pytest
 from fastmcp.client.transports import (
     FastMCPTransport,
     MCPConfigTransport,
+    NodeStdioTransport,
+    PythonStdioTransport,
     SSETransport,
     StdioTransport,
     StreamableHttpTransport,
@@ -135,3 +137,29 @@ class TestInferTransport:
         server = FastMCP1()
         transport = infer_transport(server)
         assert isinstance(transport, FastMCPTransport)
+
+
+class TestScriptPathInference:
+    def test_path_to_python_script_infers_stdio(self, tmp_path):
+        script = tmp_path / "server.py"
+        script.write_text("")
+        assert isinstance(infer_transport(script), PythonStdioTransport)
+
+    def test_path_to_node_script_infers_stdio(self, tmp_path):
+        script = tmp_path / "server.js"
+        script.write_text("")
+        assert isinstance(infer_transport(script), NodeStdioTransport)
+
+    def test_string_script_path_is_refused_even_when_the_file_exists(self, tmp_path):
+        script = tmp_path / "server.py"
+        script.write_text("")
+        with pytest.raises(ValueError, match="pathlib.Path"):
+            infer_transport(str(script))
+
+    def test_string_script_path_is_refused_when_the_file_is_missing(self, tmp_path):
+        with pytest.raises(ValueError, match="pathlib.Path"):
+            infer_transport(str(tmp_path / "missing.js"))
+
+    def test_path_with_unsupported_suffix_is_rejected(self, tmp_path):
+        with pytest.raises(ValueError, match="Unsupported script type"):
+            infer_transport(tmp_path / "server.rb")

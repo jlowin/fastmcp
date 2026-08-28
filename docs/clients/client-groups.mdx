@@ -17,12 +17,13 @@ This differs from passing a multi-server configuration directly to `Client`. `Cl
 Construct the clients explicitly when each server needs its own handlers, authentication, or connection settings:
 
 ```python
+from pathlib import Path
 import asyncio
 
 from fastmcp import Client
 from fastmcp.client.group import ClientGroup
 
-legacy_client = Client("legacy_server.py", mode="legacy")
+legacy_client = Client(Path("legacy_server.py"), mode="legacy")
 modern_client = Client("https://modern.example.com/mcp", mode="auto")
 
 group = ClientGroup(

@@ -82,8 +82,9 @@ def infer_transport(
     The function supports these input types:
     - ClientTransport: Used directly without modification
     - FastMCP or SDKServer: Creates an in-memory FastMCPTransport
-    - Path or str (file path): Creates PythonStdioTransport (.py) or NodeStdioTransport (.js)
-    - AnyUrl or str (URL): Creates StreamableHttpTransport (default) or SSETransport (for /sse endpoints)
+    - Path: Creates PythonStdioTransport (.py) or NodeStdioTransport (.js)
+    - AnyUrl or str (URL): Creates StreamableHttpTransport (default) or SSETransport (for /sse endpoints).
+      A str is never treated as a script path; one ending in .py or .js raises.
     - MCPConfig or dict: Creates MCPConfigTransport, potentially connecting to multiple servers
 
     For HTTP URLs, they are assumed to be Streamable HTTP URLs unless they end in `/sse`.
@@ -97,7 +98,7 @@ def infer_transport(
     Examples:
         ```python
         # Connect to a local Python script
-        transport = infer_transport("my_script.py")
+        transport = infer_transport(Path("my_script.py"))
 
         # Connect to a remote server via HTTP
         transport = infer_transport("http://example.com/mcp")

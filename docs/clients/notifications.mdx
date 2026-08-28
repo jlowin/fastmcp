@@ -139,6 +139,7 @@ class MyMessageHandler(MessageHandler):
 A practical example of maintaining a tool cache that refreshes when tools change:
 
 ```python
+from pathlib import Path
 from fastmcp import Client
 from fastmcp.client.messages import MessageHandler
 import mcp.types
@@ -154,7 +155,7 @@ class ToolCacheHandler(MessageHandler):
         print("Tools changed - clearing cache")
         self.cached_tools = []  # Force refresh on next access
 
-client = Client("server.py", message_handler=ToolCacheHandler())
+client = Client(Path("server.py"), message_handler=ToolCacheHandler())
 ```
 
 ## Server Requests
