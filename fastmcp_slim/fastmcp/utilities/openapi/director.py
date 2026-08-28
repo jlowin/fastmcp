@@ -175,9 +175,6 @@ class RequestDirector:
         # Use parameter map to route arguments to correct locations
         if hasattr(route, "parameter_map") and route.parameter_map:
             for arg_name, value in flat_args.items():
-                if value is None:
-                    continue  # Skip None values for optional parameters
-
                 if arg_name not in route.parameter_map:
                     logger.warning(
                         f"Argument '{arg_name}' not found in parameter map for {route.operation_id}"
@@ -187,6 +184,11 @@ class RequestDirector:
                 mapping = route.parameter_map[arg_name]
                 location = mapping["location"]
                 openapi_name = mapping["openapi_name"]
+
+                # A null body property means "clear this field" and has to survive.
+                # There is no serialization for a null path, query, header or cookie.
+                if value is None and location != "body":
+                    continue
 
                 if location == "path":
                     path_params[openapi_name] = value
@@ -213,13 +215,12 @@ class RequestDirector:
 
             # Map arguments to locations
             for arg_name, value in flat_args.items():
-                if value is None:
-                    continue
-
                 # Check if it's a suffixed parameter (e.g., id__path)
                 if "__" in arg_name:
                     base_name, location = arg_name.rsplit("__", 1)
                     if location in ["path", "query", "header", "cookie"]:
+                        if value is None:
+                            continue
                         if location == "path":
                             path_params[base_name] = value
                         elif location == "query":
@@ -232,6 +233,8 @@ class RequestDirector:
 
                 # Check if it's a known parameter
                 if arg_name in param_locations:
+                    if value is None:
+                        continue
                     location = param_locations[arg_name]
                     if location == "path":
                         path_params[arg_name] = value

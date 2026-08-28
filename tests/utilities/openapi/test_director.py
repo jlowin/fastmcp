@@ -221,13 +221,13 @@ class TestRequestDirector:
         assert body_data["name"] == "John Doe"
 
     def test_build_request_with_none_values(self, director, complex_route):
-        """Test that None values are skipped for optional parameters."""
+        """None query and header values are dropped; a null body property is sent."""
         flat_args = {
             "id": "item123",
             "version": None,  # Optional, should be skipped
             "X-Client-Version": None,  # Optional, should be skipped
             "title": "Required Title",
-            "description": None,  # Optional body param, should be skipped
+            "description": None,  # Optional body param, clears the field
         }
 
         request = director.build(complex_route, flat_args, "https://api.example.com")
@@ -241,7 +241,20 @@ class TestRequestDirector:
 
         body_data = json.loads(request.content)
         assert body_data["title"] == "Required Title"
-        assert "description" not in body_data  # Should not include None description
+        assert body_data["description"] is None
+
+    def test_build_request_with_only_a_null_body_property(
+        self, director, complex_route
+    ):
+        """A body of nothing but nulls is still a body, not an omitted request body."""
+        request = director.build(
+            complex_route,
+            {"id": "item123", "description": None},
+            "https://api.example.com",
+        )
+
+        assert json.loads(request.content) == {"description": None}
+        assert request.headers["content-type"].startswith("application/json")
 
     def test_build_request_fallback_mapping(self, director):
         """Test fallback parameter mapping when parameter_map is not available."""
