@@ -269,7 +269,9 @@ async def test_client_membership_is_immutable():
     group = ClientGroup({"solo": Client(FastMCPTransport(make_server("solo")))})
 
     with pytest.raises(TypeError):
-        group.clients["other"] = Client(FastMCPTransport(make_server("other")))  # type: ignore[index]
+        group.clients["other"] = Client(  # ty: ignore[invalid-assignment]
+            FastMCPTransport(make_server("other"))
+        )
 
 
 async def test_concurrent_group_entry_does_not_double_connect():
