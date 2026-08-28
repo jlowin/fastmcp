@@ -320,3 +320,30 @@ async def test_partial_connect_failure_unwinds_connected_clients():
 
     assert not ok.is_connected()
     assert group._exit_stack is None
+
+
+async def test_explicit_list_tools_refreshes_past_client_response_cache():
+    """A cache-hinted server must not leave group.list_tools() serving a stale
+    catalog: the explicit call is the documented refresh mechanism."""
+    server = FastMCP("hinted", cache_ttl=60000)
+
+    @server.tool
+    def original() -> str:
+        return "original"
+
+    client = Client(FastMCPTransport(server), cache=True)
+    group = ClientGroup({"hinted": client})
+
+    async with group:
+        tools = await group.list_tools()
+        assert [tool.name for tool in tools] == ["hinted_original"]
+
+        @server.tool
+        def added() -> str:
+            return "added"
+
+        refreshed = await group.list_tools()
+        assert {tool.name for tool in refreshed} == {"hinted_original", "hinted_added"}
+
+        result = await group.call_tool("hinted_added")
+        assert result.data == "added"

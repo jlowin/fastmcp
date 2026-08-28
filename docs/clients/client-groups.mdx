@@ -52,7 +52,7 @@ Tool names are prefixed with the configured client name by default. For example,
 
 A group with a single client is a supported way to get namespacing alone: the one server's tools are presented under its configured name, with no other behavior change.
 
-The first routed call loads the tool catalog lazily. After a successful load, unknown tool names fail locally rather than repeating discovery against every server. Call `list_tools()` explicitly to refresh the routes when servers add or remove tools dynamically.
+The first routed call loads the tool catalog lazily. After a successful load, unknown tool names fail locally rather than repeating discovery against every server. Call `list_tools()` explicitly to refresh the routes when servers add or remove tools dynamically — the explicit call refreshes past any client-side response cache, so the catalog reflects what every server advertises now.
 
 ## Bind tools to their owning client
 

@@ -11,6 +11,7 @@ from typing import Any
 
 import anyio
 import mcp_types
+from mcp.client.caching import CacheMode
 
 from fastmcp.client.client import CallToolResult, Client, ConnectMode
 from fastmcp.client.progress import ProgressHandler
@@ -148,13 +149,24 @@ class ClientGroup:
                 f"ClientGroup client for server {route.server_name!r} is not connected"
             )
 
-    async def list_tools(self) -> list[mcp_types.Tool]:
-        """List tools from every client with namespaced names."""
+    async def list_tools(
+        self, *, cache_mode: CacheMode = "refresh"
+    ) -> list[mcp_types.Tool]:
+        """List tools from every client with namespaced names.
+
+        An explicit call is the group's catalog-refresh mechanism, so it
+        defaults to `cache_mode="refresh"`: a client-side response cache
+        (SEP-2549) is repopulated rather than served, and the routes reflect
+        what every server advertises now. Pass `cache_mode="use"` to allow
+        cache hits when staleness within the server's hint is acceptable.
+        """
         self._require_connected()
         tools: list[mcp_types.Tool] = []
         routes: dict[str, ToolRoute] = {}
         clients = list(self._clients.items())
-        tool_lists = await gather(client.list_tools() for _, client in clients)
+        tool_lists = await gather(
+            client.list_tools(cache_mode=cache_mode) for _, client in clients
+        )
 
         for (server_name, client), server_tools in zip(
             clients, tool_lists, strict=True
@@ -197,7 +209,9 @@ class ClientGroup:
             if route is not None:
                 return route
             if not self._catalog_loaded:
-                await self.list_tools()
+                # Lazy cold-start discovery may serve a cached listing; only an
+                # explicit list_tools() call promises a refreshed catalog.
+                await self.list_tools(cache_mode="use")
                 route = self._tool_routes.get(name)
 
         if route is None:
