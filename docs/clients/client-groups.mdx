@@ -52,7 +52,20 @@ Tool names are prefixed with the configured client name by default. For example,
 
 The first routed call loads the tool catalog lazily. After a successful load, unknown tool names fail locally rather than repeating discovery against every server. Call `list_tools()` explicitly to refresh the routes when servers add or remove tools dynamically.
 
-Higher-level tool adapters can call `resolve_tool()` to recover a public tool's server name, client, and original upstream name. This preserves per-server callback and interceptor context without reimplementing the group's routing rules.
+## Bind tools to their owning client
+
+Tool adapters — code that turns MCP tools into callables for an agent framework — often need more than routed calls: session-driven input loops, handler context, and interceptors must run on the connection that owns the tool. `resolve_tool()` returns that route, so an adapter can discover through the group and still bind each generated tool to its real client:
+
+```python
+async with group:
+    for tool in await group.list_tools():
+        route = await group.resolve_tool(tool.name)
+        # route.client is the connected FastMCP client for this tool;
+        # route.upstream_name is the name the server itself advertises
+        register_agent_tool(tool, client=route.client, name=route.upstream_name)
+```
+
+The group aggregates names and detects collisions; it never stands between the adapter and the client, so everything a single `Client` supports keeps working per tool.
 
 ## Create a group from configuration
 
