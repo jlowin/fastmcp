@@ -1,5 +1,7 @@
 """Client transport inference tests."""
 
+import warnings
+
 import pytest
 
 from fastmcp.client.transports import (
@@ -12,6 +14,7 @@ from fastmcp.client.transports import (
     StreamableHttpTransport,
     infer_transport,
 )
+from fastmcp.exceptions import FastMCPDeprecationWarning
 
 
 class TestInferTransport:
@@ -150,15 +153,23 @@ class TestScriptPathInference:
         script.write_text("")
         assert isinstance(infer_transport(script), NodeStdioTransport)
 
-    def test_string_script_path_is_refused_even_when_the_file_exists(self, tmp_path):
+    def test_string_script_path_still_works_but_warns(self, tmp_path):
         script = tmp_path / "server.py"
         script.write_text("")
-        with pytest.raises(ValueError, match="pathlib.Path"):
-            infer_transport(str(script))
+        with pytest.warns(FastMCPDeprecationWarning, match="pathlib.Path"):
+            transport = infer_transport(str(script))
+        assert isinstance(transport, PythonStdioTransport)
 
-    def test_string_script_path_is_refused_when_the_file_is_missing(self, tmp_path):
-        with pytest.raises(ValueError, match="pathlib.Path"):
-            infer_transport(str(tmp_path / "missing.js"))
+    def test_path_does_not_warn(self, tmp_path):
+        script = tmp_path / "server.py"
+        script.write_text("")
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            infer_transport(script)
+
+    def test_string_to_missing_script_is_not_a_transport(self, tmp_path):
+        with pytest.raises(ValueError, match="Could not infer"):
+            infer_transport(str(tmp_path / "missing.py"))
 
     def test_path_with_unsupported_suffix_is_rejected(self, tmp_path):
         with pytest.raises(ValueError, match="Unsupported script type"):

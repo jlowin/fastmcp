@@ -1,9 +1,11 @@
+import warnings
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast, overload
 
 from mcp.server.mcpserver import MCPServer as SDKServer
 from pydantic import AnyUrl
 
+from fastmcp._warnings import FastMCPDeprecationWarning
 from fastmcp.client.transports.base import ClientTransport, ClientTransportT
 from fastmcp.client.transports.config import MCPConfigTransport
 from fastmcp.client.transports.http import StreamableHttpTransport
@@ -84,7 +86,8 @@ def infer_transport(
     - FastMCP or SDKServer: Creates an in-memory FastMCPTransport
     - Path: Creates PythonStdioTransport (.py) or NodeStdioTransport (.js)
     - AnyUrl or str (URL): Creates StreamableHttpTransport (default) or SSETransport (for /sse endpoints).
-      A str is never treated as a script path; one ending in .py or .js raises.
+      A str naming an existing .py or .js file still infers a stdio transport but
+      emits a FastMCPDeprecationWarning; pass a Path instead.
     - MCPConfig or dict: Creates MCPConfigTransport, potentially connecting to multiple servers
 
     For HTTP URLs, they are assumed to be Streamable HTTP URLs unless they end in `/sse`.
@@ -133,13 +136,21 @@ def infer_transport(
         else:
             raise ValueError(f"Unsupported script type: {transport}")
 
-    # a string that looks like a script path: refuse rather than execute
-    elif isinstance(transport, str) and transport.endswith((".py", ".js")):
-        raise ValueError(
-            f"Refusing to infer a stdio transport from the string {transport!r}."
-            " Strings are treated as URLs; pass a pathlib.Path or an explicit"
-            " StdioTransport to run a local script."
+    # a string naming an existing script: still works, but warns. Strings will
+    # mean URLs only in FastMCP 5; a Path is the explicit way to run a script.
+    elif (
+        isinstance(transport, str)
+        and transport.endswith((".py", ".js"))
+        and Path(transport).exists()
+    ):
+        warnings.warn(
+            f"Inferring a stdio transport from the string {transport!r} is"
+            " deprecated and will be removed in FastMCP 5. Pass"
+            f" pathlib.Path({transport!r}) or an explicit StdioTransport instead.",
+            FastMCPDeprecationWarning,
+            stacklevel=3,
         )
+        inferred_transport = infer_transport(Path(transport))
 
     # the transport is an http(s) URL
     elif isinstance(transport, AnyUrl | str) and str(transport).startswith("http"):
