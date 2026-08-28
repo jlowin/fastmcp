@@ -6,7 +6,7 @@ import contextlib
 import datetime
 from collections.abc import Mapping
 from dataclasses import dataclass
-from types import TracebackType
+from types import MappingProxyType, TracebackType
 from typing import Any
 
 import anyio
@@ -42,11 +42,21 @@ class ClientGroup:
         if not clients:
             raise ValueError("ClientGroup requires at least one client")
 
-        self.clients = dict(clients)
+        self._clients = dict(clients)
         self._exit_stack: contextlib.AsyncExitStack | None = None
         self._tool_routes: dict[str, ToolRoute] = {}
         self._catalog_loaded = False
         self._route_lock = anyio.Lock()
+
+    @property
+    def clients(self) -> Mapping[str, Client[Any]]:
+        """The group's clients, keyed by server name.
+
+        Read-only: membership is fixed at construction, since discovered routes
+        hold the client that advertised each tool and would silently go stale
+        if the mapping were swapped underneath them.
+        """
+        return MappingProxyType(self._clients)
 
     @classmethod
     def from_config(
@@ -75,22 +85,25 @@ class ClientGroup:
 
     @property
     def protocol_versions(self) -> dict[str, str | None]:
-        return {name: client.protocol_version for name, client in self.clients.items()}
+        return {name: client.protocol_version for name, client in self._clients.items()}
 
     async def __aenter__(self) -> ClientGroup:
         if self._exit_stack is not None:
             raise RuntimeError("ClientGroup is already connected")
 
+        # Claim the stack before the first await so a concurrent entry hits the
+        # guard above instead of racing past it and overwriting this one.
         stack = contextlib.AsyncExitStack()
+        self._exit_stack = stack
         await stack.__aenter__()
         try:
-            for client in self.clients.values():
+            for client in self._clients.values():
                 await stack.enter_async_context(client)
         except BaseException:
+            self._exit_stack = None
             await stack.aclose()
             raise
 
-        self._exit_stack = stack
         return self
 
     async def __aexit__(
@@ -109,18 +122,24 @@ class ClientGroup:
 
     def _require_connected(self) -> None:
         disconnected = [
-            name for name, client in self.clients.items() if not client.is_connected()
+            name for name, client in self._clients.items() if not client.is_connected()
         ]
         if disconnected:
             names = ", ".join(repr(name) for name in disconnected)
             raise RuntimeError(f"ClientGroup clients are not connected: {names}")
+
+    def _require_route_connected(self, route: ToolRoute) -> None:
+        if not route.client.is_connected():
+            raise RuntimeError(
+                f"ClientGroup client for server {route.server_name!r} is not connected"
+            )
 
     async def list_tools(self) -> list[mcp_types.Tool]:
         """List tools from every client with namespaced names."""
         self._require_connected()
         tools: list[mcp_types.Tool] = []
         routes: dict[str, ToolRoute] = {}
-        clients = list(self.clients.items())
+        clients = list(self._clients.items())
         tool_lists = await gather(client.list_tools() for _, client in clients)
 
         for (server_name, client), server_tools in zip(
@@ -142,10 +161,16 @@ class ClientGroup:
         return tools
 
     async def resolve_tool(self, name: str) -> ToolRoute:
-        """Resolve a public tool name to its client and upstream identity."""
-        self._require_connected()
+        """Resolve a public tool name to its client and upstream identity.
+
+        A known route only requires its own client to be connected; one dead
+        server does not couple failures onto calls routed to healthy servers.
+        Loading the catalog (the first resolution, or after a refresh) still
+        requires every client, since discovery queries them all.
+        """
         route = self._tool_routes.get(name)
         if route is not None:
+            self._require_route_connected(route)
             return route
         if self._catalog_loaded:
             raise KeyError(

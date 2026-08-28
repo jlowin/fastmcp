@@ -263,3 +263,42 @@ async def test_single_client_group_provides_namespacing_alone():
 
         result = await group.call_tool("solo_echo", {"value": "hi"})
         assert result.data == "solo: hi"
+
+
+async def test_client_membership_is_immutable():
+    group = ClientGroup({"solo": Client(FastMCPTransport(make_server("solo")))})
+
+    with pytest.raises(TypeError):
+        group.clients["other"] = Client(FastMCPTransport(make_server("other")))  # type: ignore[index]
+
+
+async def test_concurrent_group_entry_does_not_double_connect():
+    client = Client(FastMCPTransport(make_server("solo")))
+    group = ClientGroup({"solo": client})
+
+    results = await asyncio.gather(
+        group.__aenter__(), group.__aenter__(), return_exceptions=True
+    )
+    errors = [r for r in results if isinstance(r, BaseException)]
+    assert len(errors) == 1
+    assert isinstance(errors[0], RuntimeError)
+
+    await group.__aexit__(None, None, None)
+    assert not client.is_connected()
+
+
+async def test_known_route_survives_an_unrelated_dead_client():
+    healthy = Client(FastMCPTransport(make_server("healthy")))
+    doomed = Client(FastMCPTransport(make_server("doomed")))
+    group = ClientGroup({"healthy": healthy, "doomed": doomed})
+
+    async with healthy:
+        async with doomed:
+            await group.list_tools()
+        assert not doomed.is_connected()
+
+        result = await group.call_tool("healthy_echo", {"value": "hi"})
+        assert result.data == "healthy: hi"
+
+        with pytest.raises(RuntimeError, match="doomed"):
+            await group.call_tool("doomed_echo", {"value": "hi"})
