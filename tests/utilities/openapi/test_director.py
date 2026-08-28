@@ -1528,3 +1528,120 @@ class TestCookieParameters:
         assert "version=3" in cookie
         # Booleans use OpenAPI convention (true/false, not True/False)
         assert "debug=true" in cookie
+
+
+class TestNullableBodyProperties:
+    """Explicit JSON null must survive into a nullable request-body property."""
+
+    @pytest.fixture
+    def director(self, basic_openapi_30_spec):
+        return RequestDirector(SchemaPath.from_dict(basic_openapi_30_spec))
+
+    @staticmethod
+    def _route(folder_id_schema):
+        """PATCH route whose `folder_id` body property uses the given schema."""
+        return HTTPRoute(
+            path="/files/{file_id}",
+            method="PATCH",
+            operation_id="update_file",
+            parameters=[
+                ParameterInfo(
+                    name="file_id",
+                    location="path",
+                    required=True,
+                    schema={"type": "string"},
+                ),
+                ParameterInfo(
+                    name="version",
+                    location="query",
+                    required=False,
+                    schema={"type": "integer"},
+                ),
+            ],
+            request_body=RequestBodyInfo(
+                required=True,
+                content_schema={
+                    "application/json": {
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string"},
+                            "folder_id": folder_id_schema,
+                        },
+                    }
+                },
+            ),
+            parameter_map={
+                "file_id": {"location": "path", "openapi_name": "file_id"},
+                "version": {"location": "query", "openapi_name": "version"},
+                "name": {"location": "body", "openapi_name": "name"},
+                "folder_id": {"location": "body", "openapi_name": "folder_id"},
+            },
+        )
+
+    @pytest.mark.parametrize(
+        "folder_id_schema",
+        [
+            pytest.param({"type": ["string", "null"]}, id="openapi-31-type-array"),
+            pytest.param(
+                {"type": "string", "nullable": True}, id="openapi-30-nullable"
+            ),
+            pytest.param(
+                {"anyOf": [{"type": "string"}, {"type": "null"}]}, id="anyof-null"
+            ),
+        ],
+    )
+    def test_explicit_null_is_sent_for_nullable_body_property(
+        self, director, folder_id_schema
+    ):
+        """Sending null must clear the field, not read as "leave unchanged"."""
+        request = director.build(
+            self._route(folder_id_schema),
+            {"file_id": "f1", "name": "renamed", "folder_id": None},
+            "https://api.example.com",
+        )
+
+        assert json.loads(request.content) == {"name": "renamed", "folder_id": None}
+
+    def test_null_only_body_still_sends_json(self, director):
+        """A body of just one null must not collapse to an empty request."""
+        request = director.build(
+            self._route({"type": ["string", "null"]}),
+            {"file_id": "f1", "folder_id": None},
+            "https://api.example.com",
+        )
+
+        assert json.loads(request.content) == {"folder_id": None}
+        assert "application/json" in request.headers.get("content-type", "")
+
+    def test_null_non_nullable_body_property_is_still_dropped(self, director):
+        """A null on a property the spec never allows null for stays omitted."""
+        request = director.build(
+            self._route({"type": "string"}),
+            {"file_id": "f1", "name": "renamed", "folder_id": None},
+            "https://api.example.com",
+        )
+
+        assert json.loads(request.content) == {"name": "renamed"}
+
+    def test_null_query_parameter_is_still_dropped(self, director):
+        """Nullability only applies to the body; a null query param has no wire form."""
+        request = director.build(
+            self._route({"type": ["string", "null"]}),
+            {"file_id": "f1", "name": "renamed", "version": None},
+            "https://api.example.com",
+        )
+
+        assert "version" not in str(request.url)
+
+    def test_null_body_property_without_parameter_map(self, director):
+        """The fallback mapping path honours nullability too."""
+        route = self._route({"type": ["string", "null"]})
+        route.parameter_map = {}
+
+        request = director.build(
+            route,
+            {"file_id": "f1", "name": "renamed", "folder_id": None},
+            "https://api.example.com",
+        )
+
+        assert json.loads(request.content) == {"name": "renamed", "folder_id": None}

@@ -15,6 +15,44 @@ from .models import HTTPRoute, ParameterInfo
 logger = get_logger(__name__)
 
 
+def _is_nullable(schema: Any) -> bool:
+    """Whether a property schema explicitly permits null.
+
+    Covers the three spellings a spec may use: an OpenAPI 3.1 type array
+    (``{"type": ["string", "null"]}``), an OpenAPI 3.0 ``nullable: true``
+    flag, and a ``null`` branch inside ``anyOf``/``oneOf``.
+    """
+    if not isinstance(schema, dict):
+        return False
+    if schema.get("nullable") is True:
+        return True
+    schema_type = schema.get("type")
+    if schema_type == "null" or (
+        isinstance(schema_type, list) and "null" in schema_type
+    ):
+        return True
+    for keyword in ("anyOf", "oneOf"):
+        for subschema in schema.get(keyword) or ():
+            if _is_nullable(subschema):
+                return True
+    return False
+
+
+def _nullable_body_props(route: HTTPRoute) -> set[str]:
+    """Names of request-body properties whose schema explicitly permits null."""
+    request_body = getattr(route, "request_body", None)
+    content_schema = getattr(request_body, "content_schema", None)
+    if not content_schema:
+        return set()
+    body_schema = next(iter(content_schema.values()))
+    if not isinstance(body_schema, dict):
+        return set()
+    properties = body_schema.get("properties")
+    if not isinstance(properties, dict):
+        return set()
+    return {name for name, sub in properties.items() if _is_nullable(sub)}
+
+
 def _query_scalar_to_str(value: Any) -> str:
     """Convert a scalar to its query-string representation.
 
@@ -171,20 +209,32 @@ class RequestDirector:
         header_params = {}
         cookie_params = {}
         body_props = {}
+        nullable_body_props = _nullable_body_props(route)
 
         # Use parameter map to route arguments to correct locations
         if hasattr(route, "parameter_map") and route.parameter_map:
             for arg_name, value in flat_args.items():
-                if value is None:
-                    continue  # Skip None values for optional parameters
+                mapping = route.parameter_map.get(arg_name)
 
-                if arg_name not in route.parameter_map:
+                if value is None:
+                    # A null is only meaningful for a body property the spec
+                    # declares nullable: there it distinguishes "clear this
+                    # field" from "leave it unchanged". Everywhere else (path,
+                    # query, header, cookie, non-nullable body props) there is
+                    # nothing sensible to serialize, so the argument is skipped.
+                    if not (
+                        mapping is not None
+                        and mapping["location"] == "body"
+                        and mapping["openapi_name"] in nullable_body_props
+                    ):
+                        continue
+
+                if mapping is None:
                     logger.warning(
                         f"Argument '{arg_name}' not found in parameter map for {route.operation_id}"
                     )
                     continue
 
-                mapping = route.parameter_map[arg_name]
                 location = mapping["location"]
                 openapi_name = mapping["openapi_name"]
 
@@ -214,7 +264,16 @@ class RequestDirector:
             # Map arguments to locations
             for arg_name, value in flat_args.items():
                 if value is None:
-                    continue
+                    # Same rule as above: keep an explicit null only when it
+                    # lands on a body property the spec declares nullable.
+                    # In this branch a body property is one that is neither
+                    # location-suffixed nor a declared parameter.
+                    if not (
+                        "__" not in arg_name
+                        and arg_name not in param_locations
+                        and arg_name in nullable_body_props
+                    ):
+                        continue
 
                 # Check if it's a suffixed parameter (e.g., id__path)
                 if "__" in arg_name:
