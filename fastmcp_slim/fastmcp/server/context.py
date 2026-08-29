@@ -68,7 +68,7 @@ T = TypeVar("T", default=Any)
 
 _ELICIT_MODERN_ERROR = (
     "elicitation via server-initiated requests is unavailable on 2026-07-28 "
-    "connections."
+    "connections; return an InputRequiredResult instead (SEP-2322)"
 )
 
 
@@ -944,10 +944,11 @@ class Context:
         """True when the negotiated MCP protocol era removed the back-channel.
 
         Reads the negotiated protocol version from the active request context.
-        The 2026-07-28 era (SEP-2577) has no back-channel for server-initiated
-        requests such as sampling/elicitation. Returns False when no request
-        context is available (e.g. background task or pre-session), leaving the
-        existing wire path to surface its own error.
+        The 2026-07-28 era has no back-channel for server-initiated requests
+        such as elicitation (SEP-2322; sessionless transport is SEP-2575).
+        Returns False when no request context is available (e.g. background
+        task or pre-session), leaving the existing wire path to surface its
+        own error.
         """
         rc = self.request_context
         if rc is None:
@@ -1082,7 +1083,7 @@ class Context:
             # round-trip. Fail fast with the guidance to use InputRequiredResult.
             raise ToolError(_TASK_ELICIT_ERROR)
         # Foreground push path: server-initiated elicitation needs a back-channel,
-        # which the 2026-07-28 era removed (SEP-2577). Raise a clear era-aware
+        # which the 2026-07-28 era removed (SEP-2322). Raise a clear era-aware
         # error before hitting the wire instead of the SDK's opaque "Method not
         # found". Handshake-era behavior is unchanged.
         if self._is_modern_protocol():

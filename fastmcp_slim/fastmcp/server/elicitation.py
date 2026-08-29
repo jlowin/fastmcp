@@ -5,8 +5,8 @@ from enum import Enum
 from typing import Any, Generic, Literal, cast, get_origin
 
 from mcp.server.elicitation import (
-    CancelledElicitation,
-    DeclinedElicitation,
+    CancelledElicitation as _SDKCancelledElicitation,
+    DeclinedElicitation as _SDKDeclinedElicitation,
 )
 from pydantic import BaseModel
 from pydantic.json_schema import GenerateJsonSchema, JsonSchemaValue
@@ -103,10 +103,50 @@ class ElicitationJsonSchema(GenerateJsonSchema):
 
 # we can't use the low-level AcceptedElicitation because it only works with BaseModels
 class AcceptedElicitation(BaseModel, Generic[T]):
-    """Result when user accepts the elicitation."""
+    """Result when the user accepts the elicitation.
+
+    Always truthy, including when ``data`` is a negative answer (``False``,
+    ``"no"``). ``if result:`` is an approval guard, not a check of the answer.
+    """
 
     action: Literal["accept"] = "accept"
     data: T
+
+    def __bool__(self) -> bool:
+        return True
+
+    @property
+    def accepted(self) -> bool:
+        return True
+
+
+class DeclinedElicitation(_SDKDeclinedElicitation):
+    """Result when the user declined the elicitation.
+
+    Falsey so a naive ``if result:`` guard does not treat a refusal as approval.
+    """
+
+    def __bool__(self) -> bool:
+        return False
+
+    @property
+    def accepted(self) -> bool:
+        return False
+
+
+class CancelledElicitation(_SDKCancelledElicitation):
+    """Result when the user cancelled the elicitation.
+
+    Falsey so a naive ``if result:`` guard does not treat a cancellation as
+    approval.
+    """
+
+    def __bool__(self) -> bool:
+        return False
+
+    @property
+    def accepted(self) -> bool:
+        return False
 
 
 @dataclass

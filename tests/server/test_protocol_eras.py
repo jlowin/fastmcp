@@ -260,7 +260,7 @@ async def test_elicit_works_on_legacy(push_server):
 @pytest.mark.parametrize("mode", MODERN_MODES)
 async def test_elicit_degrades_on_modern(push_server, mode):
     """Elicitation is a server-initiated request, removed at 2026-07-28
-    (SEP-2577), so a tool that uses it must degrade to a surfaced error rather
+    (SEP-2322), so a tool that uses it must degrade to a surfaced error rather
     than hang or crash the connection. The connection survives: a subsequent
     normal call still works.
     """
@@ -289,7 +289,10 @@ async def test_elicit_degradation_message_is_clear_on_modern(push_server):
     ) as client:
         result = await client.call_tool("do_elicit", {})
     assert result.is_error is True
-    assert "server-initiated" in " ".join(_texts(result.content)).lower()
+    message = " ".join(_texts(result.content)).lower()
+    assert "server-initiated" in message
+    assert "inputrequiredresult" in message
+    assert "sep-2322" in message
 
 
 # ---------------------------------------------------------------------------

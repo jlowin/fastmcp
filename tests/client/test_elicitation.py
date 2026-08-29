@@ -778,3 +778,66 @@ class TestPatternMatching:
         ) as client:
             result = await client.call_tool("pattern_match_tool", {})
             assert result.data == "Cancelled"
+
+
+class TestElicitationTruthiness:
+    """Declined/cancelled results are falsey so `if result:` is a safe approval guard."""
+
+    @pytest.mark.parametrize(
+        "result,expected",
+        [
+            (AcceptedElicitation(data="yes"), True),
+            (AcceptedElicitation(data=False), True),
+            (AcceptedElicitation(data=""), True),
+            (DeclinedElicitation(), False),
+            (CancelledElicitation(), False),
+        ],
+        ids=["accept-str", "accept-false", "accept-empty", "decline", "cancel"],
+    )
+    def test_bool_and_accepted_match_action(self, result, expected):
+        assert bool(result) is expected
+        assert result.accepted is expected
+
+    @pytest.mark.parametrize("action", ["decline", "cancel"])
+    async def test_naive_truthiness_guard_blocks_refusal(self, action):
+        mcp = FastMCP("TestServer")
+
+        @mcp.tool
+        async def create_if_approved(context: Context) -> str:
+            result = await context.elicit("Create the candidate?", response_type=bool)
+            if result:
+                return f"CREATED via naive guard on {type(result).__name__}"
+            return f"BLOCKED on {type(result).__name__}"
+
+        async def elicitation_handler(message, response_type, params, ctx):
+            return ElicitResult(action=action)
+
+        async with Client(
+            mcp, mode="legacy", elicitation_handler=elicitation_handler
+        ) as client:
+            result = await client.call_tool("create_if_approved", {})
+
+        expected_type = (
+            "DeclinedElicitation" if action == "decline" else "CancelledElicitation"
+        )
+        assert result.data == f"BLOCKED on {expected_type}"
+
+    async def test_naive_truthiness_guard_allows_accept_even_with_false_data(self):
+        mcp = FastMCP("TestServer")
+
+        @mcp.tool
+        async def create_if_approved(context: Context) -> str:
+            result = await context.elicit("Create the candidate?", response_type=bool)
+            if result:
+                return f"CREATED data={result.data!r}"
+            return "BLOCKED"
+
+        async def elicitation_handler(message, response_type, params, ctx):
+            return ElicitResult(action="accept", content={"value": False})
+
+        async with Client(
+            mcp, mode="legacy", elicitation_handler=elicitation_handler
+        ) as client:
+            result = await client.call_tool("create_if_approved", {})
+
+        assert result.data == "CREATED data=False"
