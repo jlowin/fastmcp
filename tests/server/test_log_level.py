@@ -2,9 +2,7 @@
 
 import asyncio
 import socket
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
-from typing import Any
+from contextlib import nullcontext
 from unittest.mock import AsyncMock, patch
 
 from fastmcp import FastMCP
@@ -36,18 +34,8 @@ class TestLogLevelParameter:
                     pass  # Expected since we're mocking
 
     async def test_run_http_accepts_log_level(self):
-        """The HTTP runner accepts log levels and owns the outer lifespan."""
-        events: list[str] = []
-
-        @asynccontextmanager
-        async def lifespan(_server: FastMCP) -> AsyncIterator[dict[str, Any]]:
-            events.append("startup")
-            try:
-                yield {}
-            finally:
-                events.append("shutdown")
-
-        server = FastMCP("TestServer", lifespan=lifespan)
+        """Test that run_http_async accepts log_level parameter."""
+        server = FastMCP("TestServer")
 
         # Mock uvicorn to avoid actual server start
         with patch(
@@ -55,6 +43,7 @@ class TestLogLevelParameter:
         ) as mock_server_class:
             mock_instance = mock_server_class.return_value
             mock_instance._serve = AsyncMock()
+            mock_instance.capture_signals.return_value = nullcontext()
 
             # This should accept the log_level parameter without error
             await server.run_http_async(
@@ -62,14 +51,10 @@ class TestLogLevelParameter:
                 show_banner=False,
                 host="127.0.0.1",
                 port=8000,
-                uvicorn_config={"lifespan": "off"},
             )
 
             # Verify the server loop was called
             mock_instance._serve.assert_awaited_once_with(sockets=None)
-
-        # The runner's lifecycle owner is independent of Uvicorn's ASGI mode.
-        assert events == ["startup", "shutdown"]
 
     async def test_run_http_passes_sockets_to_uvicorn(self):
         """Test that run_http_async forwards pre-bound sockets to Uvicorn."""
@@ -81,6 +66,7 @@ class TestLogLevelParameter:
             ) as mock_server_class:
                 mock_instance = mock_server_class.return_value
                 mock_instance._serve = AsyncMock()
+                mock_instance.capture_signals.return_value = nullcontext()
 
                 await server.run_http_async(
                     show_banner=False,

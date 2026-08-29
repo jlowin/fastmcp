@@ -7,9 +7,15 @@ import socket
 import subprocess
 import sys
 import time
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager, nullcontext
 from pathlib import Path
+from typing import Any
+from unittest.mock import AsyncMock, patch
 
 import pytest
+
+from fastmcp import FastMCP
 
 pytestmark = [
     pytest.mark.subprocess_heavy,
@@ -20,6 +26,35 @@ pytestmark = [
 
 SERVER_MODULE = "tests.server.signal_shutdown_server"
 PROCESS_TIMEOUT = 10.0
+
+
+async def test_run_http_owns_lifespan_when_asgi_lifespan_is_disabled() -> None:
+    """Keep the process-scoped lifecycle owner retained by PR #4446."""
+    events: list[str] = []
+
+    @asynccontextmanager
+    async def lifespan(_server: FastMCP) -> AsyncIterator[dict[str, Any]]:
+        events.append("startup")
+        try:
+            yield {}
+        finally:
+            events.append("shutdown")
+
+    server = FastMCP("outer-lifespan-owner", lifespan=lifespan)
+    with (
+        patch("fastmcp.server.mixins.transport.uvicorn.Config"),
+        patch("fastmcp.server.mixins.transport.uvicorn.Server") as server_class,
+    ):
+        server_class.return_value._serve = AsyncMock()
+        server_class.return_value.capture_signals.return_value = nullcontext()
+        await server.run_http_async(
+            transport="sse",
+            show_banner=False,
+            uvicorn_config={"lifespan": "off"},
+        )
+        server_class.return_value._serve.assert_awaited_once_with(sockets=None)
+
+    assert events == ["startup", "shutdown"]
 
 
 def _available_port() -> int:

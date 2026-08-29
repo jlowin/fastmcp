@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from contextlib import nullcontext
 from functools import partial
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
@@ -39,6 +40,7 @@ async def test_uvicorn_logging_default_level(
     mock_server_instance = MagicMock()
     mock_server_instance._serve = AsyncMock()
     mock_server_instance.shutdown = AsyncMock()
+    mock_server_instance.capture_signals.return_value = nullcontext()
     mock_uvicorn_server_constructor.return_value = mock_server_instance
     serve_finished_event = anyio.Event()
     mock_server_instance._serve.side_effect = partial(
@@ -79,6 +81,7 @@ async def test_uvicorn_logging_with_custom_log_config(
     mock_server_instance = MagicMock()
     mock_server_instance._serve = AsyncMock()
     mock_server_instance.shutdown = AsyncMock()
+    mock_server_instance.capture_signals.return_value = nullcontext()
     mock_uvicorn_server_constructor.return_value = mock_server_instance
     serve_finished_event = anyio.Event()
     mock_server_instance._serve.side_effect = partial(
@@ -143,6 +146,7 @@ async def test_uvicorn_logging_custom_log_config_overrides_log_level_param(
     mock_server_instance = MagicMock()
     mock_server_instance._serve = AsyncMock()
     mock_server_instance.shutdown = AsyncMock()
+    mock_server_instance.capture_signals.return_value = nullcontext()
     mock_uvicorn_server_constructor.return_value = mock_server_instance
     serve_finished_event = anyio.Event()
     mock_server_instance._serve.side_effect = partial(
