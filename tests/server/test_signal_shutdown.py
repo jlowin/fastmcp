@@ -11,9 +11,12 @@ from pathlib import Path
 
 import pytest
 
-pytestmark = pytest.mark.skipif(
-    sys.platform == "win32", reason="POSIX signal semantics are required"
-)
+pytestmark = [
+    pytest.mark.subprocess_heavy,
+    pytest.mark.skipif(
+        sys.platform == "win32", reason="POSIX signal semantics are required"
+    ),
+]
 
 SERVER_MODULE = "tests.server.signal_shutdown_server"
 PROCESS_TIMEOUT = 10.0
