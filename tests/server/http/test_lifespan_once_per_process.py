@@ -9,23 +9,14 @@ yielded state for every session. The user lifespan must therefore fire once per
 process and persist across HTTP client sessions, not once per session.
 
 The invariant that actually matters is "the session manager drives the lifespan
-exactly once, regardless of how many client sessions connect." A plain
-user-lifespan enter/exit counter cannot guard it: ``_lifespan_manager`` is
-ref-counted, and ``run_http_async`` opens an *outer* ``_lifespan_manager``
-around uvicorn. That outer entry holds the ref count at >= 1 for the whole
-server lifetime, so even if the session manager regressed to re-entering
-``_lifespan_proxy`` once per session, the user lifespan would still be entered
-exactly once (the proxy's nested ``_lifespan_manager`` entries would all reuse
-the outer result). The user counter would stay ``1`` while the behavior it
-claims to guard was broken.
-
-So this test spies on the session-manager entry point directly -- it counts how
-many times the SDK enters ``server._mcp_server.lifespan`` (the ``_lifespan_proxy``
-wrapper) -- and asserts that count is exactly one across sequential and
-overlapping sessions. A regression that moves ``app.lifespan(app)`` into the
-per-session code path makes this count grow with the session count and fails
-loudly. The user enter/exit counter is kept as a secondary check on the
-"entered once, exited once at shutdown" shape.
+exactly once, regardless of how many client sessions connect." This test spies
+on that entry point directly -- it counts how many times the SDK enters
+``server._mcp_server.lifespan`` (the ``_lifespan_proxy`` wrapper) -- and asserts
+that count is exactly one across sequential and overlapping sessions. A
+regression that moves ``app.lifespan(app)`` into the per-session code path makes
+this count grow with the session count and fails loudly. The user enter/exit
+counter is a secondary check on the "entered once, exited once at shutdown"
+shape.
 """
 
 from collections.abc import AsyncIterator

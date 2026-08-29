@@ -260,9 +260,9 @@ def _lifespan_proxy(
         # ``StreamableHTTPSessionManager.run`` → ``app.lifespan(app)`` or
         # ``Server.run`` → ``self.lifespan(self)``) and reuses the yielded
         # state for every session. ``_lifespan_manager`` is ref-counted, so
-        # when an outer caller (``run_http_async``/``run_stdio_async``) has
-        # already entered it, this nested entry reuses the existing result
-        # instead of re-running setup.
+        # when another owner such as ``run_stdio_async`` has already entered
+        # it, this nested entry reuses the existing result instead of re-running
+        # setup.
         async with fastmcp_server._lifespan_manager():
             yield fastmcp_server._lifespan_result  # ty:ignore[invalid-yield]
 
