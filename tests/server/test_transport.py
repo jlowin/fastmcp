@@ -1,6 +1,7 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -55,9 +56,7 @@ def test_resolve_allowed_hosts_for_run_preserves_explicit_hosts():
     ) == ["mcp.example.com"]
 
 
-async def test_run_http_owns_lifespan_when_asgi_lifespan_is_disabled(
-    unused_tcp_port: int,
-) -> None:
+async def test_run_http_owns_lifespan_when_asgi_lifespan_is_disabled() -> None:
     """The runner's lifecycle owner is independent of Uvicorn's ASGI mode.
 
     ``run_http_async`` predates the app-level lifecycle owners and remains the
@@ -75,16 +74,16 @@ async def test_run_http_owns_lifespan_when_asgi_lifespan_is_disabled(
             events.append("shutdown")
 
     server = FastMCP("outer-lifespan-owner", lifespan=lifespan)
-    await server.run_http_async(
-        transport="sse",
-        host="127.0.0.1",
-        port=unused_tcp_port,
-        show_banner=False,
-        uvicorn_config={
-            "lifespan": "off",
-            "limit_max_requests": 0,
-            "log_level": "error",
-        },
-    )
+    with (
+        patch("fastmcp.server.mixins.transport.uvicorn.Config"),
+        patch("fastmcp.server.mixins.transport.uvicorn.Server") as server_class,
+    ):
+        server_class.return_value._serve = AsyncMock()
+        await server.run_http_async(
+            transport="sse",
+            show_banner=False,
+            uvicorn_config={"lifespan": "off"},
+        )
+        server_class.return_value._serve.assert_awaited_once_with(sockets=None)
 
     assert events == ["startup", "shutdown"]
