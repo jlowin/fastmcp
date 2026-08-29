@@ -42,6 +42,10 @@ from fastmcp import Client
 client = Client("my_server.py")  # Limited - no configuration options
 ```
 
+<Warning>
+Transport inference treats its input as trusted configuration. A string naming an existing `.py` or `.js` file starts that file as a subprocess, and a configuration dictionary can run any command with any arguments. An application that accepts server locations from users should validate them at its own boundary and construct the transport explicitly, for example `StreamableHttpTransport(url=...)` for a URL, rather than passing the raw value to `Client`.
+</Warning>
+
 ### Environment Variables
 
 Values you pass through `env` are merged on top of the inherited allowlist, so you add configuration rather than replacing the base environment. Anything your server needs beyond those six variables has to be listed explicitly.
