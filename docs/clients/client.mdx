@@ -247,11 +247,11 @@ config = CacheConfig(target_id="weather-api", default_ttl_ms=60_000)
 client = Client("https://example.com/mcp", mode="auto", cache=config)
 ```
 
-The high-level `list_tools`, `list_resources`, and `list_prompts` methods always use the cache when one is configured. To override the behavior for a single call, use the lower-level `list_tools_mcp`, `list_resources_mcp`, `list_resource_templates_mcp`, and `list_prompts_mcp` variants, which accept a `cache_mode` argument: `"use"` (the default) serves and stores, `"refresh"` stores a fresh result without serving a cached one, and `"bypass"` skips the cache entirely.
+The listing methods use the cache by default when one is configured. To override the behavior for a single call, pass `cache_mode`: `"use"` (the default) serves and stores, `"refresh"` stores a fresh result without serving a cached one, and `"bypass"` skips the cache entirely. `list_tools` accepts it directly; the lower-level `list_tools_mcp`, `list_resources_mcp`, `list_resource_templates_mcp`, and `list_prompts_mcp` variants accept it as well.
 
 ```python
 async with client:
-    fresh = await client.list_tools_mcp(cache_mode="refresh")
+    fresh = await client.list_tools(cache_mode="refresh")
 ```
 
 ### Sharing a cache across clients
