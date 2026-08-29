@@ -1,3 +1,4 @@
+import sys
 import warnings
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast, overload
@@ -24,6 +25,26 @@ else:
     FastMCP = Any
 
 logger = get_logger(__name__)
+
+
+_PACKAGE_ROOT = str(Path(__file__).resolve().parents[2])
+
+
+def _external_stacklevel() -> int:
+    """Stack level of the first caller outside the fastmcp package.
+
+    Public entry points reach `infer_transport` through different wrapper depths
+    (`Client(...)`, `create_proxy(...)`, a direct call), so a fixed stacklevel
+    would point the deprecation warning at internal frames for some of them.
+    """
+    level = 1
+    frame = sys._getframe(1)
+    while frame is not None:
+        if not frame.f_code.co_filename.startswith(_PACKAGE_ROOT):
+            return level
+        frame = frame.f_back
+        level += 1
+    return 1
 
 
 @overload
@@ -148,7 +169,7 @@ def infer_transport(
             " deprecated and will be removed in FastMCP 5. Pass"
             f" pathlib.Path({transport!r}) or an explicit StdioTransport instead.",
             FastMCPDeprecationWarning,
-            stacklevel=3,
+            stacklevel=_external_stacklevel(),
         )
         inferred_transport = infer_transport(Path(transport))
 

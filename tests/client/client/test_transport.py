@@ -156,9 +156,21 @@ class TestScriptPathInference:
     def test_string_script_path_still_works_but_warns(self, tmp_path):
         script = tmp_path / "server.py"
         script.write_text("")
-        with pytest.warns(FastMCPDeprecationWarning, match="pathlib.Path"):
+        with pytest.warns(FastMCPDeprecationWarning, match="pathlib.Path") as record:
             transport = infer_transport(str(script))
         assert isinstance(transport, PythonStdioTransport)
+        assert record[0].filename == __file__
+
+    def test_warning_points_at_the_caller_for_every_entry_point(self, tmp_path):
+        from fastmcp import Client
+        from fastmcp.server import create_proxy
+
+        script = tmp_path / "server.py"
+        script.write_text("")
+        for build in (Client, create_proxy):
+            with pytest.warns(FastMCPDeprecationWarning) as record:
+                build(str(script))
+            assert record[0].filename == __file__, build
 
     def test_path_does_not_warn(self, tmp_path):
         script = tmp_path / "server.py"
