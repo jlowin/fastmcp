@@ -39,7 +39,13 @@ def _wait_for_http(port: int, process: subprocess.Popen[str]) -> None:
 
 
 @pytest.mark.timeout(20)
-def test_sigterm_runs_lifespan_teardown_and_exits(tmp_path: Path) -> None:
+@pytest.mark.parametrize("transport", ["http", "sse"])
+@pytest.mark.parametrize(
+    "shutdown_signal", [signal.SIGINT, signal.SIGTERM], ids=["sigint", "sigterm"]
+)
+def test_signal_runs_lifespan_teardown_and_exits(
+    tmp_path: Path, transport: str, shutdown_signal: signal.Signals
+) -> None:
     """A normal container stop must release resources and finish promptly.
 
     The readiness checks are transport-level rather than lifespan-level. This
@@ -57,6 +63,8 @@ def test_sigterm_runs_lifespan_teardown_and_exits(tmp_path: Path) -> None:
         str(events_path),
         "--port",
         str(port),
+        "--transport",
+        transport,
     ]
 
     process = subprocess.Popen(
@@ -69,20 +77,21 @@ def test_sigterm_runs_lifespan_teardown_and_exits(tmp_path: Path) -> None:
     try:
         _wait_for_http(port, process)
 
-        process.send_signal(signal.SIGTERM)
+        process.send_signal(shutdown_signal)
         try:
             process.wait(timeout=PROCESS_TIMEOUT)
         except subprocess.TimeoutExpired:
             process.kill()
             stdout, stderr = process.communicate()
             pytest.fail(
-                "HTTP server did not exit after SIGTERM; "
+                f"{transport} server did not exit after {shutdown_signal.name}; "
                 f"stdout={stdout!r}, stderr={stderr!r}"
             )
 
         stdout, stderr = process.communicate()
         events = events_path.read_text().splitlines()
         assert events == ["startup", "shutdown"], (
+            f"transport={transport}, signal={shutdown_signal.name}, "
             f"returncode={process.returncode}, stdout={stdout!r}, stderr={stderr!r}"
         )
     finally:

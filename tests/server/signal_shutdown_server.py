@@ -17,6 +17,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--events", type=Path, required=True)
     parser.add_argument("--port", type=int, required=True)
+    parser.add_argument("--transport", choices=("http", "sse"), required=True)
     args = parser.parse_args()
 
     def record(event: str) -> None:
@@ -40,7 +41,7 @@ def main() -> None:
         return "pong"
 
     server.run(
-        transport="http",
+        transport=args.transport,
         host="127.0.0.1",
         port=args.port,
         show_banner=False,

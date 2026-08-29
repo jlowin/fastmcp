@@ -1,6 +1,7 @@
 import asyncio
 import logging
-from unittest.mock import AsyncMock, Mock, patch
+from functools import partial
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import anyio
 import pytest
@@ -18,9 +19,13 @@ def mcp_server() -> FastMCP:
     return FastMCP(name="TestLogServer")
 
 
-async def _wait_for_serve(mock_server_instance: AsyncMock) -> None:
-    while mock_server_instance.serve.await_count == 0:
+async def _wait_for_server_loop(mock_server_instance: Mock) -> None:
+    while mock_server_instance._serve.await_count == 0:
         await asyncio.sleep(0)
+
+
+async def _wait_for_event(event: anyio.Event, **_kwargs: object) -> None:
+    await event.wait()
 
 
 @patch("fastmcp.server.mixins.transport.uvicorn.Server")
@@ -31,17 +36,21 @@ async def test_uvicorn_logging_default_level(
     mcp_server: FastMCP,
 ):
     """Tests that FastMCP passes log_level to uvicorn.Config if no log_config is given."""
-    mock_server_instance = AsyncMock()
+    mock_server_instance = MagicMock()
+    mock_server_instance._serve = AsyncMock()
+    mock_server_instance.shutdown = AsyncMock()
     mock_uvicorn_server_constructor.return_value = mock_server_instance
     serve_finished_event = anyio.Event()
-    mock_server_instance.serve.side_effect = serve_finished_event.wait
+    mock_server_instance._serve.side_effect = partial(
+        _wait_for_event, serve_finished_event
+    )
 
     test_log_level = "warning"
 
     server_task = asyncio.create_task(
         mcp_server.run_http_async(log_level=test_log_level, port=8003)
     )
-    await _wait_for_serve(mock_server_instance)
+    await _wait_for_server_loop(mock_server_instance)
 
     mock_uvicorn_config_constructor.assert_called_once()
     _, kwargs_config = mock_uvicorn_config_constructor.call_args
@@ -52,7 +61,7 @@ async def test_uvicorn_logging_default_level(
     mock_uvicorn_server_constructor.assert_called_once_with(
         mock_uvicorn_config_constructor.return_value
     )
-    mock_server_instance.serve.assert_awaited_once()
+    mock_server_instance._serve.assert_awaited_once_with(sockets=None)
 
     # Signal the mock to finish and wait for run_http_async to return.
     serve_finished_event.set()
@@ -67,10 +76,14 @@ async def test_uvicorn_logging_with_custom_log_config(
     mcp_server: FastMCP,
 ):
     """Tests that FastMCP passes log_config to uvicorn.Config and not log_level."""
-    mock_server_instance = AsyncMock()
+    mock_server_instance = MagicMock()
+    mock_server_instance._serve = AsyncMock()
+    mock_server_instance.shutdown = AsyncMock()
     mock_uvicorn_server_constructor.return_value = mock_server_instance
     serve_finished_event = anyio.Event()
-    mock_server_instance.serve.side_effect = serve_finished_event.wait
+    mock_server_instance._serve.side_effect = partial(
+        _wait_for_event, serve_finished_event
+    )
 
     sample_log_config = {
         "version": 1,
@@ -101,7 +114,7 @@ async def test_uvicorn_logging_with_custom_log_config(
             uvicorn_config={"log_config": sample_log_config}, port=8004
         )
     )
-    await _wait_for_serve(mock_server_instance)
+    await _wait_for_server_loop(mock_server_instance)
 
     mock_uvicorn_config_constructor.assert_called_once()
     _, kwargs_config = mock_uvicorn_config_constructor.call_args
@@ -112,7 +125,7 @@ async def test_uvicorn_logging_with_custom_log_config(
     mock_uvicorn_server_constructor.assert_called_once_with(
         mock_uvicorn_config_constructor.return_value
     )
-    mock_server_instance.serve.assert_awaited_once()
+    mock_server_instance._serve.assert_awaited_once_with(sockets=None)
 
     # Signal the mock to finish and wait for run_http_async to return.
     serve_finished_event.set()
@@ -127,10 +140,14 @@ async def test_uvicorn_logging_custom_log_config_overrides_log_level_param(
     mcp_server: FastMCP,
 ):
     """Tests log_config precedence if log_level is also passed to run_http_async."""
-    mock_server_instance = AsyncMock()
+    mock_server_instance = MagicMock()
+    mock_server_instance._serve = AsyncMock()
+    mock_server_instance.shutdown = AsyncMock()
     mock_uvicorn_server_constructor.return_value = mock_server_instance
     serve_finished_event = anyio.Event()
-    mock_server_instance.serve.side_effect = serve_finished_event.wait
+    mock_server_instance._serve.side_effect = partial(
+        _wait_for_event, serve_finished_event
+    )
 
     sample_log_config = {
         "version": 1,
@@ -164,7 +181,7 @@ async def test_uvicorn_logging_custom_log_config_overrides_log_level_param(
             port=8005,
         )
     )
-    await _wait_for_serve(mock_server_instance)
+    await _wait_for_server_loop(mock_server_instance)
 
     mock_uvicorn_config_constructor.assert_called_once()
     _, kwargs_config = mock_uvicorn_config_constructor.call_args
@@ -175,7 +192,7 @@ async def test_uvicorn_logging_custom_log_config_overrides_log_level_param(
     mock_uvicorn_server_constructor.assert_called_once_with(
         mock_uvicorn_config_constructor.return_value
     )
-    mock_server_instance.serve.assert_awaited_once()
+    mock_server_instance._serve.assert_awaited_once_with(sockets=None)
 
     # Signal the mock to finish and wait for run_http_async to return.
     serve_finished_event.set()
