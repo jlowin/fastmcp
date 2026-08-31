@@ -1,4 +1,4 @@
-"""Tests for version fallback when the highest version is disabled via visibility.
+"""Tests for version fallback when the highest version is unusable.
 
 Regression tests for https://github.com/jlowin/fastmcp/issues/3421:
 When the latest version of a component is disabled, get_* methods should
@@ -258,6 +258,10 @@ class TestFallbackRespectsAuth:
     versions, those candidates must go through auth filtering. Otherwise
     a protected v1 could be exposed to unauthenticated users when a
     public v2 is disabled.
+
+    When the highest version is unauthorized, default lookups must also
+    continue to the highest version the caller can access. Otherwise a
+    component visible in a list response cannot be called or retrieved.
     """
 
     async def test_tool_fallback_respects_auth(self):
@@ -277,6 +281,76 @@ class TestFallbackRespectsAuth:
         # Without an admin token, v1 should NOT be returned
         tool = await mcp.get_tool("calc")
         assert tool is None
+
+    async def test_client_call_falls_back_from_unauthorized_highest_version(self):
+        """A client should call the highest version it is authorized to use."""
+        from fastmcp import Client
+
+        mcp = FastMCP()
+
+        @mcp.tool(version="1.0")
+        def calc() -> int:
+            return 1
+
+        @mcp.tool(version="2.0", auth=require_scopes("admin"))
+        def calc() -> int:
+            return 2
+
+        async with Client(mcp) as client:
+            tools = await client.list_tools()
+            assert len(tools) == 1
+            assert tools[0].name == "calc"
+
+            result = await client.call_tool("calc", {})
+            assert result.data == 1
+
+    async def test_resource_lookup_falls_back_from_unauthorized_highest_version(self):
+        """A resource lookup should select the highest authorized version."""
+        mcp = FastMCP()
+
+        @mcp.resource("data://info", version="1.0")
+        def info() -> str:
+            return "v1"
+
+        @mcp.resource("data://info", version="2.0", auth=require_scopes("admin"))
+        def info() -> str:
+            return "v2"
+
+        resource = await mcp.get_resource("data://info")
+        assert resource is not None
+        assert resource.version == "1.0"
+
+    async def test_template_lookup_falls_back_from_unauthorized_highest_version(self):
+        """A template lookup should select the highest authorized version."""
+        mcp = FastMCP()
+
+        @mcp.resource("data://items/{id}", version="1.0")
+        def item(id: str) -> str:
+            return f"v1-{id}"
+
+        @mcp.resource("data://items/{id}", version="2.0", auth=require_scopes("admin"))
+        def item(id: str) -> str:
+            return f"v2-{id}"
+
+        template = await mcp.get_resource_template("data://items/{id}")
+        assert template is not None
+        assert template.version == "1.0"
+
+    async def test_prompt_lookup_falls_back_from_unauthorized_highest_version(self):
+        """A prompt lookup should select the highest authorized version."""
+        mcp = FastMCP()
+
+        @mcp.prompt(version="1.0")
+        def greet() -> str:
+            return "v1"
+
+        @mcp.prompt(version="2.0", auth=require_scopes("admin"))
+        def greet() -> str:
+            return "v2"
+
+        prompt = await mcp.get_prompt("greet")
+        assert prompt is not None
+        assert prompt.version == "1.0"
 
     async def test_tool_fallback_allows_authorized_user(self):
         """Fallback should return auth-protected v1 to authorized users."""
