@@ -97,6 +97,25 @@ group = ClientGroup.from_config(config)
 
 Entries without a `mode` use `"auto"` by default.
 
+To control how each member client is constructed — most commonly to give shared handlers provenance — pass a `client_factory`. It receives the server name, the transport built from that entry, and the resolved mode, and returns the `Client` to use. A handler closed over the name can tell servers apart:
+
+```python
+from fastmcp import Client
+from fastmcp.client.group import ClientGroup
+
+
+def make_client(name, transport, mode):
+    async def log_handler(message):
+        print(f"[{name}] {message.data.get('msg')}")
+
+    return Client(transport, mode=mode, log_handler=log_handler)
+
+
+group = ClientGroup.from_config(config, client_factory=make_client)
+```
+
+The factory owns construction: handlers, auth, timeouts, and anything else `Client` accepts. Pass `transport` and `mode` through unless you specifically mean to override them.
+
 ## Manage connections explicitly
 
 Using the group as a context manager is optional. Applications can own each client connection and use the group only for discovery and routing:

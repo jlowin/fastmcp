@@ -1,7 +1,7 @@
 import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import Any, cast
 from unittest.mock import patch
 
 import pytest
@@ -347,3 +347,72 @@ async def test_explicit_list_tools_refreshes_past_client_response_cache():
 
         result = await group.call_tool("hinted_added")
         assert result.data == "added"
+
+
+async def test_from_config_client_factory_receives_name_transport_and_mode():
+    config = MCPConfig(
+        mcpServers={
+            "old": InMemoryServer(mcp=make_server("old"), mode="legacy"),
+            "new": InMemoryServer(mcp=make_server("new")),
+        }
+    )
+    seen: list[tuple[str, type, str]] = []
+
+    def factory(name: str, transport: Any, mode: Any) -> Client[Any]:
+        seen.append((name, type(transport), mode))
+        return Client(transport, mode=mode)
+
+    group = ClientGroup.from_config(config, client_factory=factory)
+
+    assert seen == [
+        ("old", FastMCPTransport, "legacy"),
+        ("new", FastMCPTransport, "auto"),
+    ]
+    async with group:
+        assert group.protocol_versions == {
+            "old": "2025-11-25",
+            "new": "2026-07-28",
+        }
+
+
+async def test_from_config_client_factory_gives_handlers_provenance():
+    def make_logging_server(name: str) -> FastMCP:
+        server = FastMCP(name)
+
+        @server.tool
+        async def announce(ctx: Context) -> str:
+            await ctx.info(f"hello from {name}")
+            return name
+
+        return server
+
+    config = MCPConfig(
+        mcpServers={
+            "alpha": InMemoryServer(mcp=make_logging_server("alpha"), mode="legacy"),
+            "beta": InMemoryServer(mcp=make_logging_server("beta"), mode="legacy"),
+        }
+    )
+    records: list[tuple[str, str]] = []
+
+    def factory(name: str, transport: Any, mode: Any) -> Client[Any]:
+        async def log_handler(message: Any) -> None:
+            records.append((name, message.data.get("msg")))
+
+        return Client(transport, mode=mode, log_handler=log_handler)
+
+    group = ClientGroup.from_config(config, client_factory=factory)
+
+    async with group:
+        await group.call_tool("alpha_announce", {})
+        await group.call_tool("beta_announce", {})
+
+    assert ("alpha", "hello from alpha") in records
+    assert ("beta", "hello from beta") in records
+
+
+async def test_from_config_client_factory_must_return_a_client():
+    config = MCPConfig(mcpServers={"only": InMemoryServer(mcp=make_server("only"))})
+
+    with pytest.raises(TypeError, match="must return a fastmcp Client"):
+        bad_factory = cast(Any, lambda *args: object())
+        ClientGroup.from_config(config, client_factory=bad_factory)

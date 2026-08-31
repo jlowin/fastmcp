@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import datetime
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from types import MappingProxyType, TracebackType
 from typing import Any
@@ -15,8 +15,12 @@ from mcp.client.caching import CacheMode
 
 from fastmcp.client.client import CallToolResult, Client, ConnectMode
 from fastmcp.client.progress import ProgressHandler
+from fastmcp.client.transports.base import ClientTransport
 from fastmcp.mcp_config import MCPConfig
 from fastmcp.utilities.async_utils import gather
+
+ClientFactory = Callable[[str, ClientTransport, ConnectMode], Client[Any]]
+"""Builds one group member: ``(server_name, transport, mode) -> Client``."""
 
 
 @dataclass(frozen=True)
@@ -65,11 +69,30 @@ class ClientGroup:
         config: MCPConfig | dict[str, Any],
         *,
         default_mode: ConnectMode = "auto",
+        client_factory: ClientFactory | None = None,
     ) -> ClientGroup:
         """Create one independent client for each configured server.
 
         A server entry may include a FastMCP-specific ``mode`` field. It applies
         only to that server; entries without one use ``default_mode``.
+
+        ``client_factory`` constructs each member client from its server name,
+        transport, and resolved mode. Because the factory sees the server name,
+        handlers it binds carry provenance — a shared handler closed over the
+        name can tell servers apart:
+
+        ```python
+        def make_client(name: str, transport: ClientTransport, mode: ConnectMode):
+            async def log_handler(message: LogMessage) -> None:
+                record(name, message)
+
+            return Client(transport, mode=mode, log_handler=log_handler)
+
+        group = ClientGroup.from_config(config, client_factory=make_client)
+        ```
+
+        The factory must pass ``transport`` and ``mode`` through to the client
+        it builds; it owns everything else about construction.
         """
         parsed = (
             config if isinstance(config, MCPConfig) else MCPConfig.from_dict(config)
@@ -80,7 +103,17 @@ class ClientGroup:
             configured_mode = (server.model_extra or {}).get("mode", default_mode)
             if not isinstance(configured_mode, str):
                 raise TypeError(f"Protocol mode for server {name!r} must be a string")
-            clients[name] = Client(server.to_transport(), mode=configured_mode)
+            transport = server.to_transport()
+            if client_factory is None:
+                clients[name] = Client(transport, mode=configured_mode)
+            else:
+                client = client_factory(name, transport, configured_mode)
+                if not isinstance(client, Client):
+                    raise TypeError(
+                        f"client_factory returned {type(client).__name__!r} for "
+                        f"server {name!r}; it must return a fastmcp Client."
+                    )
+                clients[name] = client
 
         return cls(clients)
 
