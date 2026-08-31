@@ -5,6 +5,28 @@ icon: "sparkles"
 tag: NEW
 ---
 
+<Update label="FastMCP 4.0.0" description="August 31, 2026" tags={["Releases"]}>
+<Card
+title="FastMCP v4.0.0: Four Real"
+href="https://github.com/PrefectHQ/fastmcp/releases/tag/v4.0.0"
+cta="Read the release notes"
+>
+FastMCP 4 is stable: the FastMCP release for the new MCP protocol and the rewritten Python SDK v2, with old-protocol clients supported through per-connection negotiation.
+
+🌐 **Every protocol era** — one deployment serves `2026-07-28` and legacy clients; `Client(url)` negotiates from the other side.
+
+🔁 **Interactive tools** — tools request follow-up input across complete request-response rounds.
+
+⚙️ **Background tasks** — `@mcp.tool(task=True)` via the `io.modelcontextprotocol/tasks` extension in the optional `fastmcp-tasks` package.
+
+🧩 **Extensions** — `add_extension()` registers capability-negotiated protocol extensions with their own methods and lifespan.
+
+💉 **Dependency injection** — `Depends` + `CallArgument` bind dependencies to call arguments while keeping them out of tool schemas.
+
+🤝 **Client groups** — `ClientGroup` manages one client per server with collision-checked namespacing.
+</Card>
+</Update>
+
 <Update label="FastMCP 4.0.0b5" description="August 28, 2026" tags={["Releases"]}>
 <Card
 title="FastMCP v4.0.0b5: Group Effourt"
