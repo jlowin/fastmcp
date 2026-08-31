@@ -7,11 +7,12 @@ from contextlib import contextmanager
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from logging import Logger
-from typing import Any, Literal, cast, overload
+from typing import Any, ClassVar, Literal, cast, overload
 
 import mcp_types
 from mcp import LoggingLevel, ServerSession
 from mcp.server.context import ServerRequestContext
+from mcp.shared.subscriptions import LISTEN_STREAM_METHODS
 from mcp_types import (
     GetPromptResult,
 )
@@ -128,6 +129,76 @@ _mcp_level_to_python_level = {
     "alert": logging.CRITICAL,
     "emergency": logging.CRITICAL,
 }
+
+
+class _EraCheckedServerSession:
+    """Proxy over `ServerSession` that warns where the SDK silently drops.
+
+    On modern (2026-07-28) connections the SDK discards connection-scoped
+    change notifications with only a debug log: the spec forbids sending a
+    change notification a client did not subscribe to, and the sanctioned
+    delivery path is a `subscriptions/listen` stream, which FastMCP does not
+    publish to yet. Until it does, sending one of these from application code
+    (e.g. a captured `ctx.session` in a background task) emits a warning
+    instead of reporting success for a message that can never arrive. A
+    warning rather than an error: the same send may also serve legacy
+    connections, where it still delivers.
+
+    See https://github.com/PrefectHQ/fastmcp/issues/4920.
+    """
+
+    __slots__ = ("_wrapped",)
+
+    _warned_methods: ClassVar[set[str]] = set()
+
+    def __init__(self, wrapped: ServerSession) -> None:
+        self._wrapped = wrapped
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._wrapped, name)
+
+    def _check_deliverable(self, method: str) -> None:
+        protocol_version = self._wrapped.protocol_version
+        if (
+            protocol_version in MODERN_PROTOCOL_VERSIONS
+            and method not in self._warned_methods
+        ):
+            self._warned_methods.add(method)
+            logger.warning(
+                "%s cannot be delivered on a %s connection: the modern protocol "
+                "only delivers change notifications through a subscriptions/listen "
+                "stream opened by the client, which FastMCP does not publish to "
+                "yet, so the SDK silently discards this send. Track support at "
+                "https://github.com/PrefectHQ/fastmcp/issues/4920. "
+                "(warned once per notification method)",
+                method,
+                protocol_version,
+            )
+
+    async def send_notification(
+        self,
+        notification: mcp_types.ServerNotification,
+        related_request_id: mcp_types.RequestId | None = None,
+    ) -> None:
+        if related_request_id is None and notification.method in LISTEN_STREAM_METHODS:
+            self._check_deliverable(notification.method)
+        await self._wrapped.send_notification(notification, related_request_id)
+
+    async def send_tool_list_changed(self) -> None:
+        self._check_deliverable("notifications/tools/list_changed")
+        await self._wrapped.send_tool_list_changed()
+
+    async def send_resource_list_changed(self) -> None:
+        self._check_deliverable("notifications/resources/list_changed")
+        await self._wrapped.send_resource_list_changed()
+
+    async def send_prompt_list_changed(self) -> None:
+        self._check_deliverable("notifications/prompts/list_changed")
+        await self._wrapped.send_prompt_list_changed()
+
+    async def send_resource_updated(self, uri: str | AnyUrl) -> None:
+        self._check_deliverable("notifications/resources/updated")
+        await self._wrapped.send_resource_updated(uri)
 
 
 @contextmanager
@@ -801,15 +872,17 @@ class Context:
         """
         # Background task mode: use the stored session
         if self.is_background_task and self._session is not None:
-            return self._session
+            return cast(ServerSession, _EraCheckedServerSession(self._session))
 
         # Request mode: use request context
         if self.request_context is not None:
-            return self.request_context.session
+            return cast(
+                ServerSession, _EraCheckedServerSession(self.request_context.session)
+            )
 
         # Fallback to stored session (e.g., during on_initialize)
         if self._session is not None:
-            return self._session
+            return cast(ServerSession, _EraCheckedServerSession(self._session))
 
         raise RuntimeError(
             "session is not available because the MCP session has not been established yet. "

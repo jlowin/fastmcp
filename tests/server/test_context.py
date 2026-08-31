@@ -489,3 +489,93 @@ class TestTransportIntegration:
             result = await client.call_tool("get_transport", {})
             assert observed_transport == "streamable-http"
             assert result.data == "streamable-http"
+
+
+class TestUndeliverableChangeNotifications:
+    """Out-of-band change notifications warn on modern-era connections.
+
+    Regression tests for https://github.com/PrefectHQ/fastmcp/issues/4920: the
+    SDK silently drops connection-scoped change notifications on 2026-07-28
+    connections, so ctx.session warns (once per method) instead of reporting
+    a successful no-op. Legacy connections still deliver.
+    """
+
+    def _server_with_captured_sessions(self) -> tuple[FastMCP, list]:
+        from fastmcp.server.middleware import Middleware
+
+        captured: list = []
+
+        class Capture(Middleware):
+            async def on_message(self, context, call_next):
+                fctx = getattr(context, "fastmcp_context", None)
+                if fctx is not None:
+                    captured.append(fctx.session)
+                return await call_next(context)
+
+        server = FastMCP("notify-repro")
+        server.add_middleware(Capture())
+
+        @server.tool
+        def hello() -> str:
+            return "hi"
+
+        return server, captured
+
+    @pytest.fixture(autouse=True)
+    def _reset_warned_methods(self):
+        from fastmcp.server.context import _EraCheckedServerSession
+
+        _EraCheckedServerSession._warned_methods.clear()
+        yield
+        _EraCheckedServerSession._warned_methods.clear()
+
+    async def test_modern_out_of_band_send_warns(self, caplog):
+        from fastmcp import Client
+
+        server, captured = self._server_with_captured_sessions()
+        async with Client(server, mode="auto") as client:
+            await client.list_tools()
+            assert client.protocol_version == "2026-07-28"
+            with caplog.at_level("WARNING", logger="FastMCP"):
+                await captured[-1].send_tool_list_changed()
+                await captured[-1].send_tool_list_changed()
+
+        warnings = [r for r in caplog.records if "4920" in r.getMessage()]
+        assert len(warnings) == 1  # once per method, not per call
+        assert "notifications/tools/list_changed" in warnings[0].getMessage()
+
+    async def test_modern_out_of_band_send_notification_warns(self, caplog):
+        import mcp_types
+
+        from fastmcp import Client
+
+        server, captured = self._server_with_captured_sessions()
+        async with Client(server, mode="auto") as client:
+            await client.list_tools()
+            with caplog.at_level("WARNING", logger="FastMCP"):
+                await captured[-1].send_notification(
+                    mcp_types.ToolListChangedNotification()
+                )
+
+        assert any("subscriptions/listen" in r.getMessage() for r in caplog.records)
+
+    async def test_legacy_out_of_band_send_delivers(self):
+        import asyncio
+
+        from fastmcp import Client
+        from fastmcp.client.messages import MessageHandler
+
+        class Recorder(MessageHandler):
+            def __init__(self):
+                super().__init__()
+                self.changed = asyncio.Event()
+
+            async def on_tool_list_changed(self, message):
+                self.changed.set()
+
+        server, captured = self._server_with_captured_sessions()
+        recorder = Recorder()
+        async with Client(server, message_handler=recorder, mode="legacy") as client:
+            await client.list_tools()
+            await captured[-1].send_tool_list_changed()
+            await asyncio.wait_for(recorder.changed.wait(), timeout=3)

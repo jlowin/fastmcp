@@ -165,7 +165,8 @@ class TestContextSessionProperty:
             mcp, session=cast(ServerSession, mock_session), task_id="test-task-123"
         )
 
-        assert ctx.session is mock_session
+        session = cast(Any, ctx.session)
+        assert session._wrapped is mock_session
 
     def test_session_uses_stored_session_during_on_initialize(self):
         """session should use the stored session during on_initialize."""
@@ -177,7 +178,8 @@ class TestContextSessionProperty:
         mock_session = MockSession()
         ctx = Context(mcp, session=cast(ServerSession, mock_session))
 
-        assert ctx.session is mock_session
+        session = cast(Any, ctx.session)
+        assert session._wrapped is mock_session
 
 
 class TestContextBackgroundTaskLogging:
