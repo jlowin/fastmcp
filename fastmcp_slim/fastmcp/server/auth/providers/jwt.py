@@ -465,6 +465,18 @@ class JWTVerifier(TokenVerifier):
                 response.raise_for_status()
                 return response.json()
 
+    def _validate_issuer(self, issuer: Any) -> bool:
+        """Check a token's `iss` claim against the configured issuer(s).
+
+        Subclasses override this to implement provider-specific rules, such as
+        accepting a family of related issuers.
+        """
+        if isinstance(self.issuer, list):
+            # self.issuer is a list - the token issuer must match one of them
+            return issuer in self.issuer
+        # self.issuer is a string - check for equality
+        return issuer == self.issuer
+
     def _extract_scopes(self, claims: dict[str, Any]) -> list[str]:
         """
         Extract scopes from JWT claims. Supports both 'scope' and 'scp'
@@ -540,16 +552,7 @@ class JWTVerifier(TokenVerifier):
             if self.issuer:
                 iss = claims.get("iss")
 
-                # Handle different combinations of issuer types
-                issuer_valid = False
-                if isinstance(self.issuer, list):
-                    # self.issuer is a list - check if token issuer matches any expected issuer
-                    issuer_valid = iss in self.issuer
-                else:
-                    # self.issuer is a string - check for equality
-                    issuer_valid = iss == self.issuer
-
-                if not issuer_valid:
+                if not self._validate_issuer(iss):
                     self.logger.warning(
                         "Bearer token rejected for client %s: issuer mismatch "
                         "(got %r, expected %r)",
