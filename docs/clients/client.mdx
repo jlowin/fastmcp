@@ -347,6 +347,8 @@ The client supports callback handlers for advanced server interactions. These le
 Sampling, elicitation, and roots are the requests a server makes of the client. A server reaches your handler by whichever route its [era](#protocol-negotiation) allows — pushed down the open session on the handshake, returned as an input-required result on the modern protocol — and both routes dispatch to the same handler, so one registration covers both. Logging and progress arrive as notifications on the response stream and work in either era.
 
 ```python
+from pathlib import Path
+
 from fastmcp import Client
 from fastmcp.client.logging import LogMessage
 
@@ -361,7 +363,7 @@ async def sampling_handler(messages, params, context):
     return "Generated response"
 
 client = Client(
-    "my_mcp_server.py",
+    Path("my_mcp_server.py"),
     log_handler=log_handler,
     progress_handler=progress_handler,
     sampling_handler=sampling_handler,
