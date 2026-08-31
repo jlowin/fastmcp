@@ -130,7 +130,7 @@ Because the docs land *before* the tag exists, derive the entry from the maintai
 
 ### Commit Messages and Agent Attribution
 
-- **Agents NOT acting on behalf of @jlowin MUST identify themselves** (e.g., "🤖 Generated with Claude Code" in commits/PRs)
+- **Agents NOT acting on behalf of a PrefectHQ maintainer MUST identify themselves** (e.g., "🤖 Generated with Claude Code" in commits/PRs)
 - Keep commit messages brief - ideally just headlines, not detailed messages
 - Focus on what changed, not how or why
 - Always read issue comments for follow-up information (treat maintainers as authoritative)
