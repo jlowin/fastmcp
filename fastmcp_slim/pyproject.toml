@@ -2,7 +2,7 @@
 name = "fastmcp-slim"
 dynamic = ["version", "optional-dependencies"]
 description = "The dependency-slim FastMCP package."
-authors = [{ name = "Jeremiah Lowin" }]
+authors = [{ name = "Jeremiah Lowin" }, { name = "Nate Nowack" }]
 dependencies = [
     "mcp-types>=2.0.0,<3.0.0",
     "platformdirs>=4.0.0",
