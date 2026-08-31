@@ -1,14 +1,14 @@
 import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Any, cast
+from typing import Any
 from unittest.mock import patch
 
 import pytest
 from pydantic import ConfigDict
 
 from fastmcp import Client, Context, FastMCP
-from fastmcp.client.group import ClientGroup
+from fastmcp.client.group import ClientGroup, GroupCallbackContext
 from fastmcp.client.transports import FastMCPTransport
 from fastmcp.mcp_config import MCPConfig, StdioMCPServer
 
@@ -349,33 +349,7 @@ async def test_explicit_list_tools_refreshes_past_client_response_cache():
         assert result.data == "added"
 
 
-async def test_from_config_client_factory_receives_name_transport_and_mode():
-    config = MCPConfig(
-        mcpServers={
-            "old": InMemoryServer(mcp=make_server("old"), mode="legacy"),
-            "new": InMemoryServer(mcp=make_server("new")),
-        }
-    )
-    seen: list[tuple[str, type, str]] = []
-
-    def factory(name: str, transport: Any, mode: Any) -> Client[Any]:
-        seen.append((name, type(transport), mode))
-        return Client(transport, mode=mode)
-
-    group = ClientGroup.from_config(config, client_factory=factory)
-
-    assert seen == [
-        ("old", FastMCPTransport, "legacy"),
-        ("new", FastMCPTransport, "auto"),
-    ]
-    async with group:
-        assert group.protocol_versions == {
-            "old": "2025-11-25",
-            "new": "2026-07-28",
-        }
-
-
-async def test_from_config_client_factory_gives_handlers_provenance():
+async def test_from_config_log_handler_receives_provenance():
     def make_logging_server(name: str) -> FastMCP:
         server = FastMCP(name)
 
@@ -392,27 +366,119 @@ async def test_from_config_client_factory_gives_handlers_provenance():
             "beta": InMemoryServer(mcp=make_logging_server("beta"), mode="legacy"),
         }
     )
-    records: list[tuple[str, str]] = []
+    records: list[tuple[str, str | None, Any]] = []
 
-    def factory(name: str, transport: Any, mode: Any) -> Client[Any]:
-        async def log_handler(message: Any) -> None:
-            records.append((name, message.data.get("msg")))
+    async def log_handler(message: Any, context: GroupCallbackContext) -> None:
+        records.append(
+            (context.server_name, context.tool_name, message.data.get("msg"))
+        )
 
-        return Client(transport, mode=mode, log_handler=log_handler)
-
-    group = ClientGroup.from_config(config, client_factory=factory)
+    group = ClientGroup.from_config(config, log_handler=log_handler)
 
     async with group:
         await group.call_tool("alpha_announce", {})
         await group.call_tool("beta_announce", {})
 
-    assert ("alpha", "hello from alpha") in records
-    assert ("beta", "hello from beta") in records
+    assert ("alpha", None, "hello from alpha") in records
+    assert ("beta", None, "hello from beta") in records
 
 
-async def test_from_config_client_factory_must_return_a_client():
-    config = MCPConfig(mcpServers={"only": InMemoryServer(mcp=make_server("only"))})
+async def test_group_progress_handler_receives_call_provenance():
+    def make_progress_server(name: str) -> FastMCP:
+        server = FastMCP(name)
 
-    with pytest.raises(TypeError, match="must return a fastmcp Client"):
-        bad_factory = cast(Any, lambda *args: object())
-        ClientGroup.from_config(config, client_factory=bad_factory)
+        @server.tool
+        async def work(ctx: Context) -> str:
+            await ctx.report_progress(progress=1, total=2)
+            return name
+
+        return server
+
+    records: list[tuple[str, str | None, float]] = []
+
+    async def progress_handler(
+        progress: float,
+        total: float | None,
+        message: str | None,
+        context: GroupCallbackContext,
+    ) -> None:
+        records.append((context.server_name, context.tool_name, progress))
+
+    group = ClientGroup(
+        {
+            "alpha": Client(make_progress_server("alpha")),
+            "beta": Client(make_progress_server("beta")),
+        },
+        progress_handler=progress_handler,
+    )
+
+    async with group:
+        await group.call_tool("alpha_work", {})
+        await group.call_tool("beta_work", {})
+
+    assert ("alpha", "work", 1.0) in records
+    assert ("beta", "work", 1.0) in records
+
+
+async def test_explicit_progress_handler_overrides_group_handler():
+    server = FastMCP("only")
+
+    @server.tool
+    async def work(ctx: Context) -> str:
+        await ctx.report_progress(progress=1, total=1)
+        return "done"
+
+    group_calls: list[float] = []
+    explicit_calls: list[float] = []
+
+    async def group_handler(
+        progress: float,
+        total: float | None,
+        message: str | None,
+        context: GroupCallbackContext,
+    ) -> None:
+        group_calls.append(progress)
+
+    async def explicit_handler(
+        progress: float, total: float | None, message: str | None
+    ) -> None:
+        explicit_calls.append(progress)
+
+    group = ClientGroup({"only": Client(server)}, progress_handler=group_handler)
+
+    async with group:
+        await group.call_tool("only_work", {}, progress_handler=explicit_handler)
+
+    assert explicit_calls == [1.0]
+    assert group_calls == []
+
+
+async def test_from_config_message_handler_receives_provenance():
+    from fastmcp.server.middleware import Middleware
+
+    captured: list[Any] = []
+
+    class Capture(Middleware):
+        async def on_message(self, context: Any, call_next: Any) -> Any:
+            fctx = getattr(context, "fastmcp_context", None)
+            if fctx is not None:
+                captured.append(fctx.session)
+            return await call_next(context)
+
+    server = make_server("alpha")
+    server.add_middleware(Capture())
+    config = MCPConfig(mcpServers={"alpha": InMemoryServer(mcp=server, mode="legacy")})
+    seen: list[str] = []
+
+    async def message_handler(message: Any, context: GroupCallbackContext) -> None:
+        seen.append(context.server_name)
+
+    group = ClientGroup.from_config(config, message_handler=message_handler)
+
+    async with group:
+        await group.call_tool("alpha_echo", {"value": "hi"})
+        # out-of-band server notification on the legacy session
+        await captured[-1].send_tool_list_changed()
+        await asyncio.sleep(0.1)
+
+    assert "alpha" in seen

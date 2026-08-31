@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import datetime
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from types import MappingProxyType, TracebackType
 from typing import Any
@@ -14,13 +14,58 @@ import mcp_types
 from mcp.client.caching import CacheMode
 
 from fastmcp.client.client import CallToolResult, Client, ConnectMode
+from fastmcp.client.logging import LogMessage
 from fastmcp.client.progress import ProgressHandler
-from fastmcp.client.transports.base import ClientTransport
 from fastmcp.mcp_config import MCPConfig
 from fastmcp.utilities.async_utils import gather
 
-ClientFactory = Callable[[str, ClientTransport, ConnectMode], Client[Any]]
-"""Builds one group member: ``(server_name, transport, mode) -> Client``."""
+
+@dataclass(frozen=True)
+class GroupCallbackContext:
+    """Provenance for a payload delivered through a group-level handler.
+
+    ``server_name`` is the group's name for the member client that produced
+    the payload. ``tool_name`` is the upstream tool name when the payload is
+    call-scoped (progress); connection-scoped payloads (logs, protocol
+    messages) carry ``None``.
+    """
+
+    server_name: str
+    tool_name: str | None = None
+
+
+GroupLogHandler = Callable[[LogMessage, GroupCallbackContext], Awaitable[None]]
+"""Group-level log handler: ``(message, context) -> None``."""
+
+GroupMessageHandler = Callable[
+    ["mcp_types.ServerNotification | Exception", GroupCallbackContext],
+    Awaitable[None],
+]
+"""Group-level protocol-message handler: ``(message, context) -> None``."""
+
+GroupProgressHandler = Callable[
+    [float, "float | None", "str | None", GroupCallbackContext],
+    Awaitable[None],
+]
+"""Group-level progress handler: ``(progress, total, message, context) -> None``."""
+
+
+def _bind_log_handler(
+    handler: GroupLogHandler, context: GroupCallbackContext
+) -> Callable[[LogMessage], Awaitable[None]]:
+    async def bound(message: LogMessage) -> None:
+        await handler(message, context)
+
+    return bound
+
+
+def _bind_message_handler(
+    handler: GroupMessageHandler, context: GroupCallbackContext
+) -> Callable[[Any], Awaitable[None]]:
+    async def bound(message: Any) -> None:
+        await handler(message, context)
+
+    return bound
 
 
 @dataclass(frozen=True)
@@ -43,11 +88,17 @@ class ClientGroup:
     is safe because client contexts are reference counted.
     """
 
-    def __init__(self, clients: Mapping[str, Client[Any]]) -> None:
+    def __init__(
+        self,
+        clients: Mapping[str, Client[Any]],
+        *,
+        progress_handler: GroupProgressHandler | None = None,
+    ) -> None:
         if not clients:
             raise ValueError("ClientGroup requires at least one client")
 
         self._clients = dict(clients)
+        self._progress_handler = progress_handler
         self._exit_stack: contextlib.AsyncExitStack | None = None
         self._tool_routes: dict[str, ToolRoute] = {}
         self._catalog_loaded = False
@@ -69,30 +120,31 @@ class ClientGroup:
         config: MCPConfig | dict[str, Any],
         *,
         default_mode: ConnectMode = "auto",
-        client_factory: ClientFactory | None = None,
+        log_handler: GroupLogHandler | None = None,
+        message_handler: GroupMessageHandler | None = None,
+        progress_handler: GroupProgressHandler | None = None,
     ) -> ClientGroup:
         """Create one independent client for each configured server.
 
         A server entry may include a FastMCP-specific ``mode`` field. It applies
         only to that server; entries without one use ``default_mode``.
 
-        ``client_factory`` constructs each member client from its server name,
-        transport, and resolved mode. Because the factory sees the server name,
-        handlers it binds carry provenance — a shared handler closed over the
-        name can tell servers apart:
+        Group-level handlers receive each payload together with a
+        `GroupCallbackContext` naming the member that produced it, so one
+        shared handler can tell servers apart:
 
         ```python
-        def make_client(name: str, transport: ClientTransport, mode: ConnectMode):
-            async def log_handler(message: LogMessage) -> None:
-                record(name, message)
+        async def log_handler(message: LogMessage, context: GroupCallbackContext):
+            print(f"[{context.server_name}] {message.data.get('msg')}")
 
-            return Client(transport, mode=mode, log_handler=log_handler)
-
-        group = ClientGroup.from_config(config, client_factory=make_client)
+        group = ClientGroup.from_config(config, log_handler=log_handler)
         ```
 
-        The factory must pass ``transport`` and ``mode`` through to the client
-        it builds; it owns everything else about construction.
+        ``log_handler`` and ``message_handler`` are connection-scoped, so they
+        can only be bound here, where the group constructs the member clients;
+        a group built from explicit clients binds those at `Client(...)`
+        construction instead. ``progress_handler`` is call-scoped and works on
+        every group — it is forwarded to the constructor.
         """
         parsed = (
             config if isinstance(config, MCPConfig) else MCPConfig.from_dict(config)
@@ -103,19 +155,20 @@ class ClientGroup:
             configured_mode = (server.model_extra or {}).get("mode", default_mode)
             if not isinstance(configured_mode, str):
                 raise TypeError(f"Protocol mode for server {name!r} must be a string")
-            transport = server.to_transport()
-            if client_factory is None:
-                clients[name] = Client(transport, mode=configured_mode)
-            else:
-                client = client_factory(name, transport, configured_mode)
-                if not isinstance(client, Client):
-                    raise TypeError(
-                        f"client_factory returned {type(client).__name__!r} for "
-                        f"server {name!r}; it must return a fastmcp Client."
-                    )
-                clients[name] = client
 
-        return cls(clients)
+            client_kwargs: dict[str, Any] = {}
+            context = GroupCallbackContext(server_name=name)
+            if log_handler is not None:
+                client_kwargs["log_handler"] = _bind_log_handler(log_handler, context)
+            if message_handler is not None:
+                client_kwargs["message_handler"] = _bind_message_handler(
+                    message_handler, context
+                )
+            clients[name] = Client(
+                server.to_transport(), mode=configured_mode, **client_kwargs
+            )
+
+        return cls(clients, progress_handler=progress_handler)
 
     @property
     def protocol_versions(self) -> dict[str, str | None]:
@@ -175,6 +228,30 @@ class ClientGroup:
         if disconnected:
             names = ", ".join(repr(name) for name in disconnected)
             raise RuntimeError(f"ClientGroup clients are not connected: {names}")
+
+    def _route_progress_handler(
+        self, route: ToolRoute, explicit: ProgressHandler | None
+    ) -> ProgressHandler | None:
+        """Contextualize the group progress handler for one routed call.
+
+        An explicit per-call handler wins; otherwise the group-level handler is
+        bound to this call's provenance. Returns None when neither is set.
+        """
+        if explicit is not None:
+            return explicit
+        group_handler = self._progress_handler
+        if group_handler is None:
+            return None
+        context = GroupCallbackContext(
+            server_name=route.server_name, tool_name=route.upstream_name
+        )
+
+        async def handler(
+            progress: float, total: float | None, message: str | None
+        ) -> None:
+            await group_handler(progress, total, message, context)
+
+        return handler
 
     def _require_route_connected(self, route: ToolRoute) -> None:
         if not route.client.is_connected():
@@ -269,7 +346,7 @@ class ClientGroup:
             route.upstream_name,
             arguments or {},
             timeout=timeout,
-            progress_handler=progress_handler,
+            progress_handler=self._route_progress_handler(route, progress_handler),
             meta=meta,
         )
 
@@ -291,7 +368,7 @@ class ClientGroup:
             arguments,
             version=version,
             timeout=timeout,
-            progress_handler=progress_handler,
+            progress_handler=self._route_progress_handler(route, progress_handler),
             raise_on_error=raise_on_error,
             meta=meta,
         )

@@ -97,24 +97,32 @@ group = ClientGroup.from_config(config)
 
 Entries without a `mode` use `"auto"` by default.
 
-To control how each member client is constructed — most commonly to give shared handlers provenance — pass a `client_factory`. It receives the server name, the transport built from that entry, and the resolved mode, and returns the `Client` to use. A handler closed over the name can tell servers apart:
+## Shared handlers with provenance
+
+A shared handler attached at the group level receives every payload together with a `GroupCallbackContext` naming the member that produced it, so one handler can serve the whole group and still tell servers apart:
 
 ```python
-from fastmcp import Client
-from fastmcp.client.group import ClientGroup
+from fastmcp.client.group import ClientGroup, GroupCallbackContext
 
 
-def make_client(name, transport, mode):
-    async def log_handler(message):
-        print(f"[{name}] {message.data.get('msg')}")
-
-    return Client(transport, mode=mode, log_handler=log_handler)
+async def log_handler(message, context: GroupCallbackContext):
+    print(f"[{context.server_name}] {message.data.get('msg')}")
 
 
-group = ClientGroup.from_config(config, client_factory=make_client)
+async def progress_handler(progress, total, message, context: GroupCallbackContext):
+    print(f"[{context.server_name}/{context.tool_name}] {progress}/{total}")
+
+
+group = ClientGroup.from_config(
+    config,
+    log_handler=log_handler,
+    progress_handler=progress_handler,
+)
 ```
 
-The factory owns construction: handlers, auth, timeouts, and anything else `Client` accepts. Pass `transport` and `mode` through unless you specifically mean to override them.
+`progress_handler` is call-scoped: the group binds the route's server and upstream tool name when it dispatches each call, so it works on any group — including one built from explicit clients via `ClientGroup(clients, progress_handler=...)`. A per-call `progress_handler` passed to `call_tool()` takes precedence.
+
+`log_handler` and `message_handler` are connection-scoped: they must be bound when the member client is constructed, so the group accepts them only in `from_config`, where it builds the clients. A group assembled from explicit clients binds those handlers at `Client(...)` construction — closing over the server name gives the same provenance.
 
 ## Manage connections explicitly
 
