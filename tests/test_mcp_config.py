@@ -7,7 +7,8 @@ import os
 import sys
 import tempfile
 import time
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, patch
@@ -172,8 +173,17 @@ class TestConfigTransportEraNegotiation:
         assert transport.legacy_only is True
 
 
-def _make_protocol_era_server(name: str) -> FastMCP:
-    server = FastMCP(name)
+def _make_protocol_era_server(name: str, starts: list[str] | None = None) -> FastMCP:
+    if starts is None:
+        server = FastMCP(name)
+    else:
+
+        @asynccontextmanager
+        async def lifespan(_server: FastMCP) -> AsyncIterator[dict[str, Any]]:
+            starts.append(name)
+            yield {}
+
+        server = FastMCP(name, lifespan=lifespan)
 
     @server.tool
     async def protocol_era(ctx: Context) -> str:
@@ -218,11 +228,14 @@ async def test_multi_server_auto_negotiates_modern_end_to_end():
 
 async def test_multi_server_auto_falls_back_all_legs_when_one_backend_is_legacy():
     """A mixed config never leaves the composite and its backends on different eras."""
+    starts: list[str] = []
     config = MCPConfig(
         mcpServers={
-            "modern": InMemoryStdioMCPServer(mcp=_make_protocol_era_server("modern")),
+            "modern": InMemoryStdioMCPServer(
+                mcp=_make_protocol_era_server("modern", starts)
+            ),
             "legacy": LegacyInMemoryStdioMCPServer(
-                mcp=_make_protocol_era_server("legacy")
+                mcp=_make_protocol_era_server("legacy", starts)
             ),
         }
     )
@@ -234,6 +247,32 @@ async def test_multi_server_auto_falls_back_all_legs_when_one_backend_is_legacy(
 
     assert modern_era.data not in MODERN_PROTOCOL_VERSIONS
     assert legacy_era.data not in MODERN_PROTOCOL_VERSIONS
+    assert starts.count("modern") == 1
+    assert starts.count("legacy") == 1
+
+
+async def test_failed_known_legacy_backend_does_not_downgrade_healthy_backends():
+    @asynccontextmanager
+    async def unavailable_lifespan(
+        server: FastMCP,
+    ) -> AsyncIterator[dict[str, Any]]:
+        if server.name == "unavailable":
+            raise RuntimeError("backend unavailable")
+        yield {}
+
+    unavailable = FastMCP("unavailable", lifespan=unavailable_lifespan)
+    config = MCPConfig(
+        mcpServers={
+            "modern": InMemoryStdioMCPServer(mcp=_make_protocol_era_server("modern")),
+            "legacy": LegacyInMemoryStdioMCPServer(mcp=unavailable),
+        }
+    )
+
+    async with Client(config) as client:
+        assert client.protocol_version in MODERN_PROTOCOL_VERSIONS
+        modern_era = await client.call_tool("modern_protocol_era", {})
+
+    assert modern_era.data in MODERN_PROTOCOL_VERSIONS
 
 
 @pytest.mark.parametrize(
