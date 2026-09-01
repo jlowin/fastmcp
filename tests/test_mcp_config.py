@@ -7,7 +7,8 @@ import os
 import sys
 import tempfile
 import time
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, patch
@@ -172,8 +173,22 @@ class TestConfigTransportEraNegotiation:
         assert transport.legacy_only is True
 
 
-def _make_protocol_era_server(name: str) -> FastMCP:
-    server = FastMCP(name)
+def _make_protocol_era_server(name: str, starts: list[str] | None = None) -> FastMCP:
+    """Build a backend server, optionally recording each lifespan start.
+
+    ``starts`` is how the tests below observe how many times a backend was
+    actually brought up, which is the cost the era heuristic exists to avoid.
+    """
+    if starts is None:
+        server = FastMCP(name)
+    else:
+
+        @asynccontextmanager
+        async def counting_lifespan(_server: FastMCP) -> AsyncIterator[dict[str, Any]]:
+            starts.append(name)
+            yield {}
+
+        server = FastMCP(name, lifespan=counting_lifespan)
 
     @server.tool
     async def protocol_era(ctx: Context) -> str:
@@ -1379,3 +1394,94 @@ async def test_script(tmp_path: Path) -> AsyncGenerator[Path, Any]:
         yield Path(f.name)
 
     pass
+
+
+async def test_mixed_era_config_starts_each_backend_once():
+    """A mixed fleet resolves to one era without restarting every backend.
+
+    The composite can only expose one era, so a legacy backend makes legacy the
+    aggregate's era. Connecting the declared-legacy backend first lets the rest
+    start in that era directly instead of negotiating modern and being torn
+    down and rebuilt.
+    """
+    starts: list[str] = []
+    config = MCPConfig(
+        mcpServers={
+            "modern": InMemoryStdioMCPServer(
+                mcp=_make_protocol_era_server("modern", starts)
+            ),
+            "legacy": LegacyInMemoryStdioMCPServer(
+                mcp=_make_protocol_era_server("legacy", starts)
+            ),
+        }
+    )
+
+    async with Client(config) as client:
+        assert client.protocol_version not in MODERN_PROTOCOL_VERSIONS
+
+    assert starts.count("modern") == 1
+    assert starts.count("legacy") == 1
+
+
+async def test_all_modern_config_starts_each_backend_once():
+    """The all-modern path is unaffected by the era heuristic."""
+    starts: list[str] = []
+    config = MCPConfig(
+        mcpServers={
+            "alpha": InMemoryStdioMCPServer(
+                mcp=_make_protocol_era_server("alpha", starts)
+            ),
+            "beta": InMemoryStdioMCPServer(
+                mcp=_make_protocol_era_server("beta", starts)
+            ),
+        }
+    )
+
+    async with Client(config) as client:
+        assert client.protocol_version in MODERN_PROTOCOL_VERSIONS
+
+    assert starts.count("alpha") == 1
+    assert starts.count("beta") == 1
+
+
+async def test_unreachable_legacy_backend_leaves_survivors_modern():
+    """A declared-legacy backend that never connects settles nothing.
+
+    The era follows connections that succeeded, so an unreachable legacy
+    backend must not drag a healthy modern sibling into the handshake era.
+    """
+
+    @asynccontextmanager
+    async def unavailable(_server: FastMCP) -> AsyncIterator[dict[str, Any]]:
+        raise RuntimeError("backend unavailable")
+        yield {}  # pragma: no cover
+
+    config = MCPConfig(
+        mcpServers={
+            "modern": InMemoryStdioMCPServer(mcp=_make_protocol_era_server("modern")),
+            "legacy": LegacyInMemoryStdioMCPServer(
+                mcp=FastMCP("legacy", lifespan=unavailable)
+            ),
+        }
+    )
+
+    async with Client(config) as client:
+        assert client.protocol_version in MODERN_PROTOCOL_VERSIONS
+        era = await client.call_tool("modern_protocol_era", {})
+
+    assert era.data in MODERN_PROTOCOL_VERSIONS
+
+
+async def test_mixed_era_config_mounts_in_declared_order():
+    """Connecting a legacy backend first does not reorder mounted components."""
+    config = MCPConfig(
+        mcpServers={
+            "alpha": InMemoryStdioMCPServer(mcp=_make_protocol_era_server("alpha")),
+            "zulu": LegacyInMemoryStdioMCPServer(mcp=_make_protocol_era_server("zulu")),
+        }
+    )
+
+    async with Client(config) as client:
+        names = [tool.name for tool in await client.list_tools()]
+
+    assert names.index("alpha_add") < names.index("zulu_add")

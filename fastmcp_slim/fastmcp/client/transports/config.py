@@ -32,6 +32,19 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
+def _transport_for(config: MCPServerTypes) -> ClientTransport:
+    """Build the underlying transport for one configured backend.
+
+    Transforming configs delegate to their base class: their transforms apply
+    to the proxy wrapped around the transport, not to the transport itself.
+    """
+    if isinstance(config, TransformingStdioMCPServer):
+        return StdioMCPServer.to_transport(config)
+    if isinstance(config, TransformingRemoteMCPServer):
+        return RemoteMCPServer.to_transport(config)
+    return config.to_transport()
+
+
 class MCPConfigTransport(ClientTransport):
     """Transport for connecting to one or more MCP servers defined in an MCPConfig.
 
@@ -219,11 +232,33 @@ class MCPConfigTransport(ClientTransport):
         )
         self._transports = []
         backend_versions: list[str] = []
+        proxies: dict[str, FastMCP[Any]] = {}
 
-        for name, server_config in self.config.mcpServers.items():
+        # Build every transport before connecting any of them, so a transport
+        # that already declares the handshake era can be connected first. One
+        # legacy backend settles the aggregate's era, and every backend that
+        # connects after it can start in that era directly instead of
+        # negotiating modern and being torn down by the caller's retry.
+        #
+        # The era is taken from connections that actually succeeded, never from
+        # the static flag alone: a declared-legacy backend that is unreachable
+        # must not drag its healthy modern siblings down with it.
+        transports = self._build_transports()
+        connect_order = sorted(
+            self.config.mcpServers.items(),
+            key=lambda item: not getattr(transports.get(item[0]), "legacy_only", False),
+        )
+        connect_mode = backend_mode
+
+        for name, server_config in connect_order:
             try:
                 transport, client, proxy = await self._create_proxy(
-                    name, server_config, timeout, stack, backend_mode
+                    name,
+                    server_config,
+                    timeout,
+                    stack,
+                    connect_mode,
+                    transport=transports.get(name),
                 )
             except Exception:  # Broad catch is intentional: failure modes
                 # are diverse (OSError, TimeoutError, RuntimeError, etc.) and
@@ -237,12 +272,45 @@ class MCPConfigTransport(ClientTransport):
             self._transports.append(transport)
             assert client.protocol_version is not None
             backend_versions.append(client.protocol_version)
-            composite.mount(proxy, namespace=name if self.name_as_prefix else None)
+            proxies[name] = proxy
+            if (
+                backend_mode == "auto"
+                and client.protocol_version not in MODERN_PROTOCOL_VERSIONS
+            ):
+                connect_mode = "legacy"
 
         if not self._transports:
             raise ConnectionError("All MCP servers failed to connect")
 
+        # Connection order follows the era heuristic above; mount order stays
+        # the order the user declared, since that is what decides precedence
+        # between backends exposing the same component name.
+        for name in self.config.mcpServers:
+            if (proxy := proxies.get(name)) is not None:
+                composite.mount(proxy, namespace=name if self.name_as_prefix else None)
+
         return composite, backend_versions
+
+    def _build_transports(self) -> dict[str, ClientTransport]:
+        """Build each backend's transport so its era capability can be read.
+
+        A config whose transport cannot be built is simply absent from the
+        result. The connection loop builds it again, fails where it always
+        failed, and reports it through the handler there — keeping one place
+        that decides what an unreachable backend means.
+        """
+        transports: dict[str, ClientTransport] = {}
+        for name, server_config in self.config.mcpServers.items():
+            try:
+                transports[name] = _transport_for(server_config)
+            except Exception:
+                logger.debug(
+                    "Could not build a transport for MCP server %r ahead of "
+                    "connecting; deferring to the connection attempt",
+                    name,
+                    exc_info=True,
+                )
+        return transports
 
     async def _create_proxy(
         self,
@@ -251,6 +319,7 @@ class MCPConfigTransport(ClientTransport):
         timeout: float | None,
         stack: contextlib.AsyncExitStack,
         backend_mode: str | None = None,
+        transport: ClientTransport | None = None,
     ) -> tuple[ClientTransport, Any, "FastMCP[Any]"]:
         """Create underlying transport, proxy client, and proxy server for a single backend.
 
@@ -271,19 +340,14 @@ class MCPConfigTransport(ClientTransport):
         include_tags = None
         exclude_tags = None
 
-        # Handle transforming servers - call base class to_transport() for underlying transport
-        if isinstance(config, TransformingStdioMCPServer):
-            transport = StdioMCPServer.to_transport(config)
+        if transport is None:
+            transport = _transport_for(config)
+        # Transforming servers carry their transforms on the proxy, not the
+        # transport, so they are read here rather than when building it.
+        if isinstance(config, TransformingStdioMCPServer | TransformingRemoteMCPServer):
             tool_transforms = config.tools
             include_tags = config.include_tags
             exclude_tags = config.exclude_tags
-        elif isinstance(config, TransformingRemoteMCPServer):
-            transport = RemoteMCPServer.to_transport(config)
-            tool_transforms = config.tools
-            include_tags = config.include_tags
-            exclude_tags = config.exclude_tags
-        else:
-            transport = config.to_transport()
 
         client_kwargs: dict[str, Any] = {}
         if backend_mode is not None:
