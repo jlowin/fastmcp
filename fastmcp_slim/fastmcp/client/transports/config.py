@@ -231,16 +231,19 @@ class MCPConfigTransport(ClientTransport):
             prepared_transports = self._prepare_transports()
 
         backends = [
-            (name, config, prepared_transports[name])
+            (name, config, prepared_transports.get(name))
             for name, config in self.config.mcpServers.items()
-            if name in prepared_transports
         ]
         if backend_mode == "auto":
             # Probe transports with a known legacy-only constraint first. Once
             # one connects, every remaining backend can start directly in the
             # aggregate's required legacy era instead of being restarted after
             # an avoidable modern probe.
-            backends.sort(key=lambda backend: not backend[2].legacy_only)
+            backends.sort(
+                key=lambda backend: (
+                    not (backend[2] is not None and backend[2].legacy_only)
+                )
+            )
 
         current_mode = backend_mode
 
@@ -290,9 +293,9 @@ class MCPConfigTransport(ClientTransport):
         for name, config in self.config.mcpServers.items():
             try:
                 transports[name] = self._create_transport(config)
-            except Exception:  # See the matching connection guard above.
-                logger.warning(
-                    "Failed to connect to MCP server %r, skipping",
+            except Exception:
+                logger.debug(
+                    "Failed to construct transport for MCP server %r",
                     name,
                     exc_info=True,
                 )
