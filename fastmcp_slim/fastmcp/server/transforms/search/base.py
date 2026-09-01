@@ -27,6 +27,7 @@ Example::
     mcp.add_transform(RegexSearchTransform())
 """
 
+import json
 from abc import abstractmethod
 from collections.abc import Awaitable, Callable, Sequence
 from typing import Annotated, Any
@@ -132,9 +133,41 @@ def _schema_section(schema: dict[str, Any] | None, title: str) -> list[str]:
         return lines
 
     for name, field in props.items():
-        required = ", required" if name in req else ""
-        lines.append(f"- `{name}` ({_schema_type(field)}{required})")
+        lines.append(f"- {_render_param(name, field, required=name in req)}")
     return lines
+
+
+def _render_param(name: str, field: Any, *, required: bool) -> str:
+    """One compact line per parameter: type, enum values, default, description.
+
+    Enums and defaults are what let a caller construct a valid value without a
+    round of guess-and-check; the first sentence of the description carries the
+    author's usage advice.
+    """
+    qualifiers = [_schema_type(field)]
+    if isinstance(field, dict):
+        enum = field.get("enum")
+        if not isinstance(enum, list):
+            for variant in field.get("anyOf", []):
+                if isinstance(variant, dict) and isinstance(variant.get("enum"), list):
+                    enum = variant["enum"]
+                    break
+        if isinstance(enum, list) and 0 < len(enum) <= 8:
+            qualifiers.append("one of " + "/".join(json.dumps(v) for v in enum))
+        if field.get("default") is not None:
+            qualifiers.append(f"default {json.dumps(field['default'])}")
+    if required:
+        qualifiers.append("required")
+
+    line = f"`{name}` ({', '.join(qualifiers)})"
+    if isinstance(field, dict):
+        description = field.get("description")
+        if isinstance(description, str) and description.strip():
+            first = description.strip().splitlines()[0]
+            if len(first) > 120:
+                first = first[:117] + "..."
+            line += f" — {first}"
+    return line
 
 
 def serialize_tools_for_output_markdown(tools: Sequence[Tool]) -> str:
