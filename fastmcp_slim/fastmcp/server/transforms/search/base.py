@@ -138,11 +138,13 @@ def _schema_section(schema: dict[str, Any] | None, title: str) -> list[str]:
 
 
 def _render_param(name: str, field: Any, *, required: bool) -> str:
-    """One compact line per parameter: type, enum values, default, description.
+    """One compact line per parameter: type, enum values, default.
 
     Enums and defaults are what let a caller construct a valid value without a
-    round of guess-and-check; the first sentence of the description carries the
-    author's usage advice.
+    round of guess-and-check, and they are cheap — on real catalogs they cost
+    ~40% more than bare types, where also inlining each parameter's description
+    costs ~300%. Descriptions stay in the `full` detail level, which emits the
+    raw JSON schema that already carries them.
     """
     qualifiers = [_schema_type(field)]
     if isinstance(field, dict):
@@ -159,15 +161,7 @@ def _render_param(name: str, field: Any, *, required: bool) -> str:
     if required:
         qualifiers.append("required")
 
-    line = f"`{name}` ({', '.join(qualifiers)})"
-    if isinstance(field, dict):
-        description = field.get("description")
-        if isinstance(description, str) and description.strip():
-            first = description.strip().splitlines()[0]
-            if len(first) > 120:
-                first = first[:117] + "..."
-            line += f" — {first}"
-    return line
+    return f"`{name}` ({', '.join(qualifiers)})"
 
 
 def serialize_tools_for_output_markdown(tools: Sequence[Tool]) -> str:

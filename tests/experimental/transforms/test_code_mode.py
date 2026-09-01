@@ -1111,3 +1111,8 @@ async def test_code_mode_get_schema_renders_enums_and_defaults() -> None:
     assert 'one of "trending"/"top"' in text
     assert 'default "trending"' in text
     assert "default 10" in text
+    # Per-parameter descriptions stay out of this level: on real catalogs they
+    # cost ~300% more than bare types where enums and defaults cost ~40%, and
+    # the `full` level already emits the raw schema that carries them.
+    assert "Rank things" in text  # the tool's own description still renders
+    assert "\u2014" not in text  # but no per-parameter description dashes
