@@ -108,7 +108,7 @@ async with legacy_client, modern_client:
 
 It is also safe to enter the group inside a client context. FastMCP client contexts are reference counted, so leaving the group does not close a connection still owned by an outer context.
 
-The group's own context is reentrant in the same way. Entering a group that is already connected, whether from a nested block or a concurrent task, reuses the existing connections. The first entry connects every client and the last exit disconnects them, so code that already relies on `Client` being safe to enter more than once can hold a `ClientGroup` the same way:
+The group's own context is reentrant in the same way (FastMCP 4.0.1 and later). Entering a group that is already connected, whether from a nested block or a concurrent task, reuses the existing connections. The first entry connects every client and the last exit disconnects them, so code that already relies on `Client` being safe to enter more than once can hold a `ClientGroup` the same way:
 
 ```python
 async with group:
