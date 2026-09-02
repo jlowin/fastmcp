@@ -5,6 +5,25 @@ rss: true
 tag: NEW
 ---
 
+<Update label="v4.0.1" description="2026-09-01">
+
+**[v4.0.1: Come Back Any Time](https://github.com/PrefectHQ/fastmcp/releases/tag/v4.0.1)**
+
+`ClientGroup` now reference-counts its context the way `Client` does, so entering a connected group from a nested block or a concurrent task reuses the existing connections instead of raising. Adapters written against `Client`'s reentrancy can hold a `ClientGroup` the same way.
+
+### Fixes 🐞
+* client: make ClientGroup context reentrant by [@zzstoatzz](https://github.com/zzstoatzz) in [#4975](https://github.com/PrefectHQ/fastmcp/pull/4975)
+* ci: fix the published-docs PR step's working base by [@zzstoatzz](https://github.com/zzstoatzz) in [#4960](https://github.com/PrefectHQ/fastmcp/pull/4960)
+### Docs 📚
+* docs: update banner for FastMCP 4 GA by [@zzstoatzz](https://github.com/zzstoatzz) in [#4958](https://github.com/PrefectHQ/fastmcp/pull/4958)
+* docs: correct whats-new and upgrade guide for GA by [@zzstoatzz](https://github.com/zzstoatzz) in [#4961](https://github.com/PrefectHQ/fastmcp/pull/4961)
+* docs: drop prerelease install framing from installation and SDK migration guides by [@zzstoatzz](https://github.com/zzstoatzz) in [#4963](https://github.com/PrefectHQ/fastmcp/pull/4963)
+* docs: refresh sidebar tags and fix audit findings by [@zzstoatzz](https://github.com/zzstoatzz) in [#4965](https://github.com/PrefectHQ/fastmcp/pull/4965)
+
+**Full Changelog**: [v4.0.0...v4.0.1](https://github.com/PrefectHQ/fastmcp/compare/v4.0.0...v4.0.1)
+
+</Update>
+
 <Update label="v4.0.0" description="2026-08-31">
 
 **[v4.0.0: Four Real](https://github.com/PrefectHQ/fastmcp/releases/tag/v4.0.0)**
@@ -85,7 +104,7 @@ FastMCP 4 is the FastMCP release for the new MCP: full support for the `2026-07-
 * Cover CallArgument resolution in background tasks by [@zzstoatzz](https://github.com/zzstoatzz) in [#4833](https://github.com/PrefectHQ/fastmcp/pull/4833)
 * Scalekit issuer updates backward compatibility by [@AkshayParihar33](https://github.com/AkshayParihar33) in [#4798](https://github.com/PrefectHQ/fastmcp/pull/4798)
 * Add Prefect Horizon account commands by [@parkedwards](https://github.com/parkedwards) in [#4786](https://github.com/PrefectHQ/fastmcp/pull/4786)
-* Cap anthropic dependency to <1 by [@craigie-ant](https://github.com/craigie-ant) in [#4864](https://github.com/PrefectHQ/fastmcp/pull/4864)
+* Cap anthropic dependency to `<1` by [@craigie-ant](https://github.com/craigie-ant) in [#4864](https://github.com/PrefectHQ/fastmcp/pull/4864)
 * Remove obsolete Docket memory-server reset fixtures by [@TyceHerrman](https://github.com/TyceHerrman) in [#4912](https://github.com/PrefectHQ/fastmcp/pull/4912)
 * add independent client groups by [@zzstoatzz](https://github.com/zzstoatzz) in [#4904](https://github.com/PrefectHQ/fastmcp/pull/4904)
 ### Security 🔒
