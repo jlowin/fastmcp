@@ -5,6 +5,26 @@ rss: true
 tag: NEW
 ---
 
+<Update label="v4.0.2" description="2026-09-02">
+
+**[v4.0.2: Root Access](https://github.com/PrefectHQ/fastmcp/releases/tag/v4.0.2)**
+
+`ClientGroup` is now importable from the package root, `from fastmcp import ClientGroup`, with the same lazy export and install hint as `Client`, so integrations no longer couple to FastMCP's internal module layout.
+
+### Enhancements ✨
+* Expose ClientGroup from package root by [@jlowin](https://github.com/jlowin) in [#4987](https://github.com/PrefectHQ/fastmcp/pull/4987)
+* skills: add release skill with changelog entry helper by [@zzstoatzz](https://github.com/zzstoatzz) in [#4982](https://github.com/PrefectHQ/fastmcp/pull/4982)
+### Fixes 🐞
+* docs: escape `<1` in changelog so MDX parses by [@zzstoatzz](https://github.com/zzstoatzz) in [#4978](https://github.com/PrefectHQ/fastmcp/pull/4978)
+### Docs 📚
+* docs: note the 4.0.1 floor for ClientGroup reentrancy by [@zzstoatzz](https://github.com/zzstoatzz) in [#4980](https://github.com/PrefectHQ/fastmcp/pull/4980)
+* docs: link the GA announcement and blog from What's New by [@zzstoatzz](https://github.com/zzstoatzz) in [#4984](https://github.com/PrefectHQ/fastmcp/pull/4984)
+
+
+**Full Changelog**: [v4.0.1...v4.0.2](https://github.com/PrefectHQ/fastmcp/compare/v4.0.1...v4.0.2)
+
+</Update>
+
 <Update label="v4.0.1" description="2026-09-01">
 
 **[v4.0.1: Come Back Any Time](https://github.com/PrefectHQ/fastmcp/releases/tag/v4.0.1)**
