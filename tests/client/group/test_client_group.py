@@ -7,8 +7,7 @@ from unittest.mock import patch
 import pytest
 from pydantic import ConfigDict
 
-from fastmcp import Client, Context, FastMCP
-from fastmcp.client.group import ClientGroup
+from fastmcp import Client, ClientGroup, Context, FastMCP
 from fastmcp.client.transports import FastMCPTransport
 from fastmcp.mcp_config import MCPConfig, StdioMCPServer
 
