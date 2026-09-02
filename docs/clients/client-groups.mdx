@@ -21,8 +21,7 @@ Construct the clients explicitly when each server needs its own handlers, authen
 from pathlib import Path
 import asyncio
 
-from fastmcp import Client
-from fastmcp.client.group import ClientGroup
+from fastmcp import Client, ClientGroup
 
 legacy_client = Client(Path("legacy_server.py"), mode="legacy")
 modern_client = Client("https://modern.example.com/mcp", mode="auto")
@@ -76,7 +75,7 @@ The group aggregates names and detects collisions; it never stands between the a
 `ClientGroup.from_config` creates one client per server rather than passing the entire configuration through a proxy. A FastMCP-specific `mode` field can select the protocol behavior for each server:
 
 ```python
-from fastmcp.client.group import ClientGroup
+from fastmcp import ClientGroup
 
 config = {
     "mcpServers": {
