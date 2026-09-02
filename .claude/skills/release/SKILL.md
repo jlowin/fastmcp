@@ -140,6 +140,10 @@ connections instead of raising.
 - `--generate-notes` copies PR titles verbatim; a title containing `<1`, `{`, or `}`
   breaks MDX. `scripts/changelog_entry.py` wraps those in backticks; the validator
   in step 4 catches anything it misses.
+- No Mintlify check-run on the new `published-docs` tip within a few minutes means
+  Mintlify never picked the merge up, and there is no CLI trigger. Read
+  https://status.mintlify.com first; their deploy queue backs up during incidents
+  and the merge deploys on its own once it drains.
 - Without `--notes-start-tag`, a prerelease tag becomes the changelog start and the
   PR list is silently truncated.
 - Maintenance releases publish packages and notes but never repoint `published-docs`;
