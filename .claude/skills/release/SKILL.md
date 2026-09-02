@@ -29,7 +29,11 @@ one gets a follow-up patch, never a re-tag.
    `gh release view <tag>` on each.
 
 2. **Propose titles.** Titles are `v<version>: <pun>`, pun on the release's main
-   theme. Offer several; the maintainer picks. Draft the handwritten notes at the
+   theme. Read the whole title history first, `gh release list -L 60`, so the
+   options stay on brand: two to four words, a familiar phrase bent toward the
+   theme ("Cache Me If You Can", "Trust, but Proxy", "Come Back Any Time"),
+   and a running family for a major's prereleases ("Fourst Contact", "Group
+   Effourt"). Offer several; the maintainer picks. Draft the handwritten notes at the
    same time: one or two sentences for a patch, narrative prose for a point release.
    Get sign-off on both before anything is pushed.
 
