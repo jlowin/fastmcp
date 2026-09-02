@@ -1,20 +1,22 @@
-"""Render docs/changelog.mdx and docs/updates.mdx blocks for a release.
+"""Insert the release entry into docs/changelog.mdx and docs/updates.mdx.
 
 Usage:
-    uv run .claude/skills/release/changelog_entry.py v4.0.1 v4.0.0 "Come Back Any Time" notes.md
+    uv run .claude/skills/release/scripts/changelog_entry.py v4.0.1 v4.0.0 "Come Back Any Time" notes.md
+    uv run .claude/skills/release/scripts/changelog_entry.py ... --print   # render only
 
 Reads the maintainer-approved notes file for the intro paragraph and pulls the
 PR list from GitHub's generate-notes API, so the docs entry matches what
-`gh release create --generate-notes` will append.
+`gh release create --generate-notes` will append. Each block is inserted above
+the newest existing `<Update` in its file. Run from the repository root.
 """
 
 from __future__ import annotations
 
 import datetime as dt
-import json
 import re
 import subprocess
 import sys
+from pathlib import Path
 
 REPO = "PrefectHQ/fastmcp"
 
@@ -83,12 +85,28 @@ def escape_mdx(text: str) -> str:
     return "\n".join(fix(line) for line in text.splitlines())
 
 
+def insert_above_newest(path: Path, block: str) -> None:
+    text = path.read_text()
+    idx = text.find("<Update ")
+    if idx < 0:
+        raise SystemExit(f"{path}: no <Update block found to insert above")
+    if block.splitlines()[0] in text:
+        raise SystemExit(f"{path}: an entry with this label already exists")
+    path.write_text(text[:idx] + block + "\n" + text[idx:])
+
+
 def main() -> None:
-    tag, previous, pun, notes_path = sys.argv[1:5]
-    target = sys.argv[5] if len(sys.argv) > 5 else "main"
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    render_only = "--print" in sys.argv
+    if len(args) < 4:
+        raise SystemExit(__doc__)
+    tag, previous, pun, notes_path = args[:4]
+    target = args[4] if len(args) > 4 else "main"
     version = tag.lstrip("v")
     today = dt.date.today()
-    intro = open(notes_path).read().strip()
+    intro = " ".join(
+        line.strip() for line in open(notes_path).read().split("\n") if line.strip()
+    )
     body = escape_mdx(linkify(generate_notes(tag, previous, target)))
     url = f"https://github.com/{REPO}/releases/tag/{tag}"
 
@@ -108,11 +126,17 @@ title="FastMCP {tag}: {pun}"
 href="{url}"
 cta="Read the release notes"
 >
-{intro.splitlines()[0]}
+{intro}
 </Card>
 </Update>
 '''
-    print(json.dumps({"changelog": changelog, "updates": updates}))
+    if render_only:
+        print(changelog)
+        print(updates)
+        return
+    insert_above_newest(Path("docs/changelog.mdx"), changelog)
+    insert_above_newest(Path("docs/updates.mdx"), updates)
+    print("inserted entries into docs/changelog.mdx and docs/updates.mdx")
 
 
 if __name__ == "__main__":

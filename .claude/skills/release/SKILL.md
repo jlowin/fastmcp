@@ -1,16 +1,17 @@
 ---
 name: release
-description: Cut a FastMCP release end to end. Use when the maintainer says "cut a release", "prep a patch", "ship 4.x.y", or asks what a release would contain. Covers the notes preview, the title pun, the docs changelog PR that must land before the tag, the tag itself, the publish chain, and verifying gofastmcp.com actually deployed.
+description: Cut a FastMCP release end to end. Use when the maintainer says "cut a release", "prep a patch", "ship 4.x.y", or asks what a release would contain. Covers the notes preview, the title pun, the docs changelog PR that must land before the tag, the tag itself, the publish fan-out, and verifying gofastmcp.com actually deployed.
 ---
 
 # Cutting a release
 
 A release is a tag on the branch that owns the line (`main` for the current major,
-`release/3.x` for 3.x maintenance). Tagging triggers `Publish fastmcp-slim to PyPI`,
-which chains into `fastmcp-tasks`, `fastmcp-remote`, and `fastmcp`; the `fastmcp`
-publish job then opens the `published-docs` PR that makes gofastmcp.com reflect the
-release. Two hand-maintained docs files mirror every release and must be on the
-tagged commit, so the docs PR always lands first.
+`release/3.x` for 3.x maintenance). The tag triggers `Publish fastmcp-slim to PyPI`;
+its success fans out to `fastmcp-tasks`, `fastmcp-remote`, and `fastmcp`, and the
+`fastmcp` publish job opens the `published-docs` PR that makes gofastmcp.com reflect
+the release. Two hand-maintained docs files mirror every release and must be on the
+tagged commit, so the docs PR always lands first. PyPI releases are immutable; a bad
+one gets a follow-up patch, never a re-tag.
 
 ## Procedure
 
@@ -22,63 +23,105 @@ tagged commit, so the docs PR always lands first.
      -f tag_name=v<new> -f target_commitish=main -f previous_tag_name=v<prev> --jq .body
    ```
 
-   Read the previous two releases for voice: `gh release list -L 5`, `gh release view <tag>`.
+   Read the two most recent releases for voice: `gh release list -L 5`, then
+   `gh release view <tag>` on each.
 
 2. **Propose titles.** Titles are `v<version>: <pun>`, pun on the release's main
    theme. Offer several; the maintainer picks. Draft the handwritten notes at the
    same time: one or two sentences for a patch, narrative prose for a point release.
    Get sign-off on both before anything is pushed.
 
-3. **Write the notes file** to the scratchpad (intro only, no title; the release
-   title is the heading).
+3. **Write the notes file** outside the repository (a temp directory), intro only.
+   The release title is the heading, so the file has none.
 
-4. **Docs entries.** Branch from `origin/main`, render both blocks, and insert each
-   above the newest existing `<Update ...>` in `docs/changelog.mdx` and
-   `docs/updates.mdx`:
+4. **Docs entries.** Branch `docs/changelog-<new>` from `origin/main` and insert
+   both blocks:
 
    ```bash
-   uv run .claude/skills/release/changelog_entry.py v<new> v<prev> "<pun>" notes.md
+   uv run .claude/skills/release/scripts/changelog_entry.py v<new> v<prev> "<pun>" /tmp/notes.md
    ```
 
-   Then run Mintlify's parser before pushing:
+   Validate, and repeat until it reports no errors; a parse error names the file
+   and line:col:
 
    ```bash
    cd docs && npx --yes mint@latest broken-links
    ```
 
-   Open the PR (`docs: add v<new> changelog entries`) and merge it. Branch policy
-   needs `--admin` on a maintainer-driven release.
+   (`@latest` on purpose: the hosted Mintlify build is always current.) Commit,
+   push, open the PR titled `docs: add v<new> changelog entries` with a one-line
+   body, and merge it. Branch policy needs `--admin` on a maintainer-driven release.
+   The docs PR itself appears in the GitHub notes but not in the mirror; that is
+   expected.
 
-5. **Tag**, immediately after the docs PR merges, from the same branch:
+5. **Tag**, immediately after the docs PR merges. Re-run the step 1 preview first;
+   if `main` moved, delete the entry blocks from both docs files, re-run the
+   helper (it refuses to insert a label that already exists), and land that as a
+   follow-up docs PR before tagging.
 
    ```bash
    gh release create v<new> --target main --title "v<new>: <pun>" \
-     --generate-notes --notes-start-tag v<prev> --notes-file notes.md
+     --generate-notes --notes-start-tag v<prev> --notes-file /tmp/notes.md
    ```
 
    Maintenance lines use `--target release/3.x` and the branch's own last tag.
    The compare link at the bottom of the created release must read `v<prev>...v<new>`.
 
-6. **Watch the chain.** `gh run watch` the slim publish, then the `fastmcp` publish
-   (`gh run list --workflow "Publish fastmcp to PyPI"`). Confirm each package with
-   `curl -s https://pypi.org/pypi/<pkg>/<new>/json | jq .info.version`; the
-   unversioned endpoint lags a few minutes.
-
-7. **Publish docs.** The `fastmcp` publish job opens `Publish FastMCP v<new> docs`
-   against `published-docs`. Merge it with `--merge --admin`. Then check Mintlify's
-   verdict on the new tip, which is the only signal that the deploy happened:
+6. **Watch the fan-out.** The slim run is keyed to the tag; the others are
+   `workflow_run` events on the default branch, so select them by workflow name.
+   The slim run appears within a minute of the tag; the `fastmcp` run is queued the
+   moment slim succeeds, so watch slim to completion first and the newest `fastmcp`
+   run is the right one.
 
    ```bash
+   gh run watch $(gh run list --event release --branch v<new> --limit 1 --json databaseId --jq '.[0].databaseId') --exit-status
+   gh run watch $(gh run list --workflow "Publish fastmcp to PyPI" --limit 1 --json databaseId --jq '.[0].databaseId') --exit-status
+   ```
+
+   Confirm each package with `curl -fsS https://pypi.org/pypi/<pkg>/<new>/json | jq .info.version`;
+   the unversioned endpoint lags a few minutes.
+
+7. **Publish docs.** When the `fastmcp` run finishes, its last job has opened
+   `Publish FastMCP v<new> docs` against `published-docs`:
+
+   ```bash
+   gh pr list --base published-docs --state open --json number,title
+   gh pr merge <n> --merge --admin
+   ```
+
+   Then read Mintlify's verdict on the new tip. The check-run is the only signal
+   that a deploy happened; the merge alone proves nothing. It starts within a
+   minute of the merge and `conclusion` is `null` until it finishes:
+
+   ```bash
+   git fetch origin published-docs
    sha=$(git rev-parse origin/published-docs)
    gh api repos/PrefectHQ/fastmcp/commits/$sha/check-runs \
      --jq '.check_runs[] | select(.name=="Mintlify Deployment") | .conclusion, .output.text'
    ```
 
-   Verify pages through their markdown endpoints, which bypass the HTML edge cache:
-   `curl -s https://gofastmcp.com/changelog.md | grep -c "<pun>"`, same for
-   `updates.md` and any page the release touched.
+   Verify through the markdown endpoints, which bypass the HTML edge cache:
+   `curl -fsS https://gofastmcp.com/changelog.md | grep -c "<pun>"`, and the same
+   for `updates.md` and any page the release touched.
 
-## Template: notes.md for a patch
+## Publishing docs by hand
+
+Used when a deploy failed and was fixed on `main`, or for a docs change outside a
+release. The publication commit must match `main`'s tree exactly.
+
+```bash
+git fetch origin main published-docs
+git checkout -b publish-docs-<topic> origin/published-docs
+git read-tree -m -u origin/main && git commit -m "docs: publish main @ $(git rev-parse --short origin/main)"
+git diff --quiet HEAD origin/main && echo "tree matches main"
+git push -u origin publish-docs-<topic>
+gh pr create --base published-docs --title "docs: publish main to published-docs (<what>)" --body "<one line>"
+gh pr merge <n> --merge --admin
+```
+
+Then repeat the check-run and endpoint verification from step 7.
+
+## Template: notes file for a patch
 
 ```
 `ClientGroup` now reference-counts its context the way `Client` does, so entering a
@@ -88,12 +131,13 @@ connections instead of raising.
 
 ## Gotchas
 
-- Mintlify persists its per-file hashes even when a deploy fails on a parse error.
-  The next successful deploy only rebuilds files changed since the failure. After
-  fixing a parse error, make a content change to every path the failed run listed
-  under "Updating targeted paths" and publish again.
+- Mintlify keeps its per-file hashes even when a deploy fails on a parse error, so
+  the next successful deploy only rebuilds files changed since the failure. After
+  fixing a parse error, make a small wording edit to every path the failed run
+  listed under "Updating targeted paths", merge that to `main`, and publish by hand.
 - `--generate-notes` copies PR titles verbatim; a title containing `<1`, `{`, or `}`
-  breaks MDX. `changelog_entry.py` wraps those in backticks; check the output anyway.
+  breaks MDX. `scripts/changelog_entry.py` wraps those in backticks; the validator
+  in step 4 catches anything it misses.
 - Without `--notes-start-tag`, a prerelease tag becomes the changelog start and the
   PR list is silently truncated.
 - Maintenance releases publish packages and notes but never repoint `published-docs`;
@@ -101,5 +145,7 @@ connections instead of raising.
 
 ## Check before finishing
 
-Three curls return non-zero: `pypi.org/pypi/fastmcp/<new>/json`,
-`gofastmcp.com/changelog.md | grep -c "<pun>"`, and `gofastmcp.com/updates.md | grep -c "<pun>"`.
+Each of these prints a count above zero:
+`curl -fsS https://pypi.org/pypi/fastmcp/<new>/json | grep -c '"version"'`,
+`curl -fsS https://gofastmcp.com/changelog.md | grep -c "<pun>"`,
+`curl -fsS https://gofastmcp.com/updates.md | grep -c "<pun>"`.
