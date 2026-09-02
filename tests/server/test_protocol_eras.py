@@ -21,11 +21,14 @@ migration feedback dossier (``<scratchpad>/specs/sdk-feedback.md``).
 
 from __future__ import annotations
 
+import anyio
 import mcp_types as types
 import pytest
 from mcp.client import Client as SDKClient
 from mcp.client.session import ClientRequestContext
+from mcp.client.subscriptions import ListenNotSupportedError, listen
 from mcp.server import Server as LowLevelServer
+from mcp.server.subscriptions import ToolsListChanged
 from mcp.shared.exceptions import MCPError
 from pydantic import FileUrl
 
@@ -326,6 +329,70 @@ async def test_logging_notification_still_flows_on_modern(push_server, mode):
         result = await client.call_tool("do_log", {})
     assert result.is_error is False
     assert _texts(result.content) == ["logged"]
+
+
+# ---------------------------------------------------------------------------
+# 4. subscriptions/listen carries server events on 2026-07-28
+# ---------------------------------------------------------------------------
+
+
+async def test_listen_stream_opens_on_modern(dual_era_server):
+    """2026-07-28 has no standing GET stream, so `subscriptions/listen` is how
+    a client receives server events. Unregistered it answers METHOD_NOT_FOUND,
+    closing the connection for a client that subscribes before it lists.
+    """
+    async with SDKClient(_server(dual_era_server), mode="auto") as client:
+        async with listen(client.session, tools_list_changed=True) as stream:
+            assert stream is not None
+
+
+async def test_listen_delivers_a_subscribed_event(dual_era_server):
+    """Events published on the server's bus reach an opted-in stream."""
+    bus = dual_era_server._mcp_server._subscriptions
+
+    async with SDKClient(_server(dual_era_server), mode="auto") as client:
+        async with listen(client.session, tools_list_changed=True) as stream:
+            await bus.publish(ToolsListChanged())
+            with anyio.fail_after(5):
+                event = await anext(aiter(stream))
+
+    assert isinstance(event, ToolsListChanged)
+
+
+async def test_listen_withholds_an_unsubscribed_event(dual_era_server):
+    """A stream never carries a kind the client did not opt in to."""
+    bus = dual_era_server._mcp_server._subscriptions
+
+    async with SDKClient(_server(dual_era_server), mode="auto") as client:
+        async with listen(client.session, prompts_list_changed=True) as stream:
+            await bus.publish(ToolsListChanged())
+            with pytest.raises(TimeoutError), anyio.fail_after(0.2):
+                await anext(aiter(stream))
+
+
+async def test_a_fastmcp_client_reaches_the_stream(dual_era_server):
+    """A FastMCP client reaches the stream through `Client.listen`, so both
+    ends of a change event work without dropping to the SDK client.
+    """
+    bus = dual_era_server._mcp_server._subscriptions
+
+    async with FastMCPClient(dual_era_server, mode="auto") as client:
+        async with client.listen(tools_list_changed=True) as subscription:
+            await bus.publish(ToolsListChanged())
+            with anyio.fail_after(5):
+                event = await anext(aiter(subscription))
+
+    assert isinstance(event, ToolsListChanged)
+
+
+async def test_listen_is_refused_on_legacy(dual_era_server):
+    """The stream is a 2026-07-28 construct, so asking for one on a handshake
+    connection is an error rather than a silently empty subscription.
+    """
+    async with FastMCPClient(dual_era_server, mode="legacy") as client:
+        with pytest.raises(ListenNotSupportedError):
+            async with client.listen(tools_list_changed=True):
+                pass
 
 
 # ---------------------------------------------------------------------------

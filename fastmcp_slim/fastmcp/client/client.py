@@ -8,7 +8,12 @@ import secrets
 import ssl
 import uuid
 from collections.abc import AsyncIterator, Callable, Coroutine, Mapping, Sequence
-from contextlib import AsyncExitStack, asynccontextmanager, suppress
+from contextlib import (
+    AbstractAsyncContextManager,
+    AsyncExitStack,
+    asynccontextmanager,
+    suppress,
+)
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Generic, Literal, TypeVar, cast, overload
@@ -46,6 +51,7 @@ from mcp.client.session import (
     ElicitationFnT,
     MessageHandlerFnT,
 )
+from mcp.client.subscriptions import Subscription, listen
 from mcp_types.methods import validate_server_result
 from mcp_types.version import HANDSHAKE_PROTOCOL_VERSIONS, MODERN_PROTOCOL_VERSIONS
 from pydantic import AnyUrl, ValidationError
@@ -1370,6 +1376,35 @@ class Client(
         """Send a ping request."""
         result = await self._await_with_session_monitoring(self.session.send_ping())
         return isinstance(result, mcp_types.EmptyResult)
+
+    def listen(
+        self,
+        *,
+        tools_list_changed: bool = False,
+        prompts_list_changed: bool = False,
+        resources_list_changed: bool = False,
+        resource_subscriptions: Sequence[str] = (),
+    ) -> AbstractAsyncContextManager[Subscription]:
+        """Open a `subscriptions/listen` stream of change events.
+
+        MCP 2026-07-28 connections only: they have no standing server->client
+        channel, so change events arrive on a stream the client opens. Raises
+        `ListenNotSupportedError` on a handshake connection, where
+        `message_handler` receives the same notifications instead.
+
+        ```python
+        async with client.listen(tools_list_changed=True) as subscription:
+            async for event in subscription:
+                tools = await client.list_tools()
+        ```
+        """
+        return listen(
+            self.session,
+            tools_list_changed=tools_list_changed,
+            prompts_list_changed=prompts_list_changed,
+            resources_list_changed=resources_list_changed,
+            resource_subscriptions=resource_subscriptions,
+        )
 
     async def cancel(
         self,
