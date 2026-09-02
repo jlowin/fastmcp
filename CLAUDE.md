@@ -85,6 +85,8 @@ When modifying MCP functionality, changes typically need to be applied across al
 
 ### Releases
 
+The executable procedure lives in `.claude/skills/release/SKILL.md`; load that skill to cut one. The policy below is the contract it implements.
+
 Only cut releases when the maintainer explicitly asks. Tags follow `v<version>` (e.g., `v3.2.0`). Always pass `--generate-notes` so the auto-generated changelog appears at the bottom.
 
 **The title pun is critical.** Titles follow `v<version>: <pun>` where the pun relates to the most important theme of the release. Propose multiple options and let the maintainer choose — never pick one yourself. Look at recent releases for tone (e.g., "Code to Joy" for the code mode release, "Three at Last" for 3.0).
