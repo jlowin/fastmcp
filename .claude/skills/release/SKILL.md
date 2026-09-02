@@ -5,8 +5,10 @@ description: Cut a FastMCP release end to end. Use when the maintainer says "cut
 
 # Cutting a release
 
-A release is a tag on the branch that owns the line (`main` for the current major,
-`release/3.x` for 3.x maintenance). The tag triggers `Publish fastmcp-slim to PyPI`;
+A release is a tag on the branch that owns the line: `<branch>` below is `main` for
+the current major and `release/3.x` for 3.x maintenance. Every step runs against that
+branch, including the docs PR, so a maintenance entry lands in the maintenance
+branch's own changelog above its newest 3.x entry. The tag triggers `Publish fastmcp-slim to PyPI`;
 its success fans out to `fastmcp-tasks`, `fastmcp-remote`, and `fastmcp`, and the
 `fastmcp` publish job opens the `published-docs` PR that makes gofastmcp.com reflect
 the release. Two hand-maintained docs files mirror every release and must be on the
@@ -18,9 +20,9 @@ one gets a follow-up patch, never a re-tag.
 1. **Preview what's in it.**
 
    ```bash
-   git fetch origin && git log v<prev>..origin/main --format='%h %s'
+   git fetch origin && git log v<prev>..origin/<branch> --format='%h %s'
    gh api -X POST repos/PrefectHQ/fastmcp/releases/generate-notes \
-     -f tag_name=v<new> -f target_commitish=main -f previous_tag_name=v<prev> --jq .body
+     -f tag_name=v<new> -f target_commitish=<branch> -f previous_tag_name=v<prev> --jq .body
    ```
 
    Read the two most recent releases for voice: `gh release list -L 5`, then
@@ -34,11 +36,11 @@ one gets a follow-up patch, never a re-tag.
 3. **Write the notes file** outside the repository (a temp directory), intro only.
    The release title is the heading, so the file has none.
 
-4. **Docs entries.** Branch `docs/changelog-<new>` from `origin/main` and insert
-   both blocks:
+4. **Docs entries.** Branch `docs/changelog-<new>` from `origin/<branch>` and insert
+   both blocks (the last argument is the branch the notes are generated against):
 
    ```bash
-   uv run .claude/skills/release/scripts/changelog_entry.py v<new> v<prev> "<pun>" /tmp/notes.md
+   uv run .claude/skills/release/scripts/changelog_entry.py v<new> v<prev> "<pun>" /tmp/notes.md <branch>
    ```
 
    Validate, and repeat until it reports no errors; a parse error names the file
@@ -49,23 +51,22 @@ one gets a follow-up patch, never a re-tag.
    ```
 
    (`@latest` on purpose: the hosted Mintlify build is always current.) Commit,
-   push, open the PR titled `docs: add v<new> changelog entries` with a one-line
-   body, and merge it. Branch policy needs `--admin` on a maintainer-driven release.
+   push, open the PR titled `docs: add v<new> changelog entries` with base
+   `<branch>` and a one-line body, and merge it. Branch policy needs `--admin` on a maintainer-driven release.
    The docs PR itself appears in the GitHub notes but not in the mirror; that is
    expected.
 
 5. **Tag**, immediately after the docs PR merges. Re-run the step 1 preview first;
-   if `main` moved, delete the entry blocks from both docs files, re-run the
+   if `<branch>` moved, delete the entry blocks from both docs files, re-run the
    helper (it refuses to insert a label that already exists), and land that as a
    follow-up docs PR before tagging.
 
    ```bash
-   gh release create v<new> --target main --title "v<new>: <pun>" \
+   gh release create v<new> --target <branch> --title "v<new>: <pun>" \
      --generate-notes --notes-start-tag v<prev> --notes-file /tmp/notes.md
    ```
 
-   Maintenance lines use `--target release/3.x` and the branch's own last tag.
-   The compare link at the bottom of the created release must read `v<prev>...v<new>`.
+   `v<prev>` is the last stable tag on that branch. The compare link at the bottom of the created release must read `v<prev>...v<new>`.
 
 6. **Watch the fan-out.** The slim run is keyed to the tag; the others are
    `workflow_run` events on the default branch, so select them by workflow name.
@@ -81,7 +82,8 @@ one gets a follow-up patch, never a re-tag.
    Confirm each package with `curl -fsS https://pypi.org/pypi/<pkg>/<new>/json | jq .info.version`;
    the unversioned endpoint lags a few minutes.
 
-7. **Publish docs.** When the `fastmcp` run finishes, its last job has opened
+7. **Publish docs** (`main` releases only; maintenance releases skip this step and
+   leave gofastmcp.com on the current major). When the `fastmcp` run finishes, its last job has opened
    `Publish FastMCP v<new> docs` against `published-docs`:
 
    ```bash

@@ -79,7 +79,8 @@ def escape_mdx(text: str) -> str:
         parts = line.split("`")
         for i in range(0, len(parts), 2):
             parts[i] = re.sub(r"(<\d[^\s`]*)", r"`\1`", parts[i])
-            parts[i] = re.sub(r"(\{[^}]*\})", r"`\1`", parts[i])
+            parts[i] = re.sub(r"(\{[^{}]*\})", r"`\1`", parts[i])
+            parts[i] = re.sub(r"(?<!`)([{}])(?!`)", r"`\1`", parts[i])
         return "`".join(parts)
 
     return "\n".join(fix(line) for line in text.splitlines())
