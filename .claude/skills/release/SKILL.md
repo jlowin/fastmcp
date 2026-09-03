@@ -95,16 +95,18 @@ one gets a follow-up patch, never a re-tag.
    gh pr merge <n> --merge --admin
    ```
 
-   Then read Mintlify's verdict on the new tip. The check-run is the only signal
-   that a deploy happened; the merge alone proves nothing. It starts within a
-   minute of the merge and `conclusion` is `null` until it finishes:
+   Merging pushes `published-docs`, which runs the `Deploy docs` workflow: it asks
+   Mintlify's admin API for a deployment of the tip and waits for the verdict.
+   That run is the signal that the site changed; the merge alone proves nothing.
 
    ```bash
-   git fetch origin published-docs
-   sha=$(git rev-parse origin/published-docs)
-   gh api repos/PrefectHQ/fastmcp/commits/$sha/check-runs \
-     --jq '.check_runs[] | select(.name=="Mintlify Deployment") | .conclusion, .output.text'
+   gh run watch $(gh run list --workflow "Deploy docs" --branch published-docs --limit 1 --json databaseId --jq '.[0].databaseId') --exit-status
    ```
+
+   A red run prints Mintlify's summary and logs; fix the cause on `main` and
+   publish again. If Mintlify's queue is backed up (status.mintlify.com), the run
+   waits up to 40 minutes; re-run it with
+   `gh workflow run deploy-docs.yml --ref published-docs` once their incident clears.
 
    Verify through the markdown endpoints, which bypass the HTML edge cache:
    `curl -fsS https://gofastmcp.com/changelog.md | grep -c "<pun>"`, and the same
@@ -125,7 +127,7 @@ gh pr create --base published-docs --title "docs: publish main to published-docs
 gh pr merge <n> --merge --admin
 ```
 
-Then repeat the check-run and endpoint verification from step 7.
+Then watch the `Deploy docs` run and verify the endpoints as in step 7.
 
 ## Template: notes file for a patch
 
@@ -137,17 +139,13 @@ connections instead of raising.
 
 ## Gotchas
 
-- Mintlify keeps its per-file hashes even when a deploy fails on a parse error, so
-  the next successful deploy only rebuilds files changed since the failure. After
-  fixing a parse error, make a small wording edit to every path the failed run
-  listed under "Updating targeted paths", merge that to `main`, and publish by hand.
 - `--generate-notes` copies PR titles verbatim; a title containing `<1`, `{`, or `}`
   breaks MDX. `scripts/changelog_entry.py` wraps those in backticks; the validator
   in step 4 catches anything it misses.
-- No Mintlify check-run on the new `published-docs` tip within a few minutes means
-  Mintlify never picked the merge up, and there is no CLI trigger. Read
-  https://status.mintlify.com first; their deploy queue backs up during incidents
-  and the merge deploys on its own once it drains.
+- Mintlify's GitHub App also deploys on its own, but it only rebuilds files
+  changed since the last commit it recorded, and it records commits it failed on
+  or skipped. Only the `Deploy docs` run's verdict counts; its API-triggered
+  deployment is what brings a page a skipped deploy left stale back in line.
 - Without `--notes-start-tag`, a prerelease tag becomes the changelog start and the
   PR list is silently truncated.
 - Maintenance releases publish packages and notes but never repoint `published-docs`;
