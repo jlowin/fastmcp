@@ -137,10 +137,12 @@ connections instead of raising.
 
 ## Gotchas
 
-- Mintlify keeps its per-file hashes even when a deploy fails on a parse error, so
-  the next successful deploy only rebuilds files changed since the failure. After
-  fixing a parse error, make a small wording edit to every path the failed run
-  listed under "Updating targeted paths", merge that to `main`, and publish by hand.
+- Mintlify only rebuilds files changed since the last merge it processed, and a
+  merge it skipped (a failed parse, or no check-run at all during an incident)
+  still counts as processed. Files changed only in a skipped merge stay stale until
+  their content changes again. Compare the files the skipped merge touched against
+  the successful run's "Updating targeted paths" list, make a small wording edit
+  to each missing one, merge that to `main`, and publish by hand.
 - `--generate-notes` copies PR titles verbatim; a title containing `<1`, `{`, or `}`
   breaks MDX. `scripts/changelog_entry.py` wraps those in backticks; the validator
   in step 4 catches anything it misses.
