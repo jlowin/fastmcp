@@ -51,6 +51,23 @@ def _contains_prefab_type(tp: Any) -> bool:
     return False
 
 
+def _is_unconstrained_sequence(tp: Any) -> bool:
+    """A `list`/`tuple` that says nothing about its items.
+
+    Bare `list`, bare `tuple`, `list[Any]`, `tuple[Any, ...]`. The schema these
+    produce -- ``{"result": {"items": {}, "type": "array"}}`` -- constrains
+    nothing, which is why `Any` itself is already excluded from inference. These
+    are its sequence-shaped equivalent.
+    """
+    tp = _unwrap_type_alias(tp)
+    if tp in (list, tuple):
+        return True
+    if get_origin(tp) not in (list, tuple):
+        return False
+    args = [a for a in get_args(tp) if a is not Ellipsis]
+    return bool(args) and all(a is Any for a in args)
+
+
 def _unwrap_type_alias(tp: Any) -> Any:
     """Resolve a PEP 695 ``type X = ...`` alias to its underlying value.
 
@@ -401,6 +418,19 @@ class ParsedFunction:
             # `run()`'s subclass-aware control handling and covering every alias
             # shape that exact-match replace_type below would miss.
             if _contains_input_required(output_type):
+                output_type = _UnserializableType
+
+            # A bare `list`/`tuple` carries no item type, so `replace_type`
+            # below has nothing to match and the content types it exists to
+            # suppress slip through. The schema that results constrains
+            # nothing, and inferring it is not free: an output schema forces
+            # structured content, so a tool returning `[ImageContent, {...}]`
+            # under a `-> list` annotation sends the base64 image BOTH as an
+            # image block and again inside `structuredContent`. Clients
+            # mishandle that in both directions -- some render the JSON blob
+            # instead of the picture, others inject the base64 into model
+            # context and blow their tool-output token cap.
+            if _is_unconstrained_sequence(output_type):
                 output_type = _UnserializableType
 
             # there are a variety of types that we don't want to attempt to
