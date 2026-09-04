@@ -1,4 +1,6 @@
 import json
+import typing
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Annotated, Any
 
@@ -645,7 +647,22 @@ class TestUnconstrainedSequenceReturns:
     picture and others injecting the base64 into model context.
     """
 
-    @pytest.mark.parametrize("annotation", [list, tuple, list[Any], "bare"])
+    @pytest.mark.parametrize(
+        "annotation",
+        [
+            list,
+            tuple,
+            Sequence,
+            list,
+            tuple,
+            typing.Sequence,
+            list[Any],
+            Sequence[Any],
+            tuple[Any, ...],
+            Annotated[list, "meta"],
+            "bare",
+        ],
+    )
     def test_no_schema_is_inferred(self, annotation):
         if annotation == "bare":
 
@@ -658,7 +675,18 @@ class TestUnconstrainedSequenceReturns:
 
         assert Tool.from_function(func).output_schema is None
 
-    @pytest.mark.parametrize("annotation", [list[int], dict, str, tuple[int, str]])
+    @pytest.mark.parametrize(
+        "annotation",
+        [
+            list[int],
+            dict,
+            str,
+            tuple[int, str],
+            tuple[Any],
+            tuple[Any, Any],
+            Sequence[str],
+        ],
+    )
     def test_a_constrained_sequence_still_infers(self, annotation):
         """The guard must not swallow annotations that do say something."""
 

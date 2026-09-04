@@ -5,7 +5,7 @@ from __future__ import annotations
 import functools
 import inspect
 import types
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Annotated, Any, Generic, Union, get_args, get_origin, get_type_hints
 
@@ -41,6 +41,9 @@ def _contains_bytes_type(tp: Any) -> bool:
     return False
 
 
+_UNCONSTRAINED_SEQUENCE_ORIGINS = (list, tuple, Sequence)
+
+
 def _contains_prefab_type(tp: Any) -> bool:
     """Check if *tp* is or contains a prefab type, recursing through unions and Annotated."""
     if is_prefab_type(tp):
@@ -52,20 +55,28 @@ def _contains_prefab_type(tp: Any) -> bool:
 
 
 def _is_unconstrained_sequence(tp: Any) -> bool:
-    """A `list`/`tuple` that says nothing about its items.
+    """A sequence annotation that says nothing about its items.
 
-    Bare `list`, bare `tuple`, `list[Any]`, `tuple[Any, ...]`. The schema these
-    produce -- ``{"result": {"items": {}, "type": "array"}}`` -- constrains
-    nothing, which is why `Any` itself is already excluded from inference. These
-    are its sequence-shaped equivalent.
+    Bare `list`, `tuple`, `Sequence` (and their `typing` spellings), plus
+    `list[Any]`, `Sequence[Any]` and the variadic `tuple[Any, ...]`. The schema
+    these produce -- ``{"result": {"items": {}, "type": "array"}}`` -- constrains
+    nothing, which is why `Any` itself is already excluded from inference. A
+    fixed-length `tuple[Any, Any]` still pins its length, so it keeps its schema.
     """
     tp = _unwrap_type_alias(tp)
-    if tp in (list, tuple):
+    if get_origin(tp) is Annotated:
+        tp = get_args(tp)[0]
+    if tp in _UNCONSTRAINED_SEQUENCE_ORIGINS:
         return True
-    if get_origin(tp) not in (list, tuple):
+    origin = get_origin(tp)
+    if origin not in _UNCONSTRAINED_SEQUENCE_ORIGINS:
         return False
-    args = [a for a in get_args(tp) if a is not Ellipsis]
-    return bool(args) and all(a is Any for a in args)
+    args = get_args(tp)
+    if not args:
+        return True
+    if origin is tuple:
+        return len(args) == 2 and args[0] is Any and args[1] is Ellipsis
+    return all(a is Any for a in args)
 
 
 def _unwrap_type_alias(tp: Any) -> Any:
