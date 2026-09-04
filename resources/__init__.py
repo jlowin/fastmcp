@@ -1,0 +1,1 @@
+"""Lightspeed MCP resource registrations."""

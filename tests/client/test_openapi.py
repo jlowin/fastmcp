@@ -201,3 +201,39 @@ async def test_client_headers_proxy(proxy_server: str):
         assert isinstance(result[0], TextResourceContents)
         headers = json.loads(result[0].text)
         assert headers["x-server-header"] == "test-abc"
+
+
+@pytest.mark.timeout(30)
+async def test_fastapi_conversion_preserves_tools_and_excludes_routes():
+    """FastAPI conversion works in-process with explicit OpenAPI route policy."""
+    app = FastAPI()
+
+    @app.get("/widgets/{widget_id}", operation_id="get_widget")
+    async def get_widget(widget_id: int) -> dict[str, int]:
+        return {"id": widget_id}
+
+    @app.delete("/widgets/{widget_id}", operation_id="delete_widget")
+    async def delete_widget(widget_id: int) -> dict[str, int]:
+        return {"deleted": widget_id}
+
+    @app.get("/admin/stats", operation_id="admin_stats")
+    async def admin_stats() -> dict[str, bool]:
+        return {"secret": True}
+
+    mcp = FastMCP.from_fastapi(
+        app=app,
+        route_maps=[
+            RouteMap(methods=["DELETE"], mcp_type=MCPType.EXCLUDE),
+            RouteMap(pattern=r"^/admin(?:/|$)", mcp_type=MCPType.EXCLUDE),
+        ],
+    )
+
+    async with Client(mcp) as client:
+        tools = await client.list_tools()
+        result = await client.call_tool("get_widget", {"widget_id": 7})
+
+    names = {tool.name for tool in tools}
+    assert "get_widget" in names
+    assert "delete_widget" not in names
+    assert "admin_stats" not in names
+    assert result.data == {"id": 7}
