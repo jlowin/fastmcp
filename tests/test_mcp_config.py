@@ -199,10 +199,15 @@ def _make_protocol_era_server(name: str, starts: list[str] | None = None) -> Fas
 
 async def test_multi_server_auto_negotiates_modern_end_to_end():
     """Modern backends keep the default multi-server client modern end to end."""
+    starts: list[str] = []
     config = MCPConfig(
         mcpServers={
-            "alpha": InMemoryStdioMCPServer(mcp=_make_protocol_era_server("alpha")),
-            "beta": InMemoryStdioMCPServer(mcp=_make_protocol_era_server("beta")),
+            "alpha": InMemoryStdioMCPServer(
+                mcp=_make_protocol_era_server("alpha", starts)
+            ),
+            "beta": InMemoryStdioMCPServer(
+                mcp=_make_protocol_era_server("beta", starts)
+            ),
         }
     )
 
@@ -224,6 +229,8 @@ async def test_multi_server_auto_negotiates_modern_end_to_end():
     assert alpha_era.data == "2026-07-28"
     assert beta_era.data == "2026-07-28"
     assert result.data == 5
+
+    assert starts == ["alpha", "beta"]
 
 
 async def test_multi_server_auto_falls_back_all_legs_when_one_backend_is_legacy():
@@ -249,6 +256,32 @@ async def test_multi_server_auto_falls_back_all_legs_when_one_backend_is_legacy(
     assert legacy_era.data not in MODERN_PROTOCOL_VERSIONS
     assert starts.count("modern") == 1
     assert starts.count("legacy") == 1
+
+
+async def test_legacy_first_connection_preserves_declared_mount_precedence():
+    starts: list[str] = []
+    modern = _make_protocol_era_server("modern", starts)
+    legacy = _make_protocol_era_server("legacy", starts)
+
+    @modern.tool(name="identify")
+    def identify_modern() -> str:
+        return "modern"
+
+    @legacy.tool(name="identify")
+    def identify_legacy() -> str:
+        return "legacy"
+
+    config = MCPConfig(
+        mcpServers={
+            "modern": InMemoryStdioMCPServer(mcp=modern),
+            "legacy": LegacyInMemoryStdioMCPServer(mcp=legacy),
+        }
+    )
+    async with Client(MCPConfigTransport(config, name_as_prefix=False)) as client:
+        result = await client.call_tool("identify")
+        assert result.data == "modern"
+
+    assert starts == ["legacy", "modern"]
 
 
 async def test_failed_known_legacy_backend_does_not_downgrade_healthy_backends():
