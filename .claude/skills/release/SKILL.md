@@ -29,8 +29,9 @@ one gets a follow-up patch, never a re-tag.
    `gh release view <tag>` on each.
 
 2. **Propose titles.** Titles are `v<version>: <pun>`, pun on the release's main
-   theme. Read the whole title history first, `gh release list -L 60`, so the
-   options stay on brand: two to four words, a familiar phrase bent toward the
+   theme from the release preview. Check prior titles with
+   `gh release list --repo PrefectHQ/fastmcp --limit 60` to avoid repeats and keep
+   the options on brand: two to four words, a familiar phrase bent toward the
    theme ("Cache Me If You Can", "Trust, but Proxy", "Come Back Any Time"),
    and a running family for a major's prereleases ("Fourst Contact", "Group
    Effourt"). Offer several; the maintainer picks. Draft the handwritten notes at the
