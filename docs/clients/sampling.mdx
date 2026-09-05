@@ -18,6 +18,7 @@ The handler receives the conversation the server wants completed, the parameters
 ## Handler Template
 
 ```python
+from pathlib import Path
 from fastmcp import Client
 from fastmcp.client.sampling import SamplingMessage, SamplingParams, RequestContext
 from mcp.types import TextContent
@@ -40,7 +41,7 @@ async def sampling_handler(
     return "Generated response based on the messages"
 
 
-client = Client("my_mcp_server.py", sampling_handler=sampling_handler)
+client = Client(Path("my_mcp_server.py"), sampling_handler=sampling_handler)
 ```
 
 The client answers with this handler however the server asks for a completion. The default `mode="auto"` negotiates whichever protocol era the server speaks, and one handler covers both of the routes an era can use — see [Request Routes](#request-routes).
