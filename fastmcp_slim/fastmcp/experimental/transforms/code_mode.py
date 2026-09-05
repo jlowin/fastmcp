@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Annotated, Any, Literal, Protocol
 if TYPE_CHECKING:
     from pydantic_monty import ResourceLimits
 
+import anyio
 from mcp_types import TextContent
 from pydantic import Field
 
@@ -155,10 +156,32 @@ class MontySandboxProvider:
                 "Install it with `fastmcp[code-mode]` or pass a custom SandboxProvider."
             ) from exc
 
+        # Monty currently leaves Python callbacks running when a sandbox exits:
+        # https://github.com/pydantic/monty/issues/821
+        # Keep their tasks alive and join them before leaving this execution.
+        pending: set[asyncio.Task[Any]] = set()
+        finished = False
+
+        def track(fn: Callable[..., Any]) -> Callable[..., Any]:
+            async_fn = _ensure_async(fn)
+
+            async def wrapped(*args: Any, **kwargs: Any) -> Any:
+                # A callback queued by the native bridge may start after exit.
+                if finished:
+                    raise asyncio.CancelledError
+                task = asyncio.current_task()
+                assert task is not None
+                pending.add(task)
+                try:
+                    return await async_fn(*args, **kwargs)
+                finally:
+                    pending.discard(task)
+
+            return wrapped
+
         inputs = inputs or {}
         async_functions = {
-            key: _ensure_async(value)
-            for key, value in (external_functions or {}).items()
+            key: track(value) for key, value in (external_functions or {}).items()
         }
 
         monty = pydantic_monty.Monty(code, inputs=list(inputs))
@@ -178,6 +201,14 @@ class MontySandboxProvider:
             # thread down instead of leaving it running to completion.
             future.cancel()
             raise
+        finally:
+            finished = True
+            tasks = tuple(pending)
+            for task in tasks:
+                task.cancel()
+            # Preserve async finally blocks even under AnyIO request cancellation.
+            with anyio.CancelScope(shield=True):
+                await asyncio.gather(*tasks, return_exceptions=True)
 
     def _run_monty(
         self,
