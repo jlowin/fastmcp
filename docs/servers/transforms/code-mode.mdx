@@ -46,6 +46,36 @@ def multiply(x: int, y: int) -> int:
 
 Clients connecting to this server no longer see `add` and `multiply` directly. Instead, they see the meta-tools that CodeMode provides — tools for discovering what's available and executing code against it. The original tools are still there, but they're accessed through the CodeMode layer.
 
+## Keeping Tools Direct
+
+Some tools are better called once with their native schema, such as a skill loader whose parameter lists the available skills. Use `direct_tool_names` to keep those tools alongside the discovery and execute tools:
+
+```python
+from typing import Literal
+
+from fastmcp import FastMCP
+from fastmcp.experimental.transforms.code_mode import CodeMode
+
+mcp = FastMCP(
+    "Server",
+    transforms=[CodeMode(direct_tool_names={"load_skill"})],
+)
+
+@mcp.tool
+def load_skill(skill: Literal["research", "review"]) -> str:
+    """Load instructions for a skill."""
+    return f"Instructions for {skill}"
+
+@mcp.tool
+def add(x: int, y: int) -> int:
+    """Add two numbers."""
+    return x + y
+```
+
+Clients see `load_skill` with its original enum schema, plus `search`, `get_schema`, and `execute`. The discovery tools expose `add`; they exclude `load_skill`, which must be called directly and cannot be invoked through the sandbox's `call_tool`. Custom discovery factories receive the same filtered catalog.
+
+Names match at CodeMode's position in the transform pipeline. If a `Namespace("api")` transform runs before CodeMode, select `"api_load_skill"`; if it runs after, select `"load_skill"`. Direct tools retain their original metadata, authorization checks, and version selection, including fallback when the newest version is disabled. Unknown names have no effect. A name that collides with a discovery or execute tool raises `ValueError`; rename the synthetic tool or change the direct selection to resolve it.
+
 ## Discovery
 
 Before the LLM can write code that calls your tools, it needs to know what tools exist and how to call them. This is the **discovery** process — the LLM uses meta-tools to learn about your tool catalog, then writes code against what it finds.

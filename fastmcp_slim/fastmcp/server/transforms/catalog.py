@@ -20,6 +20,8 @@ short-circuit a method after ``super()`` returns.
 Solution: ``CatalogTransform`` owns ``list_tools()`` and uses a
 per-instance ``ContextVar`` to detect re-entrant calls.  During bypass,
 it passes through to the base ``Transform.list_tools()`` (a no-op).
+For tools, the bypass also applies ``filter_tool_catalog()`` so a subclass
+can exclude tools at its own position in the transform pipeline.
 Otherwise, it delegates to ``transform_tools()`` — the subclass hook
 where replacement logic lives.  Same pattern for resources, prompts,
 and resource templates.
@@ -89,7 +91,7 @@ class CatalogTransform(Transform):
 
     async def list_tools(self, tools: Sequence[Tool]) -> Sequence[Tool]:
         if self._bypass.get():
-            return await super().list_tools(tools)
+            return await self.filter_tool_catalog(await super().list_tools(tools))
         return await self.transform_tools(tools)
 
     async def list_resources(self, resources: Sequence[Resource]) -> Sequence[Resource]:
@@ -112,6 +114,15 @@ class CatalogTransform(Transform):
     # ------------------------------------------------------------------
     # Subclass hooks (override these, not list_*)
     # ------------------------------------------------------------------
+
+    async def filter_tool_catalog(self, tools: Sequence[Tool]) -> Sequence[Tool]:
+        """Filter real tools while `get_tool_catalog` bypasses replacement.
+
+        Runs at this transform's position in the pipeline, before later
+        transforms can rename tools. The default keeps all tools. Server
+        visibility and authorization checks still apply after this hook.
+        """
+        return tools
 
     async def transform_tools(self, tools: Sequence[Tool]) -> Sequence[Tool]:
         """Transform the tool catalog.

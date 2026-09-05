@@ -536,6 +536,11 @@ class CodeMode(CatalogTransform):
 
     The ``execute`` tool is always present and provides a sandboxed Python
     environment with ``call_tool(name, params)`` in scope.
+
+    `direct_tool_names` keeps selected tools in the native tool listing,
+    excluding them from discovery and sandbox calls. Names are matched at
+    this transform's position in the pipeline. All versions are preserved
+    for the server's normal visibility and version selection.
     """
 
     def __init__(
@@ -543,12 +548,14 @@ class CodeMode(CatalogTransform):
         *,
         sandbox_provider: SandboxProvider | None = None,
         discovery_tools: list[DiscoveryToolFactory] | None = None,
+        direct_tool_names: set[str] | None = None,
         execute_tool_name: str = "execute",
         execute_description: str | None = None,
         max_tool_calls: int | None = 50,
     ) -> None:
         super().__init__()
         self.execute_tool_name = execute_tool_name
+        self._direct_tool_names = set(direct_tool_names or ())
         self.execute_description = execute_description
         self.max_tool_calls = max_tool_calls
         self.sandbox_provider = sandbox_provider or MontySandboxProvider()
@@ -574,11 +581,22 @@ class CodeMode(CatalogTransform):
                 )
             if len(names) != len(tools):
                 raise ValueError("Discovery tools must have unique names.")
+            collisions = self._direct_tool_names & (names | {self.execute_tool_name})
+            if collisions:
+                raise ValueError(
+                    "Direct tool names collide with CodeMode tools: "
+                    + ", ".join(sorted(collisions))
+                )
             self._built_discovery_tools = tools
         return self._built_discovery_tools
 
     async def transform_tools(self, tools: Sequence[Tool]) -> Sequence[Tool]:
-        return [*self._build_discovery_tools(), self._get_execute_tool()]
+        direct = [tool for tool in tools if tool.name in self._direct_tool_names]
+        return [*self._build_discovery_tools(), self._get_execute_tool(), *direct]
+
+    async def filter_tool_catalog(self, tools: Sequence[Tool]) -> Sequence[Tool]:
+        """Exclude direct tools before later transforms can rename them."""
+        return [tool for tool in tools if tool.name not in self._direct_tool_names]
 
     async def get_tool(
         self,
