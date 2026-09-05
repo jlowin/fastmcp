@@ -1,3 +1,4 @@
+import json
 from unittest.mock import AsyncMock
 
 import pytest
@@ -79,9 +80,9 @@ async def test_native_effect_discovery_and_lifespan(bridge):
             "bridge" not in tool.input_schema.get("properties", {}) for tool in tools
         )
         lights = (await client.call_tool("hue_read_lights")).data
-        assert lights["1"]["supported_effects"] == ["candle", "no_effect"]
-        assert lights["1"]["effects_v2"]["status"]["effect"] == "candle"
-        rooms = (await client.call_tool("hue_read_groups")).data
+        assert lights["1"].supported_effects == ["candle", "no_effect"]
+        assert lights["1"].state.effect == "candle"
+        rooms = (await client.call_tool("hue_read_rooms")).data
         assert rooms["r1"]["lights"] == ["1"]
         scenes = (await client.call_tool("hue_read_scenes")).data
         assert scenes["s1"]["actions"][0]["effects_v2"]["action"]["effect"] == "candle"
@@ -99,16 +100,16 @@ async def test_native_effect_discovery_and_lifespan(bridge):
 async def test_room_and_scene_routing(bridge):
     async with Client(hub_mcp) as client:
         await client.call_tool(
-            "hue_set_group", {"target": "living room", "state": {"brightness": 30}}
+            "hue_set_room", {"target": "living room", "state": {"brightness": 30}}
         )
         bridge.set_group.assert_awaited_once_with("g1", LightState(brightness=30))
         await client.call_tool(
-            "hue_activate_scene", {"group": "living room", "scene": "Candle"}
+            "hue_activate_scene", {"room": "living room", "scene": "Candle"}
         )
         bridge.recall_scene.assert_awaited_once_with("s1", action="active")
         result = await client.call_tool(
             "hue_activate_scene",
-            {"group": "living room", "scene": "s2"},
+            {"room": "living room", "scene": "s2"},
             raise_on_error=False,
         )
         assert result.is_error
@@ -135,3 +136,48 @@ async def test_sdk_failure_is_tool_error(bridge):
             raise_on_error=False,
         )
         assert result.is_error
+
+
+async def test_room_filtered_discovery_and_unknown_room(bridge):
+    async with Client(hub_mcp) as client:
+        lights = (
+            await client.call_tool("hue_read_lights", {"room": "living room"})
+        ).data
+        assert set(lights) == {"1"}
+        assert lights["1"].hue_details is None
+        assert lights["1"].state.temperature_kelvin is None
+        details = (
+            await client.call_tool("hue_read_lights", {"room": "r1", "details": True})
+        ).data
+        assert details["1"].hue_details["owner"]["rid"] == "d1"
+        scenes = (
+            await client.call_tool("hue_read_scenes", {"room": "living room"})
+        ).data
+        assert set(scenes) == {"s1"}
+        assert scenes["s1"]["room_id"] == "r1"
+        result = await client.call_tool(
+            "hue_read_lights", {"room": "missing"}, raise_on_error=False
+        )
+        assert result.is_error
+
+
+async def test_control_schema_and_receipt(bridge):
+    async with Client(hub_mcp) as client:
+        tools = {tool.name: tool for tool in await client.list_tools()}
+        room_schema = tools["hue_set_room"].input_schema
+        assert '"effect"' not in json.dumps(room_schema)
+        assert all(tool.annotations.open_world_hint for tool in tools.values())
+        result = await client.call_tool(
+            "hue_set_room",
+            {"target": "r1", "state": {"effect": "candle"}},
+            raise_on_error=False,
+        )
+        assert result.is_error
+        bridge.set_group.assert_not_awaited()
+        receipt = (
+            await client.call_tool(
+                "hue_set_light", {"target": "1", "state": {"on": True}}
+            )
+        ).data
+        assert receipt.status == "accepted"
+        assert receipt.state_verified is False
