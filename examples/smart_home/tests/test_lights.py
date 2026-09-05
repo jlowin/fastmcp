@@ -1,72 +1,120 @@
-import os
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
-from pydantic import ValidationError
+from phue import Bridge, HueAPIError, LightState
+from phue.models import Light, Room, Scene
+from smart_home.hub import hub_mcp
+from smart_home.lights import hue_utils
 
 from fastmcp import Client
-
-os.environ.setdefault("HUE_BRIDGE_IP", "test-bridge")
-os.environ.setdefault("HUE_BRIDGE_USERNAME", "test-user")
-
-from phue.exceptions import PhueException
-from smart_home.hub import hub_mcp
-from smart_home.lights import server
 
 
 @pytest.fixture
 def bridge(monkeypatch):
-    bridge = MagicMock()
-    bridge.get_light.return_value = {
-        "1": {
-            "name": "lamp",
-            "state": {"on": True, "bri": 127, "reachable": True},
-            "capabilities": {"control": {"ct": {"min": 153, "max": 500}}},
-        },
-        "2": {"name": "lamp", "state": {"on": False}},
-    }
-    bridge.get_group.return_value = {
-        "1": {"name": "office", "lights": ["1"]},
-        "2": {"name": "bedroom", "lights": ["2"]},
-    }
-    bridge.get_scene.return_value = {
-        "a": {"name": "Relax", "group": "1"},
-        "b": {"name": "Relax", "group": "2"},
-    }
-    bridge.set_light.return_value = [[{"success": {"/lights/1/state/on": True}}]]
-    bridge.set_group.return_value = [{"success": {"/groups/1/action/on": True}}]
-    monkeypatch.setattr(server, "get_bridge", lambda: bridge)
+    bridge = AsyncMock(spec=Bridge)
+    bridge.__aenter__.return_value = bridge
+    bridge.lights.return_value = [
+        Light(
+            id="1",
+            type="light",
+            metadata={"name": "lamp"},
+            owner={"rid": "d1", "rtype": "device"},
+            effects_v2={
+                "action": {"effect_values": ["candle", "no_effect"]},
+                "status": {"effect": "candle"},
+            },
+        ),
+        Light(
+            id="2",
+            type="light",
+            metadata={"name": "lamp"},
+            owner={"rid": "d2", "rtype": "device"},
+        ),
+    ]
+    bridge.rooms.return_value = [
+        Room(
+            id="r1",
+            type="room",
+            metadata={"name": "living room"},
+            children=[{"rid": "d1", "rtype": "device"}],
+            services=[{"rid": "g1", "rtype": "grouped_light"}],
+        ),
+        Room(
+            id="r2",
+            type="room",
+            metadata={"name": "bedroom"},
+            children=[{"rid": "d2", "rtype": "device"}],
+        ),
+    ]
+    bridge.scenes.return_value = [
+        Scene(
+            id="s1",
+            type="scene",
+            metadata={"name": "Candle"},
+            group={"rid": "r1", "rtype": "room"},
+            actions=[{"effects_v2": {"action": {"effect": "candle"}}}],
+        ),
+        Scene(
+            id="s2",
+            type="scene",
+            metadata={"name": "Candle"},
+            group={"rid": "r2", "rtype": "room"},
+        ),
+    ]
+    bridge.resources.return_value = []
+    bridge.set_light.return_value = []
+    bridge.set_group.return_value = []
+    bridge.recall_scene.return_value = []
+    monkeypatch.setenv("HUE_BRIDGE_IP", "test-bridge")
+    monkeypatch.setenv("HUE_BRIDGE_USERNAME", "test-user")
+    monkeypatch.setattr(hue_utils, "Bridge", lambda *a, **kw: bridge)
     return bridge
 
 
-@pytest.mark.asyncio
-async def test_discovery_and_changes_over_mcp(bridge):
+async def test_native_effect_discovery_and_lifespan(bridge):
     async with Client(hub_mcp) as client:
-        result = await client.call_tool("hue_read_lights")
-        assert result.data["1"]["state"]["reachable"] is True
-        assert result.data["1"]["capabilities"]["control"]["ct"]["min"] == 153
+        tools = await client.list_tools()
+        assert len(tools) == 6
+        assert all(
+            "bridge" not in tool.input_schema.get("properties", {}) for tool in tools
+        )
+        lights = (await client.call_tool("hue_read_lights")).data
+        assert lights["1"]["supported_effects"] == ["candle", "no_effect"]
+        assert lights["1"]["effects_v2"]["status"]["effect"] == "candle"
+        rooms = (await client.call_tool("hue_read_groups")).data
+        assert rooms["r1"]["lights"] == ["1"]
+        scenes = (await client.call_tool("hue_read_scenes")).data
+        assert scenes["s1"]["actions"][0]["effects_v2"]["action"]["effect"] == "candle"
         await client.call_tool(
             "hue_set_light",
-            {
-                "target": "1",
-                "state": {
-                    "on": True,
-                    "brightness": 50,
-                    "color_temperature": 2500,
-                    "transition": 1.5,
-                },
-            },
+            {"target": "1", "state": {"effect": "candle", "effect_speed": 0.5}},
         )
-        bridge.set_light.assert_called_once_with(
-            1, {"on": True, "bri": 127, "ct": 400, "transitiontime": 15}
+        bridge.set_light.assert_awaited_once_with(
+            "1", LightState(effect="candle", effect_speed=0.5)
         )
+        bridge.__aenter__.assert_awaited_once()
+    bridge.__aexit__.assert_awaited_once()
+
+
+async def test_room_and_scene_routing(bridge):
+    async with Client(hub_mcp) as client:
         await client.call_tool(
-            "hue_activate_scene", {"group": "office", "scene": "Relax"}
+            "hue_set_group", {"target": "living room", "state": {"brightness": 30}}
         )
-        bridge.set_group.assert_called_once_with(1, {"scene": "a"})
+        bridge.set_group.assert_awaited_once_with("g1", LightState(brightness=30))
+        await client.call_tool(
+            "hue_activate_scene", {"group": "living room", "scene": "Candle"}
+        )
+        bridge.recall_scene.assert_awaited_once_with("s1", action="active")
+        result = await client.call_tool(
+            "hue_activate_scene",
+            {"group": "living room", "scene": "s2"},
+            raise_on_error=False,
+        )
+        assert result.is_error
+        assert bridge.recall_scene.await_count == 1
 
 
-@pytest.mark.asyncio
 async def test_ambiguous_name_never_writes(bridge):
     async with Client(hub_mcp) as client:
         result = await client.call_tool(
@@ -75,24 +123,11 @@ async def test_ambiguous_name_never_writes(bridge):
             raise_on_error=False,
         )
         assert result.is_error
-        bridge.set_light.assert_not_called()
+        bridge.set_light.assert_not_awaited()
 
 
-@pytest.mark.asyncio
-async def test_wrong_room_scene_never_writes(bridge):
-    async with Client(hub_mcp) as client:
-        result = await client.call_tool(
-            "hue_activate_scene",
-            {"group": "office", "scene": "b"},
-            raise_on_error=False,
-        )
-        assert result.is_error
-        bridge.set_group.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_sdk_failure_is_mcp_error(bridge):
-    bridge.set_light.side_effect = PhueException(201, "light unavailable")
+async def test_sdk_failure_is_tool_error(bridge):
+    bridge.set_light.side_effect = HueAPIError([{"description": "unavailable"}], [])
     async with Client(hub_mcp) as client:
         result = await client.call_tool(
             "hue_set_light",
@@ -100,27 +135,3 @@ async def test_sdk_failure_is_mcp_error(bridge):
             raise_on_error=False,
         )
         assert result.is_error
-
-
-@pytest.mark.parametrize(
-    "state",
-    [
-        {},
-        {"transition": 1},
-        {"brightness": 101},
-        {"xy": [0.9, 0.9]},
-        {"xy": [0.2, 0.3], "color_temperature": 3000},
-        {"typo": True},
-    ],
-)
-def test_invalid_states_rejected(state):
-    with pytest.raises(ValidationError):
-        server.LightState.model_validate(state)
-
-
-def test_color_degrees_and_percent():
-    state = server.LightState(hue=120, saturation=50)
-    assert state.to_hue() == {"hue": 21845, "sat": 127}
-    assert server.LightState(hue=360).to_hue() == {"hue": 0}
-    with pytest.raises(ValidationError):
-        server.LightState(hue=120, xy=(0.2, 0.3))

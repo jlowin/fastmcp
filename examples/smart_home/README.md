@@ -1,10 +1,9 @@
 # smart home MCP
 
-Control Philips Hue lights through FastMCP. An agent can inspect light state and
-capabilities, discover rooms and scenes, change individual lights or whole rooms,
-and read back the result. This example uses the local Hue bridge API through
-[`phue2`](https://github.com/zzstoatzz/phue) 0.1. API failures raise exceptions,
-including partial-success responses; the example exposes failures as MCP tool errors.
+Control Philips Hue lights through FastMCP and the `phue2` 1.0 alpha's local Hue
+V2 API. An agent can discover real state and capabilities, inspect saved scenes,
+and activate native candle or fire effects. The bridge runs those effects;
+no agent polling loop is needed.
 
 ## Run
 
@@ -13,79 +12,69 @@ Create `.env` in this directory with your existing bridge credentials:
 ```dotenv
 HUE_BRIDGE_IP=<bridge IP>
 HUE_BRIDGE_USERNAME=<bridge application key>
+HUE_BRIDGE_CERTIFICATE=/absolute/path/to/trusted-bridge.pem
 ```
 
-Start the stdio server from this directory:
+HTTPS verification is enabled. The optional certificate file is an explicitly
+trusted certificate obtained and verified for your bridge; its identity replaces
+hostname matching when connecting by IP. Without it, normal system trust and
+hostname verification apply. Credentials remain local and are not saved by the SDK.
 
 ```bash
 uv run smart-home
 ```
 
-For an MCP client, configure `uv` with arguments `run --directory
-/absolute/path/to/examples/smart_home smart-home`. Credentials stay in the local
-environment; the server does not write a bridge configuration file.
+The server owns one pooled asynchronous bridge connection in its lifespan. Tools
+receive that existing connection through dependency injection. Settings load at
+startup, so importing the example does not require live credentials.
 
 ## Agent workflow
 
-Start with `hue_read_groups` and `hue_read_lights`. Discovery includes stable IDs,
-room membership, reachability, current state and the capabilities reported by each
-bulb. Names must match exactly and be unique; IDs avoid ambiguity. A room named
-“all” is just a name, so inspect its membership.
+Start with `hue_read_groups` and `hue_read_lights`. Rooms include member light UUIDs;
+lights include state, device connectivity and supported effects. Names must match
+exactly and be unique. V2 UUIDs replace the old numeric light and group IDs.
 
-To make one room warm and dim, call `hue_set_group` with its ID and a state:
+To turn on candle flicker, check each room member's `supported_effects` and call
+`hue_set_light` for each supported bulb:
 
 ```json
 {
-  "target": "1",
-  "state": {
-    "on": true,
-    "brightness": 20,
-    "color_temperature": 2700,
-    "transition": 2
-  }
+  "target": "<light UUID>",
+  "state": {"on": true, "effect": "candle", "effect_speed": 0.5}
 }
 ```
 
-Brightness is a percentage, temperature is kelvin and transitions are seconds.
-Omitted properties stay unchanged. Brightness and color do not implicitly turn a
-light on. Use hue degrees and saturation percent for a color-wheel setting, or `xy` for
-CIE color coordinates instead of a temperature. Choose one color mode; consult bulb
-capabilities before selecting a color. Discovery preserves Hue's native state
-units (`bri` from 0–254, `ct` in mireds).
+This preserves brightness. Read `effects_v2.status` afterward to verify the active
+effect; use `effect: "no_effect"` to stop it. Effect names and support come from the
+bulb, not a fixed list. Speed is between zero and one; color or temperature supplied
+with an active effect changes its parameters.
 
-A successful write acknowledges the command. After a transition, use
-`hue_read_lights` to verify actual state. Hue can partially apply a command before
-returning an error; an error does not imply that nothing changed.
+For ordinary room-wide lighting, use `hue_set_group` with brightness percent,
+`temperature_kelvin`, and optional `transition_seconds`. Color can instead use CIE
+`xy` coordinates. Native effects target individual bulbs. Brightness, color and
+effects do not implicitly turn lights on; include `on: true` when desired.
 
-Use `hue_read_scenes` and `hue_activate_scene` to recall saved scenes. Scene names
-are resolved within the specified room, so a “Relax” scene in another room cannot
-be selected accidentally.
+Use `hue_read_scenes` to inspect room associations, palettes and per-light actions.
+That distinguishes a scene with warm static colors from one with candle or fire
+effects. `hue_activate_scene` resolves names within the chosen room and recalls the
+saved actions. Its optional `dynamic_palette` action requests palette cycling where
+supported by Hue.
 
-This refresh replaces the old name-only discovery and individual attribute tools
-with three discovery tools and three control tools. Clients should rediscover the
-server's tools after updating.
+A write acknowledgement does not prove the resulting state. Read lights after a
+transition. Hue may partially apply a command before reporting an error; failures
+are exposed as MCP tool errors. This example does not implement scheduling,
+custom animation loops, or entertainment streaming.
 
-## Test
-
-The regression tests use a simulated bridge and exercise the actual MCP client:
+## Test with an agent
 
 ```bash
 uv run pytest
-```
-
-For a live agent check, give Pi only this MCP server and disable built-in tools.
-First ask it to inspect state without changing anything. For a write check, record
-the original state of one reachable light, change a single property, read it back,
-then restore and verify the original state. Keep the tool-call transcript to
-separate an agent's claim from an observed result.
-
-With Pi and `pi-mcp-adapter` installed, run the isolated harness from this directory:
-
-```bash
 uv run scripts/pi_harness.py --json
 ```
 
-It supplies exactly this server, disables Pi's built-in tools and other extensions,
-and defaults to a read-only prompt. Pass `--env-file /path/to/existing.env` if your
-credentials are elsewhere. Pass a quoted prompt to exercise a particular workflow;
-write requests operate real lights. `--json` records tool calls and results on stdout.
+The tests exercise actual MCP calls with a simulated bridge. The Pi harness
+requires Pi and `pi-mcp-adapter`, exposes only this MCP, disables built-in tools,
+and defaults to read-only discovery. Pass `--env-file /path/to/existing.env` if
+credentials live elsewhere; `HUE_BRIDGE_CERTIFICATE` can also be exported in the
+launching environment. A quoted prompt may request real changes to lights.
+`--json` records tool calls and results for verification.
