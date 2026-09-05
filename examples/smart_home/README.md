@@ -3,7 +3,8 @@
 Control Philips Hue lights through FastMCP. An agent can inspect light state and
 capabilities, discover rooms and scenes, change individual lights or whole rooms,
 and read back the result. This example uses the local Hue bridge API through
-[`phue2`](https://github.com/zzstoatzz/phue).
+[`phue2`](https://github.com/zzstoatzz/phue) 0.1. API failures raise exceptions,
+including partial-success responses; the example exposes failures as MCP tool errors.
 
 ## Run
 
