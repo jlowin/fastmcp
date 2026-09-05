@@ -172,6 +172,45 @@ class TestVersionFilter:
         tools = await mcp.list_tools()
         assert [tool.name for tool in tools] == ["included_versioned_tool"]
 
+    async def test_get_tool_excludes_unversioned_when_disabled(self):
+        """Regression (#4946): with include_unversioned=False, a direct
+        ``get_tool()`` lookup must exclude unversioned components, agreeing
+        with ``list_tools()``. Previously only the list operations honored the
+        exclusion; the direct lookup resolved through the provider layer where
+        ``VersionSpec.matches`` defaults to ``match_none=True``, so an excluded
+        unversioned component was still returned."""
+
+        mcp = FastMCP()
+
+        @mcp.tool
+        def hidden_tool() -> str:
+            return "hidden"
+
+        mcp.add_transform(VersionFilter(version_gte="1.0", include_unversioned=False))
+
+        # List operation excludes the unversioned tool.
+        assert [t.name for t in await mcp.list_tools()] == []
+        # Direct lookup must agree.
+        assert await mcp.get_tool("hidden_tool") is None
+
+    async def test_get_tool_keeps_in_range_versioned_when_disabled(self):
+        """Regression (#4946): with include_unversioned=False, a versioned
+        component that is within the filter range is still returned by a direct
+        lookup -- the guard only drops unversioned (version=None) components, so
+        legitimate versioned tools are never over-suppressed."""
+
+        mcp = FastMCP()
+
+        @mcp.tool(version="1.5")
+        def calc() -> int:
+            return 15
+
+        mcp.add_transform(VersionFilter(version_gte="1.0", include_unversioned=False))
+
+        got = await mcp.get_tool("calc")
+        assert got is not None
+        assert got.version == "1.5"
+
     async def test_date_versions(self):
         """Works with date-based versions like '2025-01-15'."""
         from fastmcp.server.transforms import VersionFilter

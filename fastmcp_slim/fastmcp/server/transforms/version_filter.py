@@ -73,6 +73,22 @@ class VersionFilter(Transform):
             parts.append("include_unversioned=False")
         return f"VersionFilter({', '.join(parts)})"
 
+    def _guard_unversioned(self, component):
+        """Drop a component if it is unversioned and this filter excludes them.
+
+        ``list_*`` operations filter components through
+        ``self._spec.matches(version, match_none=self.include_unversioned)``, so
+        unversioned components are removed from list results. Direct lookups,
+        however, resolve via the intersected version spec at the provider
+        layer, where ``VersionSpec.matches`` uses the default
+        ``match_none=True`` -- so an excluded unversioned component can still be
+        returned by a direct ``get_*``. Re-apply the ``include_unversioned``
+        intent here so direct lookups agree with list operations.
+        """
+        if component is not None and not self.include_unversioned and component.version is None:
+            return None
+        return component
+
     # -------------------------------------------------------------------------
     # Tools
     # -------------------------------------------------------------------------
@@ -87,7 +103,9 @@ class VersionFilter(Transform):
     async def get_tool(
         self, name: str, call_next: GetToolNext, *, version: VersionSpec | None = None
     ) -> Tool | None:
-        return await call_next(name, version=self._spec.intersect(version))
+        return self._guard_unversioned(
+            await call_next(name, version=self._spec.intersect(version))
+        )
 
     # -------------------------------------------------------------------------
     # Resources
@@ -107,7 +125,9 @@ class VersionFilter(Transform):
         *,
         version: VersionSpec | None = None,
     ) -> Resource | None:
-        return await call_next(uri, version=self._spec.intersect(version))
+        return self._guard_unversioned(
+            await call_next(uri, version=self._spec.intersect(version))
+        )
 
     # -------------------------------------------------------------------------
     # Resource Templates
@@ -129,7 +149,9 @@ class VersionFilter(Transform):
         *,
         version: VersionSpec | None = None,
     ) -> ResourceTemplate | None:
-        return await call_next(uri, version=self._spec.intersect(version))
+        return self._guard_unversioned(
+            await call_next(uri, version=self._spec.intersect(version))
+        )
 
     # -------------------------------------------------------------------------
     # Prompts
@@ -145,4 +167,6 @@ class VersionFilter(Transform):
     async def get_prompt(
         self, name: str, call_next: GetPromptNext, *, version: VersionSpec | None = None
     ) -> Prompt | None:
-        return await call_next(name, version=self._spec.intersect(version))
+        return self._guard_unversioned(
+            await call_next(name, version=self._spec.intersect(version))
+        )
