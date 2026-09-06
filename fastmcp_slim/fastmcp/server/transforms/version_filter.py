@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypeVar
 
 from fastmcp.server.transforms import (
     GetPromptNext,
@@ -19,6 +19,9 @@ if TYPE_CHECKING:
     from fastmcp.resources.base import Resource
     from fastmcp.resources.template import ResourceTemplate
     from fastmcp.tools.base import Tool
+    from fastmcp.utilities.components import FastMCPComponent
+
+_ComponentT = TypeVar("_ComponentT", bound="FastMCPComponent")
 
 
 class VersionFilter(Transform):
@@ -73,6 +76,25 @@ class VersionFilter(Transform):
             parts.append("include_unversioned=False")
         return f"VersionFilter({', '.join(parts)})"
 
+    def _apply_unversioned_exclusion(
+        self, component: _ComponentT | None
+    ) -> _ComponentT | None:
+        """Re-apply the ``include_unversioned`` check that ``list_*`` enforces.
+
+        The version *range* reaches ``call_next`` as a ``VersionSpec``, but a
+        spec carries no ``include_unversioned`` flag, so an unversioned
+        component (``version is None``) passes it unconditionally. Without this,
+        a direct lookup (``get_tool`` etc.) returns a component that
+        ``list_tools`` hides. See jlowin/fastmcp#4946.
+        """
+        if (
+            component is not None
+            and not self.include_unversioned
+            and component.version is None
+        ):
+            return None
+        return component
+
     # -------------------------------------------------------------------------
     # Tools
     # -------------------------------------------------------------------------
@@ -87,7 +109,9 @@ class VersionFilter(Transform):
     async def get_tool(
         self, name: str, call_next: GetToolNext, *, version: VersionSpec | None = None
     ) -> Tool | None:
-        return await call_next(name, version=self._spec.intersect(version))
+        return self._apply_unversioned_exclusion(
+            await call_next(name, version=self._spec.intersect(version))
+        )
 
     # -------------------------------------------------------------------------
     # Resources
@@ -107,7 +131,9 @@ class VersionFilter(Transform):
         *,
         version: VersionSpec | None = None,
     ) -> Resource | None:
-        return await call_next(uri, version=self._spec.intersect(version))
+        return self._apply_unversioned_exclusion(
+            await call_next(uri, version=self._spec.intersect(version))
+        )
 
     # -------------------------------------------------------------------------
     # Resource Templates
@@ -129,7 +155,9 @@ class VersionFilter(Transform):
         *,
         version: VersionSpec | None = None,
     ) -> ResourceTemplate | None:
-        return await call_next(uri, version=self._spec.intersect(version))
+        return self._apply_unversioned_exclusion(
+            await call_next(uri, version=self._spec.intersect(version))
+        )
 
     # -------------------------------------------------------------------------
     # Prompts
@@ -145,4 +173,6 @@ class VersionFilter(Transform):
     async def get_prompt(
         self, name: str, call_next: GetPromptNext, *, version: VersionSpec | None = None
     ) -> Prompt | None:
-        return await call_next(name, version=self._spec.intersect(version))
+        return self._apply_unversioned_exclusion(
+            await call_next(name, version=self._spec.intersect(version))
+        )

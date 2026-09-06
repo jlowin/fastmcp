@@ -172,6 +172,11 @@ class TestVersionFilter:
         tools = await mcp.list_tools()
         assert [tool.name for tool in tools] == ["included_versioned_tool"]
 
+        # Direct lookup must match list_tools (jlowin/fastmcp#4946)
+        assert await mcp.get_tool("unversioned_tool") is None
+        assert await mcp.get_tool("excluded_versioned_tool") is None
+        assert (await mcp.get_tool("included_versioned_tool")) is not None
+
     async def test_date_versions(self):
         """Works with date-based versions like '2025-01-15'."""
         from fastmcp.server.transforms import VersionFilter
@@ -266,6 +271,11 @@ class TestVersionFilter:
             "file:///included_versioned"
         ]
 
+        # Direct lookup must match list_resources (jlowin/fastmcp#4946)
+        assert await mcp.get_resource("file:///unversioned") is None
+        assert await mcp.get_resource("file:///excluded_versioned") is None
+        assert (await mcp.get_resource("file:///included_versioned")) is not None
+
     async def test_include_unversioned_false_excludes_unversioned_resource_templates(
         self,
     ):
@@ -290,6 +300,16 @@ class TestVersionFilter:
         assert [template.uri_template for template in templates] == [
             "resource://included_versioned/{name}"
         ]
+
+        # Direct lookup must match list_resource_templates (jlowin/fastmcp#4946)
+        assert await mcp.get_resource_template("resource://unversioned/{name}") is None
+        assert (
+            await mcp.get_resource_template("resource://excluded_versioned/{name}")
+            is None
+        )
+        assert (
+            await mcp.get_resource_template("resource://included_versioned/{name}")
+        ) is not None
 
     async def test_prompts_filtered(self):
         """Prompts are filtered by version."""
@@ -331,6 +351,11 @@ class TestVersionFilter:
 
         prompts = await mcp.list_prompts()
         assert [prompt.name for prompt in prompts] == ["included_versioned_prompt"]
+
+        # Direct lookup must match list_prompts (jlowin/fastmcp#4946)
+        assert await mcp.get_prompt("unversioned_prompt") is None
+        assert await mcp.get_prompt("excluded_versioned_prompt") is None
+        assert (await mcp.get_prompt("included_versioned_prompt")) is not None
 
     async def test_repr(self):
         """Test VersionFilter string representation."""
