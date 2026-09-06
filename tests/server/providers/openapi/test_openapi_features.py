@@ -13,6 +13,7 @@ from fastmcp.server.providers.openapi import OpenAPIProvider
 from fastmcp.server.providers.openapi.components import (
     _extract_mime_type_from_route,
     _redact_headers,
+    _slugify,
 )
 from fastmcp.server.providers.openapi.routing import MCPType, RouteMap
 from fastmcp.utilities.openapi.models import HTTPRoute, ResponseInfo
@@ -1412,3 +1413,48 @@ class TestMultipartUpload:
 
         assert "multipart/form-data" in received["content_type"]
         assert b"data" in received["body"]
+
+
+class TestSlugify:
+    """Tests for the _slugify helper used in tool name generation."""
+
+    def test_slash_becomes_underscore(self):
+        """A '/' in an operationId should produce '_', not be deleted."""
+        assert _slugify("foo/get-thing") == "foo_get_thing"
+
+    def test_github_style_operation_id(self):
+        """Tag-prefixed operationIds like 'actions/list-repos' should be handled."""
+        assert _slugify("actions/list-repos") == "actions_list_repos"
+
+    def test_slash_at_start_is_stripped(self):
+        """Leading slash should not produce a leading underscore."""
+        assert _slugify("/get-thing") == "get_thing"
+
+    def test_multiple_slashes(self):
+        """Multiple consecutive slashes collapse to a single underscore."""
+        assert _slugify("a//b") == "a_b"
+
+    def test_mixed_separators(self):
+        """Mix of slash, hyphen, dot, and space all convert to underscores."""
+        assert _slugify("tag/some.operation-name here") == "tag_some_operation_name_here"
+
+    async def test_slash_in_operation_id_generates_correct_tool_name(self):
+        """Integration: an operationId with '/' produces the correct tool name."""
+        spec = {
+            "openapi": "3.0.0",
+            "info": {"title": "t", "version": "1"},
+            "paths": {
+                "/foo": {
+                    "get": {
+                        "operationId": "foo/get-thing",
+                        "responses": {"200": {"description": "ok"}},
+                    }
+                }
+            },
+        }
+        async with httpx2.AsyncClient(base_url="https://example.com") as client:
+            server = create_openapi_server(spec, client)
+            async with Client(server) as mcp_client:
+                tools = await mcp_client.list_tools()
+                assert len(tools) == 1
+                assert tools[0].name == "foo_get_thing"
