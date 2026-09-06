@@ -109,7 +109,7 @@ from fastmcp.server.auth.oauth_proxy.models import (
     _hash_token,
 )
 from fastmcp.server.auth.oauth_proxy.ui import create_error_html
-from fastmcp.server.auth.oauth_proxy.upstream import AsyncOAuth2Client
+from fastmcp.server.auth.oauth_proxy.upstream import AsyncOAuth2Client, OAuthError
 from fastmcp.server.auth.redirect_validation import (
     build_client_redirect,
     is_redirect_uri_allowed_for_application_type,
@@ -1816,9 +1816,24 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
                     **self._extra_token_params,
                 )
             logger.debug("Successfully refreshed upstream token")
-        except Exception as e:
-            logger.error("Upstream token refresh failed: %s", e)
-            raise TokenError("invalid_grant", f"Upstream refresh failed: {e}") from e
+        except OAuthError as e:
+            # Only a definitive upstream rejection invalidates the stored
+            # credential. Anything else must not surface as invalid_grant:
+            # clients discard credentials on invalid_grant, and a transient
+            # upstream failure is not a credential failure.
+            if e.error == "invalid_grant":
+                logger.warning("Upstream refresh token was rejected")
+                raise TokenError(
+                    "invalid_grant", "Upstream refresh token was rejected"
+                ) from e
+            logger.warning("Upstream token refresh failed with %s", e.error)
+            raise
+        except Exception:
+            # Transport and local failures are internal errors, never
+            # credential failures, and must not echo details to the client.
+            # The endpoint renders these as a generic 500.
+            logger.exception("Upstream token refresh failed")
+            raise
 
         # Update stored upstream token
         # In refresh flow, we know there's a refresh token, so default to 1 hour
