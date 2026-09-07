@@ -30,6 +30,7 @@ from pydantic import (
 )
 from pydantic.json_schema import SkipJsonSchema
 
+from fastmcp.exceptions import ToolError
 from fastmcp.utilities.authorization import AuthCheck
 from fastmcp.utilities.components import FastMCPComponent
 from fastmcp.utilities.logging import get_logger
@@ -410,7 +411,17 @@ class Tool(FastMCPComponent):
 
         try:
             structured = _serialize_to_jsonable(raw_value, self.return_type)
-        except (pydantic_core.PydanticSerializationError, UnicodeDecodeError):
+        except (pydantic_core.PydanticSerializationError, UnicodeDecodeError) as e:
+            if self.output_schema is not None:
+                # Falling back to text-only content would violate the declared
+                # output schema and surface as a confusing validation error on
+                # the client, so fail the call with the real cause instead.
+                raise ToolError(
+                    f"Tool {self.name!r} declares an output schema but its "
+                    f"return value could not be serialized to structured "
+                    f"content: {e}. Set output_schema=None to disable "
+                    f"structured output."
+                ) from e
             return ToolResult(content=content)
 
         if not is_content_result:

@@ -1,4 +1,5 @@
 import json
+import threading
 import typing
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -18,6 +19,7 @@ from pydantic import AnyUrl, BaseModel, Field, TypeAdapter
 from typing_extensions import TypedDict
 
 from fastmcp import Client, FastMCP
+from fastmcp.exceptions import ToolError
 from fastmcp.tools.base import Tool, ToolResult
 from fastmcp.utilities.json_schema import compress_schema
 from fastmcp.utilities.types import Audio, File, Image
@@ -715,3 +717,45 @@ class TestUnconstrainedSequenceReturns:
 
         assert [b.type for b in result.content] == ["image", "text"]
         assert png not in json.dumps(result.structured_content or {})
+
+
+class TestUnserializableReturnValues:
+    """A value that fails structured serialization must not become a silent success."""
+
+    async def test_output_schema_tool_raises_tool_error(self):
+        def get_connection_info() -> dict:
+            return {"host": "db1", "lock": threading.Lock()}
+
+        tool = Tool.from_function(get_connection_info)
+        assert tool.output_schema is not None
+
+        with pytest.raises(
+            ToolError, match="could not be serialized to structured content"
+        ):
+            await tool.run({})
+
+    async def test_no_output_schema_tool_keeps_text_fallback(self):
+        def get_connection_info():
+            return {"host": "db1", "lock": threading.Lock()}
+
+        tool = Tool.from_function(get_connection_info)
+        assert tool.output_schema is None
+
+        result = await tool.run({})
+
+        assert result.structured_content is None
+        assert isinstance(result.content[0], TextContent)
+        assert "db1" in result.content[0].text
+
+    async def test_client_receives_error_result_not_silent_success(self):
+        mcp = FastMCP("test")
+
+        @mcp.tool
+        def bad() -> dict:
+            return {"lock": threading.Lock()}
+
+        async with Client(mcp) as client:
+            with pytest.raises(
+                ToolError, match="could not be serialized to structured content"
+            ):
+                await client.call_tool("bad")
