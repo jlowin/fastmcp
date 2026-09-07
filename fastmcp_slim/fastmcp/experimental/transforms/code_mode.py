@@ -108,8 +108,8 @@ _DEFAULT_LIMITS: "ResourceLimits" = {
     "max_memory": 100_000_000,  # 100 MB
 }
 """Baseline limits applied when ``MontySandboxProvider`` is constructed
-without an explicit ``limits`` argument. Pass ``limits=None`` to opt out
-entirely, or a dict to override."""
+without an explicit ``limits`` argument. Pass ``limits=None`` to disable
+configurable time, memory, and GC limits, or a dict to override."""
 
 
 class MontySandboxProvider:
@@ -119,15 +119,17 @@ class MontySandboxProvider:
         limits: Resource limits for sandbox execution. Supported keys:
             `max_duration_secs` (float), `max_memory` (int),
             `max_recursion_depth` (int), and `gc_interval` (int).
-            All are optional; omit a key to leave that limit uncapped.
+            Time, memory, and GC limits are optional; omit a key to disable
+            it. Recursion depth defaults to Monty's standard maximum of 1,000.
             Unsupported keys raise `ValueError` rather than being silently
             ignored.
 
             When the argument is omitted entirely, a conservative baseline
             is applied (``max_duration_secs=30``, ``max_memory=100 MB``) so
             the out-of-box configuration is not unbounded. Pass
-            ``limits=None`` to explicitly run without any limits, or a dict
-            to set your own.
+            ``limits=None`` to disable configurable time, memory, and GC
+            limits, or a dict to set your own. Monty's standard recursion
+            limit still applies.
     """
 
     def __init__(
@@ -207,10 +209,10 @@ class MontySandboxProvider:
         try:
             return await future
         except asyncio.CancelledError:
-            # Awaiting alone does not stop the native sandbox thread when the
+            # Awaiting alone does not stop the sandbox worker when the
             # surrounding task is cancelled (e.g. an HTTP client disconnects
             # mid-execution). Explicitly cancel so the Monty runtime tears the
-            # thread down instead of leaving it running to completion.
+            # worker down instead of leaving it running to completion.
             future.cancel()
             raise
         finally:

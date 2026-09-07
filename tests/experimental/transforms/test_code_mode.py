@@ -994,10 +994,10 @@ async def test_code_mode_max_tool_calls_none_is_unlimited() -> None:
 async def test_monty_provider_cancels_future_when_task_cancelled() -> None:
     """Cancelling the awaiting task must cancel the underlying sandbox future.
 
-    Otherwise the native Monty thread keeps running to completion after a
+    Otherwise the Monty worker keeps running to completion after a
     client disconnects or the request times out. A subclass overrides the
     launch seam so the cancellation handling in `run()` is exercised against
-    a controllable future rather than a live sandbox thread.
+    a controllable future rather than a live sandbox worker.
     """
     loop = asyncio.get_running_loop()
     sandbox_future: asyncio.Future[Any] = loop.create_future()
