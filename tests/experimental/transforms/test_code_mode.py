@@ -882,6 +882,14 @@ async def test_monty_provider_forwards_limits() -> None:
         await provider.run("x = 0\nfor _ in range(10**9):\n    x += 1")
 
 
+async def test_monty_provider_forwards_inputs() -> None:
+    provider = MontySandboxProvider()
+
+    result = await provider.run("return value + 1", inputs={"value": 2})
+
+    assert result == 3
+
+
 async def test_monty_provider_applies_default_limits() -> None:
     provider = MontySandboxProvider()
     assert provider.limits == _DEFAULT_LIMITS
@@ -983,19 +991,24 @@ async def test_monty_provider_cancels_future_when_task_cancelled() -> None:
     """
     loop = asyncio.get_running_loop()
     sandbox_future: asyncio.Future[Any] = loop.create_future()
+    sandbox_started = asyncio.Event()
 
     class _NeverFinishingProvider(MontySandboxProvider):
-        def _run_monty(self, monty: Any, *, inputs: Any, external_functions: Any):
-            return sandbox_future
+        async def _run_monty(
+            self,
+            pydantic_monty: Any,
+            *,
+            code: str,
+            inputs: Any,
+            external_functions: Any,
+        ) -> Any:
+            sandbox_started.set()
+            return await sandbox_future
 
     provider = _NeverFinishingProvider()
     task = asyncio.create_task(provider.run("return 1"))
 
-    # Advance the task to `await future` (no suspension point before it).
-    for _ in range(3):
-        await asyncio.sleep(0)
-        if not task.done():
-            break
+    await sandbox_started.wait()
 
     task.cancel()
     with pytest.raises(asyncio.CancelledError):

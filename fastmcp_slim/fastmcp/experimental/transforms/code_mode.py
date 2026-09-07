@@ -184,10 +184,10 @@ class MontySandboxProvider:
             key: track(value) for key, value in (external_functions or {}).items()
         }
 
-        monty = pydantic_monty.Monty(code, inputs=list(inputs))
         future = asyncio.ensure_future(
             self._run_monty(
-                monty,
+                pydantic_monty,
+                code=code,
                 inputs=inputs or None,
                 external_functions=async_functions or None,
             )
@@ -210,23 +210,28 @@ class MontySandboxProvider:
             with anyio.CancelScope(shield=True):
                 await asyncio.gather(*tasks, return_exceptions=True)
 
-    def _run_monty(
+    async def _run_monty(
         self,
-        monty: Any,
+        pydantic_monty: Any,
         *,
+        code: str,
         inputs: dict[str, Any] | None,
         external_functions: dict[str, Callable[..., Any]] | None,
     ) -> Any:
-        """Launch the sandbox and return its awaitable.
+        """Run code in an isolated sandbox session.
 
         Isolated so the cancellation handling in `run()` can be exercised
         without a live `pydantic-monty` runtime.
         """
-        return monty.run_async(
-            inputs=inputs,
-            external_functions=external_functions,
-            limits=self.limits,
-        )
+        async with (
+            pydantic_monty.AsyncMonty() as pool,
+            pool.checkout(limits=self.limits) as session,
+        ):
+            return await session.feed_run(
+                code,
+                inputs=inputs,
+                external_lookup=external_functions,
+            )
 
 
 # ---------------------------------------------------------------------------
