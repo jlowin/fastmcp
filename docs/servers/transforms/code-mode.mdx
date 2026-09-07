@@ -313,9 +313,10 @@ All keys are optional — omit any to leave that dimension uncapped:
 |---|---|---|
 | `max_duration_secs` | `float` | Maximum wall-clock execution time |
 | `max_memory` | `int` | Memory ceiling in bytes |
-| `max_allocations` | `int` | Cap on total object allocations |
 | `max_recursion_depth` | `int` | Maximum recursion depth |
 | `gc_interval` | `int` | Garbage collection frequency |
+
+Unsupported keys raise `ValueError` rather than being silently ignored. Monty no longer supports `max_allocations`; use `max_memory` to cap memory usage.
 
 ### Tool Call Limits
 

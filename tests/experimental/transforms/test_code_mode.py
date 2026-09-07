@@ -2,7 +2,7 @@ import asyncio
 import importlib
 import importlib.util
 import json
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from mcp_types import ImageContent, TextContent
@@ -880,6 +880,16 @@ async def test_monty_provider_forwards_limits() -> None:
 
     with pytest.raises(Exception, match="time limit exceeded"):
         await provider.run("x = 0\nfor _ in range(10**9):\n    x += 1")
+
+
+async def test_monty_provider_rejects_unsupported_limits() -> None:
+    provider = MontySandboxProvider(limits=cast(Any, {"max_allocations": 1}))
+
+    with pytest.raises(
+        ValueError,
+        match=r"Unsupported Monty resource limits: 'max_allocations'.*max_memory",
+    ):
+        await provider.run("return list(range(10_000))")
 
 
 async def test_monty_provider_forwards_inputs() -> None:

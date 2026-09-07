@@ -117,10 +117,11 @@ class MontySandboxProvider:
 
     Args:
         limits: Resource limits for sandbox execution. Supported keys:
-            ``max_duration_secs`` (float), ``max_allocations`` (int),
-            ``max_memory`` (int), ``max_recursion_depth`` (int),
-            ``gc_interval`` (int).  All are optional; omit a key to
-            leave that limit uncapped.
+            `max_duration_secs` (float), `max_memory` (int),
+            `max_recursion_depth` (int), and `gc_interval` (int).
+            All are optional; omit a key to leave that limit uncapped.
+            Unsupported keys raise `ValueError` rather than being silently
+            ignored.
 
             When the argument is omitted entirely, a conservative baseline
             is applied (``max_duration_secs=30``, ``max_memory=100 MB``) so
@@ -155,6 +156,17 @@ class MontySandboxProvider:
                 "CodeMode requires pydantic-monty for the Monty sandbox provider. "
                 "Install it with `fastmcp[code-mode]` or pass a custom SandboxProvider."
             ) from exc
+
+        if self.limits is not None:
+            supported_limits = pydantic_monty.ResourceLimits.__annotations__.keys()
+            unsupported_limits = self.limits.keys() - supported_limits
+            if unsupported_limits:
+                unsupported = ", ".join(repr(key) for key in sorted(unsupported_limits))
+                supported = ", ".join(sorted(supported_limits))
+                raise ValueError(
+                    f"Unsupported Monty resource limits: {unsupported}. "
+                    f"Supported limits: {supported}."
+                )
 
         # Monty currently leaves Python callbacks running when a sandbox exits:
         # https://github.com/pydantic/monty/issues/821
