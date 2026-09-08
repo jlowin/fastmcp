@@ -31,6 +31,7 @@ from fastmcp.client.transports import (
     StdioTransport,
     StreamableHttpTransport,
 )
+from fastmcp.client.transports.base import TransportOptions
 from fastmcp.mcp_config import (
     CanonicalMCPConfig,
     CanonicalMCPServerTypes,
@@ -154,6 +155,36 @@ class TestConfigTransportEraNegotiation:
         }
         transport = MCPConfigTransport(config)
         assert transport.legacy_only is False
+
+    def test_multi_server_transport_adds_client_mode_without_dropping_options(self):
+        config = {
+            "mcpServers": {
+                "a": {"url": "https://a.example.com/mcp"},
+                "b": {"url": "https://b.example.com/mcp"},
+            },
+        }
+        transport = MCPConfigTransport(config)
+        options = TransportOptions(forward_incoming_headers=True)
+
+        resolved = transport.get_client_transport_options(
+            mode="auto", transport_options=options
+        )
+
+        assert resolved is not None
+        assert resolved.backend_mode == "auto"
+        assert resolved.forward_incoming_headers is True
+
+    def test_single_server_transport_leaves_client_options_unchanged(self):
+        config = {"mcpServers": {"only": {"url": "https://example.com/mcp"}}}
+        transport = MCPConfigTransport(config)
+        options = TransportOptions(forward_incoming_headers=True)
+
+        assert (
+            transport.get_client_transport_options(
+                mode="auto", transport_options=options
+            )
+            is options
+        )
 
     def test_transforming_single_server_wrapper_is_legacy_only(self):
         """A single-server config that uses tool transforms or tag filters wraps

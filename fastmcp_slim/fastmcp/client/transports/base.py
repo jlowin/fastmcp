@@ -93,6 +93,20 @@ class ClientTransport(abc.ABC):
     #: `server/discover` (which some servers answer over SSE but then cannot serve).
     legacy_only: bool = False
 
+    def get_client_transport_options(
+        self,
+        *,
+        mode: str,
+        transport_options: TransportOptions | None,
+    ) -> TransportOptions | None:
+        """Add transport-specific options derived from the owning client.
+
+        Wrapping transports can override this hook when they create backend
+        clients that need client-owned connection settings. Returning the
+        existing options unchanged is the default for direct transports.
+        """
+        return transport_options
+
     @abc.abstractmethod
     @contextlib.asynccontextmanager
     async def connect_session(

@@ -1359,13 +1359,8 @@ def _create_client_factory(
             credentials get forwarded upstream.
             """
             fresh = c.new()
-            # The caller chose this client's era, so a multi-server MCPConfig
-            # target's mounted backend legs should negotiate it too rather than
-            # stopping at the composite router (see
-            # `TransportOptions.backend_mode`).
-            fresh._transport_options = replace(
-                _with_proxy_transport_options(fresh._transport_options),
-                backend_mode=fresh.mode,
+            fresh._transport_options = _with_proxy_transport_options(
+                fresh._transport_options
             )
             return fresh
 
@@ -1427,16 +1422,10 @@ def _create_client_factory(
                 if backend_mode is not None:
                     fresh.mode = backend_mode
             if backend_mode is not None:
-                # A multi-server MCPConfig target reaches its real backends
-                # through proxies mounted on a composite router, so setting the
-                # era on this client alone would stop at the router. Carry the
-                # era down to those backend legs too (see
-                # `TransportOptions.backend_mode`), resolved here — at the
-                # moment a client is built for this request — so it tracks the
-                # front era rather than whatever was true at construction.
-                fresh._transport_options = replace(
-                    _with_proxy_transport_options(fresh._transport_options),
-                    backend_mode=backend_mode,
+                # The transport derives any backend-specific options from the
+                # fresh client's mode when it connects.
+                fresh._transport_options = _with_proxy_transport_options(
+                    fresh._transport_options
                 )
             return fresh
 

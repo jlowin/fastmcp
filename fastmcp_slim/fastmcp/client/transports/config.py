@@ -1,5 +1,6 @@
 import contextlib
 from collections.abc import AsyncIterator
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 from mcp import ClientSession
@@ -125,6 +126,20 @@ class MCPConfigTransport(ClientTransport):
         if len(self.config.mcpServers) == 1:
             return self.transport.legacy_only
         return self._resolved_legacy_only
+
+    def get_client_transport_options(
+        self,
+        *,
+        mode: str,
+        transport_options: TransportOptions | None,
+    ) -> TransportOptions | None:
+        """Pass the owning client's mode into multi-server backend clients."""
+        if len(self.config.mcpServers) == 1:
+            return transport_options
+        return replace(
+            transport_options or TransportOptions(),
+            backend_mode=mode,
+        )
 
     @contextlib.asynccontextmanager
     async def connect_session(

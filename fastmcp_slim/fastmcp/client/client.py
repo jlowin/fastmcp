@@ -9,7 +9,7 @@ import ssl
 import uuid
 from collections.abc import AsyncIterator, Callable, Coroutine, Mapping, Sequence
 from contextlib import AsyncExitStack, asynccontextmanager, suppress
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Generic, Literal, TypeVar, cast, overload
 
@@ -800,17 +800,13 @@ class Client(
 
     @asynccontextmanager
     async def _context_manager(self):
-        transport_options = self._transport_options
-        if (
-            isinstance(self.transport, MCPConfigTransport)
-            and len(self.transport.config.mcpServers) > 1
-        ):
-            # Resolve mutable connection policy here rather than at construction:
-            # both `Client.mode` and an MCPConfig's server set may change before
-            # the client connects. Preserve options contributed by other layers.
-            transport_options = replace(
-                transport_options or TransportOptions(), backend_mode=self.mode
-            )
+        # Resolve mutable connection policy here rather than at construction:
+        # both `Client.mode` and a wrapping transport's backend set may change
+        # before the client connects. The transport owns which client options
+        # it needs; preserve options contributed by other client layers.
+        transport_options = self.transport.get_client_transport_options(
+            mode=self.mode, transport_options=self._transport_options
+        )
 
         # Only passed when this client actually wants non-default settings, so an
         # ordinary client never sends an argument a transport might not accept.
