@@ -5,6 +5,71 @@ rss: true
 tag: NEW
 ---
 
+<Update label="v4.0.3" description="2026-09-04">
+
+**[v4.0.3: Once Is Enough](https://github.com/PrefectHQ/fastmcp/releases/tag/v4.0.3)**
+
+Multi-server clients with legacy-only backends now avoid unnecessary startup retries, and tools returning unconstrained sequences no longer send images twice. This patch also fixes task timing values rejected by strict clients and cleans up unfinished Monty callbacks when execution ends.
+
+### Enhancements ✨
+* ci: deploy docs through Mintlify's admin API and wait for a verdict by [@zzstoatzz](https://github.com/zzstoatzz) in [#4996](https://github.com/PrefectHQ/fastmcp/pull/4996)
+* perf: avoid duplicate startup for mixed-era backends by [@ningmao-hlyz](https://github.com/ningmao-hlyz) in [#4971](https://github.com/PrefectHQ/fastmcp/pull/4971)
+* docs: clarify release title history lookup by [@zzstoatzz](https://github.com/zzstoatzz) in [#5006](https://github.com/PrefectHQ/fastmcp/pull/5006)
+### Fixes 🐞
+* fix: don't infer an output schema for unconstrained sequences by [@fsecada01](https://github.com/fsecada01) in [#4999](https://github.com/PrefectHQ/fastmcp/pull/4999)
+* Clean up unfinished Monty callbacks by [@zzstoatzz](https://github.com/zzstoatzz) in [#5005](https://github.com/PrefectHQ/fastmcp/pull/5005)
+* Fix task timing field serialization by [@LarryHu0217](https://github.com/LarryHu0217) in [#5003](https://github.com/PrefectHQ/fastmcp/pull/5003)
+### Docs 📚
+* docs: point What's New at the changelog for later releases by [@zzstoatzz](https://github.com/zzstoatzz) in [#4992](https://github.com/PrefectHQ/fastmcp/pull/4992)
+* docs: attribute the back-channel removal to SEP-2322/2575, not SEP-2577 by [@zzstoatzz](https://github.com/zzstoatzz) in [#4988](https://github.com/PrefectHQ/fastmcp/pull/4988)
+
+## New Contributors
+* @fsecada01 made their first contribution in [#4999](https://github.com/PrefectHQ/fastmcp/pull/4999)
+* @ningmao-hlyz made their first contribution in [#4971](https://github.com/PrefectHQ/fastmcp/pull/4971)
+
+**Full Changelog**: [v4.0.2...v4.0.3](https://github.com/PrefectHQ/fastmcp/compare/v4.0.2...v4.0.3)
+
+</Update>
+
+<Update label="v4.0.2" description="2026-09-02">
+
+**[v4.0.2: Root Access](https://github.com/PrefectHQ/fastmcp/releases/tag/v4.0.2)**
+
+`ClientGroup` is now importable from the package root, `from fastmcp import ClientGroup`, with the same lazy export and install hint as `Client`, so integrations no longer couple to FastMCP's internal module layout.
+
+### Enhancements ✨
+* Expose ClientGroup from package root by [@jlowin](https://github.com/jlowin) in [#4987](https://github.com/PrefectHQ/fastmcp/pull/4987)
+* skills: add release skill with changelog entry helper by [@zzstoatzz](https://github.com/zzstoatzz) in [#4982](https://github.com/PrefectHQ/fastmcp/pull/4982)
+### Fixes 🐞
+* docs: escape `<1` in changelog so MDX parses by [@zzstoatzz](https://github.com/zzstoatzz) in [#4978](https://github.com/PrefectHQ/fastmcp/pull/4978)
+### Docs 📚
+* docs: note the 4.0.1 floor for ClientGroup reentrancy by [@zzstoatzz](https://github.com/zzstoatzz) in [#4980](https://github.com/PrefectHQ/fastmcp/pull/4980)
+* docs: link the GA announcement and blog from What's New by [@zzstoatzz](https://github.com/zzstoatzz) in [#4984](https://github.com/PrefectHQ/fastmcp/pull/4984)
+
+
+**Full Changelog**: [v4.0.1...v4.0.2](https://github.com/PrefectHQ/fastmcp/compare/v4.0.1...v4.0.2)
+
+</Update>
+
+<Update label="v4.0.1" description="2026-09-01">
+
+**[v4.0.1: Come Back Any Time](https://github.com/PrefectHQ/fastmcp/releases/tag/v4.0.1)**
+
+`ClientGroup` now reference-counts its context the way `Client` does, so entering a connected group from a nested block or a concurrent task reuses the existing connections instead of raising. Adapters written against `Client`'s reentrancy can hold a `ClientGroup` the same way.
+
+### Fixes 🐞
+* client: make ClientGroup context reentrant by [@zzstoatzz](https://github.com/zzstoatzz) in [#4975](https://github.com/PrefectHQ/fastmcp/pull/4975)
+* ci: fix the published-docs PR step's working base by [@zzstoatzz](https://github.com/zzstoatzz) in [#4960](https://github.com/PrefectHQ/fastmcp/pull/4960)
+### Docs 📚
+* docs: update banner for FastMCP 4 GA by [@zzstoatzz](https://github.com/zzstoatzz) in [#4958](https://github.com/PrefectHQ/fastmcp/pull/4958)
+* docs: correct whats-new and upgrade guide for GA by [@zzstoatzz](https://github.com/zzstoatzz) in [#4961](https://github.com/PrefectHQ/fastmcp/pull/4961)
+* docs: drop prerelease install framing from installation and SDK migration guides by [@zzstoatzz](https://github.com/zzstoatzz) in [#4963](https://github.com/PrefectHQ/fastmcp/pull/4963)
+* docs: refresh sidebar tags and fix audit findings by [@zzstoatzz](https://github.com/zzstoatzz) in [#4965](https://github.com/PrefectHQ/fastmcp/pull/4965)
+
+**Full Changelog**: [v4.0.0...v4.0.1](https://github.com/PrefectHQ/fastmcp/compare/v4.0.0...v4.0.1)
+
+</Update>
+
 <Update label="v4.0.0" description="2026-08-31">
 
 **[v4.0.0: Four Real](https://github.com/PrefectHQ/fastmcp/releases/tag/v4.0.0)**
@@ -85,7 +150,7 @@ FastMCP 4 is the FastMCP release for the new MCP: full support for the `2026-07-
 * Cover CallArgument resolution in background tasks by [@zzstoatzz](https://github.com/zzstoatzz) in [#4833](https://github.com/PrefectHQ/fastmcp/pull/4833)
 * Scalekit issuer updates backward compatibility by [@AkshayParihar33](https://github.com/AkshayParihar33) in [#4798](https://github.com/PrefectHQ/fastmcp/pull/4798)
 * Add Prefect Horizon account commands by [@parkedwards](https://github.com/parkedwards) in [#4786](https://github.com/PrefectHQ/fastmcp/pull/4786)
-* Cap anthropic dependency to <1 by [@craigie-ant](https://github.com/craigie-ant) in [#4864](https://github.com/PrefectHQ/fastmcp/pull/4864)
+* Cap anthropic dependency to `<1` by [@craigie-ant](https://github.com/craigie-ant) in [#4864](https://github.com/PrefectHQ/fastmcp/pull/4864)
 * Remove obsolete Docket memory-server reset fixtures by [@TyceHerrman](https://github.com/TyceHerrman) in [#4912](https://github.com/PrefectHQ/fastmcp/pull/4912)
 * add independent client groups by [@zzstoatzz](https://github.com/zzstoatzz) in [#4904](https://github.com/PrefectHQ/fastmcp/pull/4904)
 ### Security 🔒
