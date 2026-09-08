@@ -24,7 +24,7 @@ import time
 from base64 import urlsafe_b64encode
 from collections import OrderedDict
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from contextvars import ContextVar
 from typing import Any, Literal
 from urllib.parse import urlencode
@@ -98,12 +98,14 @@ from fastmcp.server.auth.oauth_proxy.models import (
     DEFAULT_ACCESS_TOKEN_EXPIRY_SECONDS,
     DEFAULT_AUTH_CODE_EXPIRY_SECONDS,
     DEFAULT_REFRESH_TOKEN_EXPIRY_SECONDS,
+    DEFAULT_ROTATION_GRACE_PERIOD_SECONDS,
     HTTP_TIMEOUT_SECONDS,
     ClientCode,
     ConsentCSRFToken,
     JTIMapping,
     OAuthTransaction,
     ProxyDCRClient,
+    RefreshGraceRecord,
     RefreshTokenMetadata,
     UpstreamTokenSet,
     _hash_token,
@@ -270,6 +272,7 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
     - _client_codes: Authorization codes with PKCE challenges and upstream tokens
     - _jti_mapping_store: Maps FastMCP token JTIs to upstream token IDs
     - _refresh_token_store: Refresh token metadata (keyed by token hash)
+    - _refresh_grace_store: Replay records for just-rotated refresh tokens
 
     All state is stored in the configured client_storage backend (Redis, disk, etc.)
     enabling horizontal scaling across multiple instances.
@@ -341,6 +344,8 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
         fastmcp_access_token_expiry_seconds: int | None = None,
         # Token refresh threshold
         token_expiry_threshold_seconds: int = 0,
+        # Grace period for just-rotated client refresh tokens
+        rotation_grace_period_seconds: float = DEFAULT_ROTATION_GRACE_PERIOD_SECONDS,
         # CIMD (Client ID Metadata Document) support
         enable_cimd: bool = True,
         # Identity assertion (SEP-990 ID-JAG) support
@@ -440,6 +445,17 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
                 a token as expired (default 0). This prevents race conditions where a token
                 passes the expiry check but expires before the next operation completes.
                 For example, set to 30 to refresh tokens that will expire within 30 seconds.
+            rotation_grace_period_seconds: Seconds after a client-facing refresh token
+                is rotated during which the just-replaced token is still accepted
+                (default 45). A replay inside the window returns the already-issued
+                token pair instead of minting a new rotation, so concurrent /token
+                requests racing on the same refresh token (client retries, multiple
+                tabs, background + foreground refresh) don't fail with invalid_grant
+                and permanently lose the session. This mirrors the grace philosophy
+                already applied to the upstream refresh token (see load_access_token).
+                The window should be much shorter than the access token lifetime.
+                Set to 0 or a negative value to disable (a rotated token is rejected
+                immediately).
             enable_cimd: Enable CIMD (Client ID Metadata Document) support for URL-based
                 client IDs. When True, clients can authenticate using HTTPS URLs as client
                 IDs, with metadata fetched from the URL. Supports private_key_jwt auth.
@@ -553,6 +569,7 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
             fastmcp_access_token_expiry_seconds
         )
         self._token_expiry_threshold_seconds: int = token_expiry_threshold_seconds
+        self._rotation_grace_period_seconds: float = rotation_grace_period_seconds
 
         if jwt_signing_key is None:
             if upstream_client_secret is None:
@@ -688,6 +705,19 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
                 key_value=self._client_storage,
                 pydantic_model=RefreshTokenMetadata,
                 default_collection="mcp-refresh-tokens",
+                raise_on_validation_error=True,
+            )
+        )
+
+        # Grace records for just-rotated client refresh tokens, keyed by the
+        # hash of the previous token. Same hashing discipline as
+        # _refresh_token_store: the raw token never touches storage. Records
+        # are TTL-bounded by the grace window so stale entries self-clean.
+        self._refresh_grace_store: PydanticAdapter[RefreshGraceRecord] = (
+            PydanticAdapter[RefreshGraceRecord](
+                key_value=self._client_storage,
+                pydantic_model=RefreshGraceRecord,
+                default_collection="mcp-refresh-grace",
                 raise_on_validation_error=True,
             )
         )
@@ -1719,6 +1749,74 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
         _ = idp_tokens
         return None
 
+    def _grace_enabled(self) -> bool:
+        """Whether rotated-refresh-token grace replay is enabled."""
+        return self._rotation_grace_period_seconds > 0
+
+    async def _get_grace_record(
+        self, presented_token: str
+    ) -> RefreshGraceRecord | None:
+        """Return the grace record for a just-rotated refresh token, if live.
+
+        A record that has aged past the grace window is deleted best-effort
+        and treated as absent, so reuse outside the window fails closed with
+        invalid_grant. Records also self-expire via storage TTL; the timestamp
+        check is the source of truth.
+        """
+        if not self._grace_enabled():
+            return None
+        token_hash = _hash_token(presented_token)
+        record = await self._refresh_grace_store.get(key=token_hash)
+        if record is None:
+            return None
+        if time.time() - record.rotated_at > self._rotation_grace_period_seconds:
+            with suppress(Exception):
+                await self._refresh_grace_store.delete(key=token_hash)
+            return None
+        return record
+
+    async def _replay_rotated_refresh(
+        self,
+        client: OAuthClientInformationFull,
+        record: RefreshGraceRecord,
+    ) -> OAuthToken:
+        """Replay the pair already issued for a just-rotated refresh token.
+
+        Returns the exact access/refresh pair minted by the winning rotation
+        without contacting upstream again, so concurrent /token requests
+        converge on one pair. The replacement refresh token must still be live;
+        if it was revoked after rotation the replay is rejected instead of
+        resurrecting it.
+        """
+        if record.client_id != client.client_id:
+            logger.warning(
+                "Rotated refresh token client_id mismatch: expected %s",
+                client.client_id,
+            )
+            raise TokenError("invalid_grant", "Invalid refresh token")
+        replacement = await self._refresh_token_store.get(
+            key=_hash_token(record.refresh_token)
+        )
+        if replacement is None:
+            logger.warning(
+                "Grace replay refused for client=%s: replacement refresh token "
+                "no longer exists (revoked or expired).",
+                client.client_id,
+            )
+            raise TokenError("invalid_grant", "Refresh token has been revoked")
+        logger.info(
+            "Concurrent refresh detected for client=%s within grace window; "
+            "replaying issued pair without a new rotation.",
+            client.client_id,
+        )
+        return OAuthToken(
+            access_token=record.access_token,
+            token_type="Bearer",
+            expires_in=record.expires_in,
+            refresh_token=record.refresh_token,
+            scope=record.scope,
+        )
+
     async def load_refresh_token(
         self,
         client: OAuthClientInformationFull,
@@ -1728,10 +1826,27 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
 
         Looks up by token hash and reconstructs the RefreshToken object.
         Validates that the token belongs to the requesting client.
+
+        A token that was just rotated by a concurrent /token request is still
+        accepted inside the rotation grace window (replaying the rotation);
+        reuse past the window fails closed with invalid_grant.
         """
         token_hash = _hash_token(refresh_token)
         metadata = await self._refresh_token_store.get(key=token_hash)
         if not metadata:
+            grace = await self._get_grace_record(refresh_token)
+            if grace is not None and grace.client_id == client.client_id:
+                logger.info(
+                    "Refresh token recently rotated for client=%s; accepting "
+                    "within grace window instead of invalid_grant.",
+                    client.client_id,
+                )
+                return RefreshToken(
+                    token=refresh_token,
+                    client_id=grace.client_id,
+                    scopes=grace.scopes,
+                    expires_at=grace.expires_at,
+                )
             logger.warning(
                 "Refresh token not found for client=%s (token_hash=%s); it was "
                 "already rotated, expired, or revoked. Rejecting with invalid_grant, "
@@ -1765,11 +1880,13 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
 
         Implements two-tier refresh:
         1. Verify FastMCP refresh token
-        2. Look up upstream token via JTI mapping
-        3. Refresh upstream token with upstream provider
-        4. Update stored upstream token
-        5. Issue new FastMCP access token
-        6. Keep same FastMCP refresh token (unless upstream rotates)
+        2. Replay the already-issued pair if this token was just rotated
+           (grace window for concurrent /token requests)
+        3. Look up upstream token via JTI mapping
+        4. Refresh upstream token with upstream provider
+        5. Update stored upstream token
+        6. Issue new FastMCP access token
+        7. Rotate the FastMCP refresh token (one-time use, with grace replay)
         """
         # Verify FastMCP refresh token
         try:
@@ -1781,9 +1898,42 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
             logger.debug("FastMCP refresh token validation failed: %s", e)
             raise TokenError("invalid_grant", "Invalid refresh token") from e
 
+        # Serialize concurrent exchanges of the same refresh token within this
+        # process; cross-process races converge on one pair via the grace
+        # record. Mirrors the advisory-lock + re-read pattern used for the
+        # upstream token in load_access_token.
+        lock = self._get_refresh_lock(f"client-refresh:{refresh_jti}")
+        async with lock:
+            return await self._exchange_refresh_token_locked(
+                client, refresh_token, refresh_jti, scopes
+            )
+
+    async def _exchange_refresh_token_locked(
+        self,
+        client: OAuthClientInformationFull,
+        refresh_token: RefreshToken,
+        refresh_jti: str,
+        scopes: list[str],
+    ) -> OAuthToken:
+        """Refresh body for one FastMCP refresh token.
+
+        The caller must hold the per-refresh-token lock for ``refresh_jti`` so
+        concurrent exchanges of the same token serialize and the loser replays
+        the winner's pair via the grace record instead of rotating again.
+        """
+        # A concurrent request may already have rotated this token: replay the
+        # issued pair inside the grace window instead of rotating again, so all
+        # racers converge on the same pair and nobody gets invalid_grant.
+        if grace := await self._get_grace_record(refresh_token.token):
+            return await self._replay_rotated_refresh(client, grace)
+
         # Look up upstream token via JTI mapping
         jti_mapping = await self._jti_mapping_store.get(key=refresh_jti)
         if not jti_mapping:
+            # A concurrent rotation may have deleted the mapping after our
+            # grace check above; replay if the winner published its record.
+            if grace := await self._get_grace_record(refresh_token.token):
+                return await self._replay_rotated_refresh(client, grace)
             logger.error("JTI mapping not found for refresh token: %s", refresh_jti[:8])
             raise TokenError("invalid_grant", "Refresh token mapping not found")
 
@@ -1817,6 +1967,19 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
                 )
             logger.debug("Successfully refreshed upstream token")
         except Exception as e:
+            # Another worker may have already rotated this session (consuming
+            # the upstream refresh token), making our upstream refresh fail.
+            # Give the winner a moment to publish its grace record, then replay
+            # it instead of failing with invalid_grant. Mirrors the
+            # reload-and-revalidate fallback in load_access_token.
+            if self._grace_enabled():
+                for _ in range(5):
+                    if grace := await self._get_grace_record(refresh_token.token):
+                        try:
+                            return await self._replay_rotated_refresh(client, grace)
+                        except TokenError:
+                            break
+                    await anyio.sleep(0.1)
             logger.error("Upstream token refresh failed: %s", e)
             raise TokenError("invalid_grant", f"Upstream refresh failed: {e}") from e
 
@@ -1970,12 +2133,6 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
             ttl=refresh_ttl,  # Align with upstream refresh token expiry
         )
 
-        # Invalidate old refresh token (refresh token rotation - enforces one-time use)
-        await self._jti_mapping_store.delete(key=refresh_jti)
-        logger.debug(
-            "Rotated refresh token (old JTI invalidated - one-time use enforced)"
-        )
-
         # Store new refresh token metadata (keyed by hash)
         await self._refresh_token_store.put(
             key=_hash_token(new_fastmcp_refresh),
@@ -1986,6 +2143,36 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
                 created_at=time.time(),
             ),
             ttl=refresh_ttl,
+        )
+
+        # Record the rotation so a concurrent request presenting the just-
+        # replaced refresh token replays this pair inside the grace window
+        # instead of failing with invalid_grant (which would orphan the
+        # session). Written after the replacement entries exist (so replays
+        # always resolve) but before the old entries are deleted (so a crash
+        # between the two favors availability over a lost session). The record
+        # self-expires via TTL; reuse past the window fails closed in the
+        # load/exchange paths.
+        if self._grace_enabled():
+            await self._refresh_grace_store.put(
+                key=_hash_token(refresh_token.token),
+                value=RefreshGraceRecord(
+                    client_id=client.client_id,
+                    scopes=refreshed_scopes,
+                    rotated_at=time.time(),
+                    access_token=new_fastmcp_access,
+                    refresh_token=new_fastmcp_refresh,
+                    expires_in=fastmcp_access_expires_in,
+                    scope=" ".join(refreshed_scopes),
+                    expires_at=int(time.time()) + refresh_ttl,
+                ),
+                ttl=max(int(self._rotation_grace_period_seconds), 1),
+            )
+
+        # Invalidate old refresh token (refresh token rotation - enforces one-time use)
+        await self._jti_mapping_store.delete(key=refresh_jti)
+        logger.debug(
+            "Rotated refresh token (old JTI invalidated - one-time use enforced)"
         )
 
         # Delete old refresh token (by hash)
@@ -2325,6 +2512,8 @@ class OAuthProxy(OAuthProvider, ConsentMixin):
         # For refresh tokens, delete from local storage by hash
         if isinstance(token, RefreshToken):
             await self._refresh_token_store.delete(key=_hash_token(token.token))
+            # A revoked pre-rotation token must not replay its successor.
+            await self._refresh_grace_store.delete(key=_hash_token(token.token))
 
         # ID-JAG access tokens are self-contained and never known upstream, so
         # upstream revocation cannot invalidate them. Track the jti locally so

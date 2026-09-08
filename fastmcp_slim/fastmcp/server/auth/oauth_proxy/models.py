@@ -32,6 +32,14 @@ DEFAULT_ACCESS_TOKEN_EXPIRY_NO_REFRESH_SECONDS: Final[int] = (
 DEFAULT_REFRESH_TOKEN_EXPIRY_SECONDS: Final[int] = 60 * 60 * 24 * 365  # 1 year
 DEFAULT_AUTH_CODE_EXPIRY_SECONDS: Final[int] = 5 * 60  # 5 minutes
 
+# Grace period after a client-facing refresh token is rotated during which the
+# just-replaced (previous) token is still accepted. A replay inside the window
+# returns the already-issued token pair instead of minting a new rotation, so
+# concurrent /token requests racing on the same refresh token (client retries,
+# multiple tabs, background + foreground refresh) don't fail with invalid_grant
+# and permanently lose the session.
+DEFAULT_ROTATION_GRACE_PERIOD_SECONDS: Final[float] = 45.0
+
 # HTTP client timeout
 HTTP_TIMEOUT_SECONDS: Final[int] = 30
 
@@ -147,6 +155,28 @@ class RefreshTokenMetadata(BaseModel):
     scopes: list[str]
     expires_at: int | None = None
     created_at: float
+
+
+class RefreshGraceRecord(BaseModel):
+    """Replay record for a just-rotated client-facing refresh token.
+
+    Stored keyed by the hash of the *previous* (rotated-out) refresh token for
+    ``rotation_grace_period_seconds`` after rotation. A second request arriving
+    with the previous token inside the window replays the already-issued token
+    pair instead of minting a fresh rotation, tolerating concurrent /token
+    races without allowing indefinite reuse of the old token. Raw tokens never
+    touch storage — both the key and the replayed pair are only usable by a
+    client that already holds them.
+    """
+
+    client_id: str
+    scopes: list[str]
+    rotated_at: float
+    access_token: str
+    refresh_token: str
+    expires_in: int
+    scope: str
+    expires_at: int | None = None
 
 
 def _hash_token(token: str) -> str:
