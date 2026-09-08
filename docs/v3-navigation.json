@@ -235,6 +235,7 @@
                 "v3/integrations/claude-code",
                 "v3/integrations/claude-desktop",
                 "v3/integrations/cursor",
+                "v3/integrations/flujo",
                 "v3/integrations/gemini-cli",
                 "v3/integrations/goose"
               ]

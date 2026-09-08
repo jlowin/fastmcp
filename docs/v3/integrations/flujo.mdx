@@ -1,0 +1,145 @@
+---
+title: FLUJO 🤝 FastMCP
+sidebarTitle: FLUJO
+description: Connect a local FastMCP stdio server to FLUJO
+icon: message-smile
+---
+
+import { LocalFocusTip } from "/snippets/local-focus.mdx"
+
+<LocalFocusTip />
+
+[FLUJO](https://github.com/mario-andreschak/FLUJO) is an open-source MCP workstation for connecting apps, inspecting tools, and building agent flows. Unlike clients that ask you to edit an MCP JSON file, FLUJO’s local-server form separates the **run command**, **arguments**, and **environment variables** in the UI.
+
+There is no `fastmcp install flujo` command yet. This guide shows the manual stdio setup for a local FastMCP server and a quick tool verification in FLUJO’s Tool Tester.
+
+<Note>
+FLUJO-specific FastMCP validation is still pending. Treat this as a manual connection guide; if a field label differs slightly in your FLUJO build, match the stdio `command` / `args` / `env` values below.
+</Note>
+
+## Requirements
+
+- [FLUJO](https://github.com/mario-andreschak/FLUJO) installed and running (browser UI, typically on port `4200`)
+- A local FastMCP server file that speaks **STDIO** (the default for `mcp.run()`)
+- [`uv`](https://docs.astral.sh/uv/) on your `PATH` (recommended), so FLUJO can launch the server with isolated dependencies
+
+For remote FastMCP servers (HTTP / SSE / Streamable HTTP), use FLUJO’s remote connection flow instead of this stdio recipe.
+
+## Create a Server
+
+The examples in this guide use the following simple dice-rolling server, saved as `server.py`.
+
+```python server.py
+import random
+from fastmcp import FastMCP
+
+mcp = FastMCP(name="Dice Roller")
+
+@mcp.tool
+def roll_dice(n_dice: int) -> list[int]:
+    """Roll `n_dice` 6-sided dice and return the results."""
+    return [random.randint(1, 6) for _ in range(n_dice)]
+
+if __name__ == "__main__":
+    mcp.run()
+```
+
+Confirm the server starts on its own before wiring FLUJO:
+
+```bash
+uv run --with fastmcp python server.py
+```
+
+Stop that process after you see it waiting on stdio; FLUJO will launch it.
+
+## Connect in FLUJO
+
+1. Open **Connected Apps** (or the **MCP** page, depending on your FLUJO version).
+2. Click **Connect App** / **Add Server**.
+3. Choose the **local** / **Local Server** path (not Marketplace or Remote).
+4. Fill in the define step:
+   - **Server name** — for example `dice-roller`
+   - **MCP server root path** — the directory that contains `server.py` (or `/` if you only need absolute paths in Arguments)
+5. Skip **Install command** and **Build command** for a plain Python FastMCP file (leave them empty).
+6. Under **Third, define how to run your server**:
+   - Set **Transport type** to **stdio**
+   - Set **Run command** to the executable only (not the full shell line)
+   - Add each CLI token as its own **Arguments** row
+   - Add any secrets under **Environment Variables**
+7. Click **3) Test run**, then save when the connection succeeds.
+
+### Example field values
+
+These fields map to the usual MCP stdio triple `(command, args, env)`:
+
+| FLUJO field | Example value |
+| --- | --- |
+| **Run command** | `uv` |
+| **Arguments** (one per row) | `run`, `--with`, `fastmcp`, `python`, `/absolute/path/to/server.py` |
+| **Environment Variables** | optional — for example `API_KEY=…` if your server needs secrets |
+
+Equivalent mental model (do **not** paste this JSON into FLUJO; enter the pieces in the UI):
+
+```json
+{
+  "command": "uv",
+  "args": [
+    "run",
+    "--with",
+    "fastmcp",
+    "python",
+    "/absolute/path/to/server.py"
+  ],
+  "env": {}
+}
+```
+
+<Tip>
+Prefer absolute paths in **Arguments**. Relative paths depend on FLUJO’s working directory and the **MCP server root path**, which is easy to get wrong on first setup.
+</Tip>
+
+### Dependencies
+
+If your server needs extra packages, add them with additional `--with` argument rows before `python`:
+
+| Argument rows (order matters) |
+| --- |
+| `run` |
+| `--with` |
+| `fastmcp` |
+| `--with` |
+| `pandas` |
+| `python` |
+| `/absolute/path/to/server.py` |
+
+Alternatively, install dependencies into a project and point **Run command** at that environment’s interpreter (for example `python` or the full path to a venv binary) with a single argument: the absolute path to `server.py`.
+
+### Environment variables
+
+Add keys in FLUJO’s **Environment Variables** editor (FLUJO can store and bind secrets). Example for a weather-style server:
+
+| Key | Value |
+| --- | --- |
+| `API_KEY` | your API key |
+| `DEBUG` | `true` |
+
+FLUJO injects these into the stdio process environment; you do not put them in the run command string.
+
+<Warning>
+**`uv` must be installed and available in the environment FLUJO uses to spawn processes.** If Test run fails with a missing `uv` executable, install [`uv`](https://docs.astral.sh/uv/) system-wide or switch **Run command** to an absolute interpreter path you already verified locally.
+</Warning>
+
+## Verify a tool call
+
+1. Open the saved app / server card in FLUJO.
+2. Open **Tool Tester** for the server.
+3. Select `roll_dice`, set `n_dice` to `3`, and run the tool.
+4. Confirm you get a JSON list of three integers (for example `[2, 5, 1]`).
+
+You can also attach the server to an agent and ask it to roll dice; Tool Tester is the fastest check that the FastMCP stdio process is healthy.
+
+## Troubleshooting
+
+- **Test run times out on first `uv` / `uvx` use** — package download can be slow; wait for the longer runner timeout or pre-warm with `uv run --with fastmcp python server.py` once in a terminal.
+- **`MODULE_NOT_FOUND`** — FLUJO surfaces this when Argument paths are wrong; fix the `server.py` path rows under **Arguments**.
+- **Command not found** — **Run command** must be a single executable (`uv`, `python`, `uvx`), with everything else in **Arguments**, not one pasted shell line.

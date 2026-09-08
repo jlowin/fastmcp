@@ -319,6 +319,7 @@
                       "integrations/claude-code",
                       "integrations/claude-desktop",
                       "integrations/cursor",
+                      "integrations/flujo",
                       "integrations/gemini-cli",
                       "integrations/goose"
                     ]
