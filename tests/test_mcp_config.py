@@ -308,6 +308,41 @@ async def test_failed_known_legacy_backend_does_not_downgrade_healthy_backends()
     assert modern_era.data in MODERN_PROTOCOL_VERSIONS
 
 
+async def test_multi_server_connection_report_records_skipped_backends():
+    @asynccontextmanager
+    async def unavailable_lifespan(
+        server: FastMCP,
+    ) -> AsyncIterator[dict[str, Any]]:
+        if server.name == "unavailable":
+            raise RuntimeError("backend unavailable")
+        yield {}
+
+    healthy = FastMCP("healthy", lifespan=unavailable_lifespan)
+    unavailable = FastMCP("unavailable", lifespan=unavailable_lifespan)
+
+    @healthy.tool(name="health")
+    def health() -> str:
+        return "ok"
+
+    config = MCPConfig(
+        mcpServers={
+            "healthy": InMemoryStdioMCPServer(mcp=healthy),
+            "unavailable": InMemoryStdioMCPServer(mcp=unavailable),
+        }
+    )
+    transport = MCPConfigTransport(config)
+
+    async with Client(transport) as client:
+        result = await client.call_tool("healthy_health", {})
+        assert result.content[0].text == "ok"
+
+    report = transport.last_connection_report
+    assert report is not None
+    assert report.included == ("healthy",)
+    assert report.skipped == ("unavailable",)
+    assert report.is_partial is True
+
+
 @pytest.mark.parametrize(
     ("mode", "is_modern"),
     [("legacy", False), ("2026-07-28", True)],

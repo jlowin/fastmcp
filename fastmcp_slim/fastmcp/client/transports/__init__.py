@@ -5,7 +5,10 @@ from fastmcp.client.transports.base import (
     ClientTransportT,
     SessionKwargs,
 )
-from fastmcp.client.transports.config import MCPConfigTransport
+from fastmcp.client.transports.config import (
+    MCPConfigConnectionReport,
+    MCPConfigTransport,
+)
 from fastmcp.client.transports.http import StreamableHttpTransport
 from fastmcp.client.transports.inference import infer_transport
 from fastmcp.client.transports.sse import SSETransport
@@ -24,6 +27,7 @@ __all__ = [
     "ClientTransport",
     "FastMCPStdioTransport",
     "FastMCPTransport",
+    "MCPConfigConnectionReport",
     "NodeStdioTransport",
     "NpxStdioTransport",
     "PythonStdioTransport",

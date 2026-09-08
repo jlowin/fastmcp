@@ -1,5 +1,6 @@
 import contextlib
 from collections.abc import AsyncIterator
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from mcp import ClientSession
@@ -30,6 +31,19 @@ if TYPE_CHECKING:
     from fastmcp.server.server import FastMCP
 
 logger = get_logger(__name__)
+
+
+@dataclass(frozen=True)
+class MCPConfigConnectionReport:
+    """Backends included or skipped by the most recent aggregate attempt."""
+
+    included: tuple[str, ...]
+    skipped: tuple[str, ...]
+
+    @property
+    def is_partial(self) -> bool:
+        """Whether at least one configured backend was skipped."""
+        return bool(self.skipped)
 
 
 class MCPConfigTransport(ClientTransport):
@@ -87,6 +101,7 @@ class MCPConfigTransport(ClientTransport):
         self._transports: list[ClientTransport] = []
         self._request_state_security: RequestStateSecurity | None = None
         self._resolved_legacy_only = False
+        self._last_connection_report: MCPConfigConnectionReport | None = None
 
         if not self.config.mcpServers:
             raise ValueError("No MCP servers defined in the config")
@@ -125,6 +140,15 @@ class MCPConfigTransport(ClientTransport):
         if len(self.config.mcpServers) == 1:
             return self.transport.legacy_only
         return self._resolved_legacy_only
+
+    @property
+    def last_connection_report(self) -> MCPConfigConnectionReport | None:
+        """Report from the most recent multi-server connection attempt.
+
+        This records membership in the last attempt; it does not represent
+        current backend health after the connection context has closed.
+        """
+        return self._last_connection_report
 
     @contextlib.asynccontextmanager
     async def connect_session(
@@ -226,6 +250,7 @@ class MCPConfigTransport(ClientTransport):
         self._transports = []
         backend_versions: list[str] = []
         proxies: dict[str, FastMCP[Any]] = {}
+        skipped_names: list[str] = []
 
         if prepared_transports is None:
             prepared_transports = self._prepare_transports()
@@ -265,6 +290,7 @@ class MCPConfigTransport(ClientTransport):
                     name,
                     exc_info=True,
                 )
+                skipped_names.append(name)
                 continue
             self._transports.append(connected_transport)
             assert client.protocol_version is not None
@@ -276,14 +302,21 @@ class MCPConfigTransport(ClientTransport):
             ):
                 current_mode = "legacy"
 
-        if not self._transports:
-            raise ConnectionError("All MCP servers failed to connect")
-
         # Connection order may prioritize known legacy-only transports, but
         # mounted component order remains the order declared by the user.
         for name in self.config.mcpServers:
             if proxy := proxies.get(name):
                 composite.mount(proxy, namespace=name if self.name_as_prefix else None)
+
+        self._last_connection_report = MCPConfigConnectionReport(
+            included=tuple(name for name in self.config.mcpServers if name in proxies),
+            skipped=tuple(
+                name for name in self.config.mcpServers if name in skipped_names
+            ),
+        )
+
+        if not self._transports:
+            raise ConnectionError("All MCP servers failed to connect")
 
         return composite, backend_versions
 
